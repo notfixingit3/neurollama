@@ -64,6 +64,22 @@ type Benchmark struct {
 	CreatedAt      string  `json:"created_at"`
 }
 
+type OptimizerRun struct {
+	ID              int64   `json:"id"`
+	ServerName      string  `json:"server_name"`
+	ServerURL       string  `json:"server_url"`
+	ModelName       string  `json:"model_name"`
+	Temperature     float64 `json:"temperature"`
+	TopP            float64 `json:"top_p"`
+	TopK            int     `json:"top_k"`
+	TtftMs          float64 `json:"ttft_ms"`
+	Tps             float64 `json:"tps"`
+	AvgLatencyMs    float64 `json:"avg_latency_ms"`
+	PromptUsed      string  `json:"prompt_used"`
+	ResponsePreview string  `json:"response_preview"`
+	CreatedAt       string  `json:"created_at"`
+}
+
 // InitDB initializes the SQLite database connection and runs migrations
 func InitDB(dbPath string) error {
 	// Create directory if it doesn't exist
@@ -172,6 +188,21 @@ func migrate() error {
 			avg_latency_ms REAL NOT NULL,
 			reasoning_score TEXT NOT NULL DEFAULT 'Pending',
 			notes TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);`,
+		`CREATE TABLE IF NOT EXISTS optimizer_runs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			server_name TEXT NOT NULL,
+			server_url TEXT NOT NULL,
+			model_name TEXT NOT NULL,
+			temperature REAL NOT NULL,
+			top_p REAL NOT NULL,
+			top_k INTEGER NOT NULL,
+			ttft_ms REAL NOT NULL,
+			tps REAL NOT NULL,
+			avg_latency_ms REAL NOT NULL,
+			prompt_used TEXT NOT NULL,
+			response_preview TEXT NOT NULL,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);`,
 	}
@@ -537,4 +568,42 @@ func PruneChatMessages(chatID int64, keepCount int) error {
 	`, chatID, chatID, limit)
 	return err
 }
+
+// Optimizer Run Helpers
+
+func SaveOptimizerRun(serverName, serverUrl, modelName string, temp, topP float64, topK int, ttft, tps, avgLatency float64, prompt, preview string) (int64, error) {
+	res, err := DB.Exec(`
+		INSERT INTO optimizer_runs 
+		(server_name, server_url, model_name, temperature, top_p, top_k, ttft_ms, tps, avg_latency_ms, prompt_used, response_preview) 
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		serverName, serverUrl, modelName, temp, topP, topK, ttft, tps, avgLatency, prompt, preview)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func GetOptimizerRuns() ([]OptimizerRun, error) {
+	rows, err := DB.Query("SELECT id, server_name, server_url, model_name, temperature, top_p, top_k, ttft_ms, tps, avg_latency_ms, prompt_used, response_preview, datetime(created_at, 'localtime') FROM optimizer_runs ORDER BY id DESC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []OptimizerRun
+	for rows.Next() {
+		var r OptimizerRun
+		if err := rows.Scan(&r.ID, &r.ServerName, &r.ServerURL, &r.ModelName, &r.Temperature, &r.TopP, &r.TopK, &r.TtftMs, &r.Tps, &r.AvgLatencyMs, &r.PromptUsed, &r.ResponsePreview, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		list = append(list, r)
+	}
+	return list, nil
+}
+
+func DeleteOptimizerRun(id int64) error {
+	_, err := DB.Exec("DELETE FROM optimizer_runs WHERE id = ?", id)
+	return err
+}
+
 

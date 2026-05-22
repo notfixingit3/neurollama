@@ -190,6 +190,7 @@ function populateModelDropdowns() {
   const builderSelect = document.getElementById('builder-base-select');
   const completionSelect = document.getElementById('completion-model-select');
   const benchmarkSelect = document.getElementById('benchmark-model-select');
+  const optimizerSelect = document.getElementById('optimizer-model-select');
 
   // Filter out models that might not have values
   const options = models.map(m => {
@@ -203,10 +204,12 @@ function populateModelDropdowns() {
     if (builderSelect) builderSelect.innerHTML = noModels;
     if (completionSelect) completionSelect.innerHTML = noModels;
     if (benchmarkSelect) benchmarkSelect.innerHTML = noModels;
+    if (optimizerSelect) optimizerSelect.innerHTML = noModels;
   } else {
     if (chatSelect) chatSelect.innerHTML = options;
     if (builderSelect) builderSelect.innerHTML = options;
     if (benchmarkSelect) benchmarkSelect.innerHTML = options;
+    if (optimizerSelect) optimizerSelect.innerHTML = options;
     if (completionSelect) {
       const currentSelected = completionSelect.value;
       completionSelect.innerHTML = options;
@@ -1566,14 +1569,49 @@ function generateModelfilePreview() {
   const ctx = document.getElementById('builder-ctx-select').value;
   const stop = document.getElementById('builder-stop-input').value.trim();
   const system = document.getElementById('builder-system-input').value.trim();
+  const templateVal = document.getElementById('builder-template-input').value.trim();
 
-  let modelfile = `FROM ${baseModel || 'base-model-placeholder'}\n\n`;
+  const mergeEnable = document.getElementById('builder-merge-enable').checked;
+  const mergeMethod = document.getElementById('builder-merge-method').value;
+  const mergeModel = document.getElementById('builder-merge-model').value.trim();
+  const mergeRatio = document.getElementById('builder-merge-ratio').value.trim();
+
+  let modelfile = "";
+
+  // Merge recipe details as documented metadata comments
+  if (mergeEnable) {
+    modelfile += `# MERGE_METHOD: ${mergeMethod}\n`;
+    if (mergeModel) modelfile += `# MERGE_MODEL: ${mergeModel}\n`;
+    if (mergeRatio) modelfile += `# MERGE_RATIO: ${mergeRatio}\n`;
+    modelfile += `\n`;
+  }
+
+  modelfile += `FROM ${baseModel || 'base-model-placeholder'}\n\n`;
   modelfile += `# SET GENERATION PARAMETERS\n`;
   modelfile += `PARAMETER temperature ${temp}\n`;
   modelfile += `PARAMETER num_ctx ${ctx}\n`;
   
   if (stop) {
     modelfile += `PARAMETER stop "${stop}"\n`;
+  }
+
+  // Add templates
+  if (templateVal) {
+    modelfile += `\n# CUSTOM PROMPT TEMPLATE\n`;
+    modelfile += `TEMPLATE """${templateVal}"""\n`;
+  }
+
+  // Add LoRA adapters
+  const adapterInputs = document.querySelectorAll('.builder-adapter-input');
+  let adapterLines = "";
+  adapterInputs.forEach(input => {
+    const val = input.value.trim();
+    if (val) {
+      adapterLines += `ADAPTER ${val}\n`;
+    }
+  });
+  if (adapterLines) {
+    modelfile += `\n# LORA ADAPTERS\n${adapterLines}`;
   }
   
   if (system) {
@@ -1582,6 +1620,47 @@ function generateModelfilePreview() {
   }
 
   document.getElementById('builder-modelfile-preview').textContent = modelfile;
+}
+
+function addAdapterField() {
+  const container = document.getElementById('builder-adapters-container');
+  if (!container) return;
+
+  const div = document.createElement('div');
+  div.className = 'flex items-center gap-1.5';
+  
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'input input-xs input-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-[10px] w-full focus:outline-none builder-adapter-input';
+  input.placeholder = 'e.g. /path/to/adapter-or-name';
+  input.oninput = generateModelfilePreview;
+
+  const removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.className = 'btn btn-xs btn-error btn-ghost p-1 h-auto min-h-0 text-[#bf616a] hover:bg-[#bf616a]/20';
+  removeBtn.innerHTML = '<i class="fa-solid fa-trash-can"></i>';
+  removeBtn.onclick = function() {
+    div.remove();
+    generateModelfilePreview();
+  };
+
+  div.appendChild(input);
+  div.appendChild(removeBtn);
+  container.appendChild(div);
+  
+  generateModelfilePreview();
+}
+
+function toggleMergeInputs() {
+  const checkbox = document.getElementById('builder-merge-enable');
+  const inputsDiv = document.getElementById('builder-merge-inputs');
+  if (checkbox && inputsDiv) {
+    if (checkbox.checked) {
+      inputsDiv.classList.remove('hidden');
+    } else {
+      inputsDiv.classList.add('hidden');
+    }
+  }
 }
 
 async function buildCustomModel() {
@@ -4178,6 +4257,317 @@ async function deleteBenchmark(id) {
     
     showToast('Benchmark record deleted', 'warning');
     fetchBenchmarks();
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+}
+
+// --- HYPERPARAMETER OPTIMIZER CONTROLLERS ---
+
+function switchBenchmarkSubtab(tab) {
+  const standardBtn = document.getElementById('benchmark-subtab-standard');
+  const optimizerBtn = document.getElementById('benchmark-subtab-optimizer');
+  const standardContainer = document.getElementById('benchmark-standard-container');
+  const optimizerContainer = document.getElementById('benchmark-optimizer-container');
+  
+  if (tab === 'standard') {
+    if (standardBtn) standardBtn.classList.add('tab-active');
+    if (optimizerBtn) optimizerBtn.classList.remove('tab-active');
+    if (standardContainer) standardContainer.classList.remove('hidden');
+    if (optimizerContainer) optimizerContainer.classList.add('hidden');
+  } else {
+    if (standardBtn) standardBtn.classList.remove('tab-active');
+    if (optimizerBtn) optimizerBtn.classList.add('tab-active');
+    if (standardContainer) standardContainer.classList.add('hidden');
+    if (optimizerContainer) optimizerContainer.classList.remove('hidden');
+    
+    loadOptimizerHistory();
+  }
+}
+
+let optimizerEventSource = null;
+
+function startOptimizerBenchmark() {
+  const modelSelect = document.getElementById('optimizer-model-select');
+  if (!modelSelect) return;
+  
+  const model = modelSelect.value;
+  if (!model) {
+    showToast('Please select a model to evaluate', 'warning');
+    return;
+  }
+  
+  const promptInput = document.getElementById('optimizer-prompt-input');
+  const prompt = promptInput ? promptInput.value.trim() : '';
+  
+  const runBtn = document.getElementById('run-optimizer-btn');
+  const logContainer = document.getElementById('optimizer-log');
+  
+  // Reset UI elements
+  for (let i = 1; i <= 3; i++) {
+    document.getElementById(`opt-ttft-${i}`).textContent = '--';
+    document.getElementById(`opt-tps-${i}`).textContent = '--';
+    document.getElementById(`opt-lat-${i}`).textContent = '--';
+    const badge = document.getElementById(`opt-badge-${i}`);
+    if (badge) {
+      badge.classList.add('hidden');
+      badge.textContent = '';
+    }
+  }
+  
+  if (runBtn) runBtn.disabled = true;
+  if (logContainer) {
+    logContainer.innerHTML = `<div class="text-[#88c0d0] uppercase animate-pulse">Initializing parameter sweep suite for ${model}...</div>`;
+  }
+  
+  if (optimizerEventSource) {
+    optimizerEventSource.close();
+  }
+  
+  let url = `/api/optimizer/run?model=${encodeURIComponent(model)}`;
+  if (prompt) {
+    url += `&prompt=${encodeURIComponent(prompt)}`;
+  }
+  
+  optimizerEventSource = new EventSource(url);
+  
+  const results = {};
+  
+  optimizerEventSource.addEventListener('status', (e) => {
+    if (logContainer) {
+      const div = document.createElement('div');
+      div.className = 'py-0.5 border-b border-[#4c566a]/10 last:border-none';
+      div.textContent = e.data;
+      logContainer.appendChild(div);
+      logContainer.scrollTop = logContainer.scrollHeight;
+    }
+  });
+  
+  optimizerEventSource.addEventListener('error', (e) => {
+    if (logContainer) {
+      const div = document.createElement('div');
+      div.className = 'text-[#bf616a] font-bold mt-1';
+      div.textContent = `[ERROR] ${e.data || 'Sweep failed or was cancelled.'}`;
+      logContainer.appendChild(div);
+      logContainer.scrollTop = logContainer.scrollHeight;
+    }
+    optimizerEventSource.close();
+    if (runBtn) runBtn.disabled = false;
+    showToast('Optimization sweep failed', 'error');
+  });
+  
+  optimizerEventSource.addEventListener('config_result', (e) => {
+    try {
+      const res = JSON.parse(e.data);
+      let idx = 1;
+      if (res.temperature === 0.7) idx = 2;
+      if (res.temperature === 1.2) idx = 3;
+      
+      results[idx] = res;
+      
+      document.getElementById(`opt-ttft-${idx}`).textContent = `${res.ttft_ms.toFixed(1)} ms`;
+      document.getElementById(`opt-tps-${idx}`).textContent = `${res.tps.toFixed(1)}`;
+      document.getElementById(`opt-lat-${idx}`).textContent = `${res.avg_latency.toFixed(0)} ms`;
+      
+      if (logContainer) {
+        const div = document.createElement('div');
+        div.className = 'text-[#ebcb8b] py-0.5 font-bold';
+        div.textContent = `[RESULT] ${res.config_name}: TPS = ${res.tps.toFixed(1)}, TTFT = ${res.ttft_ms.toFixed(1)}ms`;
+        logContainer.appendChild(div);
+        logContainer.scrollTop = logContainer.scrollHeight;
+      }
+    } catch (err) {
+      console.error('Error parsing config result', err);
+    }
+  });
+  
+  optimizerEventSource.addEventListener('done', (e) => {
+    if (logContainer) {
+      const div = document.createElement('div');
+      div.className = 'text-[#a3be8c] font-bold mt-2 border-t border-[#a3be8c]/20 pt-1';
+      div.textContent = `[COMPLETED] Sweep complete.`;
+      logContainer.appendChild(div);
+      logContainer.scrollTop = logContainer.scrollHeight;
+    }
+    
+    // Highlight the best configurations
+    highlightBestConfigs(results);
+    
+    showToast('Optimization sweep completed successfully!', 'success');
+    optimizerEventSource.close();
+    if (runBtn) runBtn.disabled = false;
+    loadOptimizerHistory();
+  });
+  
+  optimizerEventSource.onerror = (err) => {
+    console.warn('Optimizer EventSource error:', err);
+    optimizerEventSource.close();
+    if (runBtn) runBtn.disabled = false;
+  };
+}
+
+function highlightBestConfigs(results) {
+  let bestTpsIdx = null;
+  let maxTps = -1;
+  let bestTtftIdx = null;
+  let minTtft = Infinity;
+  
+  for (let idx in results) {
+    const res = results[idx];
+    if (res.tps > maxTps) {
+      maxTps = res.tps;
+      bestTpsIdx = idx;
+    }
+    if (res.ttft_ms < minTtft) {
+      minTtft = res.ttft_ms;
+      bestTtftIdx = idx;
+    }
+  }
+  
+  if (bestTpsIdx) {
+    const badge = document.getElementById(`opt-badge-${bestTpsIdx}`);
+    if (badge) {
+      badge.className = 'absolute top-2 right-2 text-[9px] font-bold px-1.5 py-0.5 rounded bg-[#a3be8c]/35 text-[#a3be8c] border border-[#a3be8c]/50';
+      badge.textContent = '⚡ FASTEST';
+      badge.classList.remove('hidden');
+    }
+  }
+  
+  if (bestTtftIdx) {
+    const badge = document.getElementById(`opt-badge-${bestTtftIdx}`);
+    if (badge) {
+      if (bestTtftIdx === bestTpsIdx) {
+        badge.textContent = '⚡ BEST ALL-AROUND';
+        badge.className = 'absolute top-2 right-2 text-[9px] font-bold px-1.5 py-0.5 rounded bg-[#88c0d0]/35 text-[#88c0d0] border border-[#88c0d0]/50';
+      } else {
+        badge.className = 'absolute top-2 right-2 text-[9px] font-bold px-1.5 py-0.5 rounded bg-[#88c0d0]/35 text-[#88c0d0] border border-[#88c0d0]/50';
+        badge.textContent = '⏱️ LOWEST TTFT';
+      }
+      badge.classList.remove('hidden');
+    }
+  }
+}
+
+async function loadOptimizerHistory() {
+  const container = document.getElementById('optimizer-history-container');
+  if (!container) return;
+  
+  try {
+    const response = await fetch('/api/optimizer/runs');
+    if (!response.ok) throw new Error('Failed to fetch parameter optimizer history');
+    const list = await response.json();
+    
+    // Group runs by Server + Model + Setting (Temp, TopP, TopK)
+    const groups = {};
+    if (list && list.length > 0) {
+      list.forEach(run => {
+        // Group Key: Server URL + Model Name + Setting Params
+        const key = `${run.server_name || run.server_url}::${run.model_name}::T:${run.temperature}_P:${run.top_p}_K:${run.top_k}`;
+        if (!groups[key]) {
+          groups[key] = {
+            server_name: run.server_name,
+            server_url: run.server_url,
+            model_name: run.model_name,
+            temperature: run.temperature,
+            top_p: run.top_p,
+            top_k: run.top_k,
+            runs: []
+          };
+        }
+        // Retain only the last 3 runs for each unique group
+        if (groups[key].runs.length < 3) {
+          groups[key].runs.push(run);
+        }
+      });
+    }
+    
+    let html = '';
+    for (let key in groups) {
+      const g = groups[key];
+      
+      html += `
+        <div class="tech-panel border border-[#4c566a]/40 rounded-lg p-3 bg-[#2e3440]/30 space-y-2">
+          <div class="flex justify-between items-center pb-1.5 border-b border-[#4c566a]/30">
+            <div>
+              <span class="text-[10px] font-bold text-[#88c0d0] uppercase tracking-wide">${escapeHTML(g.model_name)}</span>
+              <span class="text-[9px] text-[#4c566a] ml-1.5 font-mono">on ${escapeHTML(g.server_name || g.server_url)}</span>
+            </div>
+            <span class="badge badge-outline border-[#4c566a] text-[#ebcb8b] text-[9px] font-mono px-2 py-0.5">
+              Temp: ${g.temperature} / P: ${g.top_p} / K: ${g.top_k}
+            </span>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="table table-compact w-full text-[10px] font-mono text-[#d8dee9] bg-transparent">
+              <thead>
+                <tr class="text-[#4c566a] border-b border-[#4c566a]/20">
+                  <th class="bg-transparent text-left py-1 font-tech uppercase text-[8px]">Date & Time</th>
+                  <th class="bg-transparent text-center py-1 font-tech uppercase text-[8px]">TTFT</th>
+                  <th class="bg-transparent text-center py-1 font-tech uppercase text-[8px]">TPS</th>
+                  <th class="bg-transparent text-center py-1 font-tech uppercase text-[8px]">Avg Latency</th>
+                  <th class="bg-transparent text-left py-1 font-tech uppercase text-[8px] max-w-[150px] truncate">Response Preview</th>
+                  <th class="bg-transparent text-right py-1 font-tech uppercase text-[8px]">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+      `;
+      
+      g.runs.forEach(r => {
+        html += `
+          <tr class="hover:bg-[#3b4252]/10 border-b border-[#4c566a]/10 last:border-none transition-colors">
+            <td class="py-1.5 text-left text-[#4c566a]">${escapeHTML(r.created_at)}</td>
+            <td class="py-1.5 text-center">${r.ttft_ms.toFixed(1)} ms</td>
+            <td class="py-1.5 text-center font-bold text-[#a3be8c]">${r.tps.toFixed(1)}</td>
+            <td class="py-1.5 text-center">${r.avg_latency_ms.toFixed(0)} ms</td>
+            <td class="py-1.5 text-left max-w-[150px] truncate text-[#d8dee9]/80 italic" title="${escapeHTML(r.response_preview)}">
+              "${escapeHTML(r.response_preview)}"
+            </td>
+            <td class="py-1.5 text-right">
+              <button onclick="deleteOptimizerRun(${r.id})" class="btn btn-ghost btn-xs text-[#bf616a] hover:bg-[#bf616a]/15 p-1 h-auto min-h-0">
+                <i class="fa-solid fa-trash-can text-[9px]"></i>
+              </button>
+            </td>
+          </tr>
+        `;
+      });
+      
+      html += `
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+    
+    if (html === '') {
+      html = `
+        <div class="text-center py-12 text-[#4c566a] italic text-xs">
+          No past runs logged for the parameter optimizer yet. Run a suite on the left to start history logging.
+        </div>
+      `;
+    }
+    
+    container.innerHTML = html;
+  } catch (error) {
+    container.innerHTML = `
+      <div class="text-center py-8 text-[#bf616a] italic text-xs">
+        Failed to load optimization history: ${error.message}
+      </div>
+    `;
+  }
+}
+
+async function deleteOptimizerRun(id) {
+  if (!confirm('Are you sure you want to delete this optimizer run record?')) return;
+  
+  try {
+    const response = await fetch(`/api/optimizer/runs/${id}`, {
+      method: 'DELETE'
+    });
+    
+    if (!response.ok) throw new Error('Failed to delete run record');
+    
+    showToast('Optimizer run record deleted', 'warning');
+    loadOptimizerHistory();
   } catch (error) {
     showToast(error.message, 'error');
   }
