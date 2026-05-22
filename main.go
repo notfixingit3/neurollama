@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -380,12 +381,19 @@ func pullModelSSEHandler(c *gin.Context) {
 	}
 
 	client := NewOllamaClient(activeSrv.URL)
-	stream, err := client.StreamPullModel(name)
+	var ctx context.Context = c.Request.Context()
+	stream, err := client.StreamPullModel(ctx, name)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
 	defer stream.Close()
+
+	// Launch a goroutine to close the stream on client disconnect
+	go func() {
+		<-ctx.Done()
+		stream.Close()
+	}()
 
 	// Set headers for SSE streaming
 	c.Header("Content-Type", "text/event-stream")

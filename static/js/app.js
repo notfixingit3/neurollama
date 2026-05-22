@@ -17,6 +17,7 @@ let chatSessions = [];
 let activeChatId = null;
 let presets = [];
 let selectedImages = [];
+let speedHistory = [];
 
 // Initialization
 document.addEventListener('DOMContentLoaded', () => {
@@ -40,6 +41,7 @@ async function init() {
   if (sysTextarea) {
     sysTextarea.addEventListener('input', (e) => {
       updatePresetDropdownSelection(e.target.value);
+      updateContextVisualizer();
     });
   }
 
@@ -67,6 +69,7 @@ async function init() {
         if (activeChatId) {
           updateActiveChatConfig();
         }
+        updateContextVisualizer();
       });
     }
   });
@@ -742,6 +745,8 @@ async function handleBatchDelete() {
 
 // --- MODEL PULL SSE ---
 
+// --- MODEL PULL SSE ---
+
 function handlePullModel(event) {
   event.preventDefault();
   
@@ -779,6 +784,7 @@ function handlePullModel(event) {
 
   let lastCompleted = 0;
   let lastTime = Date.now();
+  speedHistory = []; // Reset speed history
 
   currentEventSource.addEventListener('progress', (e) => {
     try {
@@ -795,8 +801,16 @@ function handlePullModel(event) {
         const elapsed = (now - lastTime) / 1000; // seconds
         if (elapsed > 0.8) { // update speed every 800ms
           const bytesDiff = data.completed - lastCompleted;
-          const speed = bytesDiff / elapsed; // bytes/sec
-          speedText.textContent = `${(speed / (1024 * 1024)).toFixed(2)} MB/s`;
+          const speedVal = bytesDiff / elapsed; // bytes/sec
+          const speedMb = speedVal / (1024 * 1024);
+          speedText.textContent = `${speedMb.toFixed(2)} MB/s`;
+          
+          speedHistory.push(speedMb);
+          if (speedHistory.length > 50) {
+            speedHistory.shift();
+          }
+          drawSpeedGraph();
+          
           lastCompleted = data.completed;
           lastTime = now;
         }
@@ -841,6 +855,86 @@ function resetPullUI() {
   pullBtn.disabled = false;
   pullBtn.innerHTML = `<i class="fa-solid fa-download"></i> PULL`;
   progressContainer.classList.add('hidden');
+  speedHistory = [];
+}
+
+function abortPullModel() {
+  if (currentEventSource) {
+    showToast('Model download aborted', 'info');
+    resetPullUI();
+    // Fetch models to reload lists
+    fetchModels().then(() => populateModelDropdowns());
+  }
+}
+
+function drawSpeedGraph() {
+  const canvas = document.getElementById('pull-speed-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  
+  // Set resolution of canvas matching CSS layout
+  canvas.width = canvas.clientWidth;
+  canvas.height = canvas.clientHeight;
+  
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (speedHistory.length === 0) return;
+  
+  // Draw grid lines
+  ctx.strokeStyle = 'rgba(76, 86, 106, 0.1)';
+  ctx.lineWidth = 1;
+  for (let i = 1; i < 3; i++) {
+    const y = (canvas.height / 3) * i;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(canvas.width, y);
+    ctx.stroke();
+  }
+  
+  const maxSpeed = Math.max(...speedHistory, 5); // Minimum y-scale of 5 MB/s
+  const points = speedHistory.map((speed, index) => {
+    const x = (index / Math.max(speedHistory.length - 1, 1)) * canvas.width;
+    const y = canvas.height - (speed / maxSpeed) * (canvas.height - 10) - 5;
+    return { x, y };
+  });
+  
+  // Fill gradient below line
+  if (points.length > 1) {
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, canvas.height);
+    for (const pt of points) {
+      ctx.lineTo(pt.x, pt.y);
+    }
+    ctx.lineTo(points[points.length - 1].x, canvas.height);
+    ctx.closePath();
+    
+    const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    grad.addColorStop(0, 'rgba(136, 192, 208, 0.2)');
+    grad.addColorStop(1, 'rgba(136, 192, 208, 0.0)');
+    ctx.fillStyle = grad;
+    ctx.fill();
+  }
+  
+  // Draw the speed path
+  ctx.beginPath();
+  ctx.strokeStyle = '#88c0d0'; // Nord cyan
+  ctx.lineWidth = 1.5;
+  points.forEach((pt, idx) => {
+    if (idx === 0) ctx.moveTo(pt.x, pt.y);
+    else ctx.lineTo(pt.x, pt.y);
+  });
+  ctx.stroke();
+  
+  // Pulsing dot at current point
+  if (points.length > 0) {
+    const lastPt = points[points.length - 1];
+    ctx.beginPath();
+    ctx.arc(lastPt.x, lastPt.y, 3, 0, 2 * Math.PI);
+    ctx.fillStyle = '#81a1c1';
+    ctx.fill();
+    ctx.strokeStyle = '#88c0d0';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
 }
 
 
@@ -1073,6 +1167,59 @@ function renderChatHistory() {
 
   container.innerHTML = html;
   container.scrollTop = container.scrollHeight;
+  updateContextVisualizer();
+}
+
+function updateContextVisualizer() {
+  const visualizer = document.getElementById('chat-context-visualizer');
+  if (!visualizer) return;
+  
+  const sysPromptEl = document.getElementById('chat-system-prompt');
+  const sysPrompt = sysPromptEl ? sysPromptEl.value || '' : '';
+  
+  const ctxLimitEl = document.getElementById('chat-ctx-limit');
+  const ctxLimit = ctxLimitEl ? parseInt(ctxLimitEl.value) || 2048 : 2048;
+  
+  const sysTokens = Math.ceil(sysPrompt.length / 3.9);
+  
+  let msgTokens = 0;
+  chatMessages.forEach(msg => {
+    msgTokens += Math.ceil(msg.content.length / 3.9);
+    if (msg.images && msg.images.length > 0) {
+      msgTokens += msg.images.length * 150;
+    }
+  });
+  
+  const totalUsed = sysTokens + msgTokens;
+  const sysPercent = (sysTokens / ctxLimit) * 100;
+  const msgPercent = (msgTokens / ctxLimit) * 100;
+  const totalPercent = Math.min((totalUsed / ctxLimit) * 100, 100);
+  
+  const usedTokensEl = document.getElementById('ctx-used-tokens');
+  const totalTokensEl = document.getElementById('ctx-total-tokens');
+  const percentEl = document.getElementById('ctx-percent');
+  
+  if (usedTokensEl) usedTokensEl.textContent = totalUsed;
+  if (totalTokensEl) totalTokensEl.textContent = ctxLimit;
+  if (percentEl) percentEl.textContent = `${Math.round(totalPercent)}%`;
+  
+  const sysBar = document.getElementById('ctx-sys-bar');
+  const msgBar = document.getElementById('ctx-msg-bar');
+  const warningText = document.getElementById('ctx-warning-text');
+  
+  if (sysBar) sysBar.style.width = `${Math.min(sysPercent, 100)}%`;
+  if (msgBar) msgBar.style.width = `${Math.min(msgPercent, 100 - sysPercent)}%`;
+  
+  if (totalUsed >= ctxLimit * 0.9) {
+    if (percentEl) percentEl.className = 'font-bold text-[#bf616a]';
+    if (warningText) warningText.classList.remove('hidden');
+  } else if (totalUsed >= ctxLimit * 0.75) {
+    if (percentEl) percentEl.className = 'font-bold text-[#ebcb8b]';
+    if (warningText) warningText.classList.add('hidden');
+  } else {
+    if (percentEl) percentEl.className = 'font-bold text-[#88c0d0]';
+    if (warningText) warningText.classList.add('hidden');
+  }
 }
 
 function resetChatSession() {

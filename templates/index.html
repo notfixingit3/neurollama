@@ -136,9 +136,22 @@
                 <div class="progress-cyber w-full h-2 rounded-full overflow-hidden">
                   <div id="pull-progress-bar" class="progress-cyber-bar h-full w-[0%]"></div>
                 </div>
-                <div class="flex justify-between text-[10px] text-[#4c566a]">
+                <div class="flex justify-between text-[10px] text-[#4c566a] items-center">
                   <span id="pull-speed">-- MB/s</span>
                   <span id="pull-bytes">-- MB / -- MB</span>
+                </div>
+                
+                <!-- Live Speed Graph -->
+                <div class="mt-2">
+                  <div class="text-[9px] uppercase tracking-wider text-[#4c566a] mb-1">Telemetry // Speed History</div>
+                  <canvas id="pull-speed-canvas" class="w-full bg-[#2e3440]/30 border border-[#4c566a]/30 rounded h-16"></canvas>
+                </div>
+
+                <!-- Abort Button -->
+                <div class="flex justify-end mt-2">
+                  <button type="button" onclick="abortPullModel()" class="btn btn-xs btn-outline btn-error font-tech text-[9px] px-2.5 h-6 min-h-0 uppercase">
+                    <i class="fa-solid fa-circle-stop mr-1"></i> Abort Pull
+                  </button>
                 </div>
               </div>
             </div>
@@ -508,6 +521,27 @@
                   <button onclick="togglePlaygroundSidebar('config')" class="btn btn-ghost btn-xs px-1.5 py-0.5 text-[#88c0d0] hover:bg-[#2e3440] border border-[#4c566a]/30 h-6 min-h-0" title="Toggle Configuration">
                     <i id="toggle-config-icon" class="fa-solid fa-chevron-left"></i>
                   </button>
+                </div>
+              </div>
+
+              <!-- Context Window Visualizer -->
+              <div id="chat-context-visualizer" class="px-4 py-2 border-b border-[#4c566a]/40 bg-[#161820]/60 font-mono text-[10px] flex flex-col gap-1.5 select-none">
+                <div class="flex justify-between items-center text-[#d8dee9]/80">
+                  <span class="flex items-center gap-1.5">
+                    <i class="fa-solid fa-chart-pie text-[#88c0d0]"></i>
+                    <span>CONTEXT_WINDOW: <span id="ctx-used-tokens" class="text-white font-semibold">0</span> / <span id="ctx-total-tokens" class="text-white font-semibold">2048</span> TOKENS</span>
+                  </span>
+                  <span id="ctx-percent" class="font-bold text-[#88c0d0]">0%</span>
+                </div>
+                <div class="w-full h-1.5 bg-[#2e3440] rounded-full overflow-hidden flex">
+                  <div id="ctx-sys-bar" class="h-full bg-[#81a1c1] transition-all duration-300" style="width: 0%" title="System Prompt"></div>
+                  <div id="ctx-msg-bar" class="h-full bg-[#88c0d0] transition-all duration-300" style="width: 0%" title="Chat Messages"></div>
+                  <div id="ctx-free-bar" class="h-full bg-[#3b4252] flex-1" title="Free Context Space"></div>
+                </div>
+                <div class="flex gap-4 text-[9px] text-[#4c566a] items-center">
+                  <span class="flex items-center gap-1"><span class="w-1.5 h-1.5 bg-[#81a1c1] rounded-full"></span> SYSTEM PROMPT</span>
+                  <span class="flex items-center gap-1"><span class="w-1.5 h-1.5 bg-[#88c0d0] rounded-full"></span> MESSAGES</span>
+                  <span id="ctx-warning-text" class="ml-auto text-[#bf616a] hidden animate-pulse font-bold uppercase"><i class="fa-solid fa-triangle-exclamation"></i> Context full / pruning active</span>
                 </div>
               </div>
 

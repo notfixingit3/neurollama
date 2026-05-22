@@ -16,7 +16,7 @@
   - Add a copy-paste panel displaying ready-to-run API snippets (`curl`, Python, Node.js, Go) matching the active chat parameters.
 - [ ] **Automated Model Updates & Scheduler**
   - Implement a background task planner to check the Ollama registry for newer tag builds and download updates during off-peak hours.
-- [ ] **Context Window Visualizer & Heatmap**
+- [x] **Context Window Visualizer & Heatmap**
   - Visualize active context window consumption token-by-token or message-by-message, indicating current system prompt space and highlighting content about to be pruned.
 - [ ] **Automated Context Compression & Auto-Summarizer**
   - Prompt a background summary of older conversation threads when context limits are reached to maintain chat coherence over very long discussions.
@@ -24,7 +24,7 @@
   - Support vision-capable models (e.g. LLaVA, BakLLaVA) by providing an image upload/preview area in the playground chat console and encoding images to base64 strings in `/api/chat` payloads.
 - [x] **Hugging Face & Ollama Library Model Cards**
   - Fetch and display the full Markdown model description cards from Hugging Face or Ollama registry inside the model details panel.
-- [ ] **Pause/Resume Model Downloader with Network Speed Graphs**
+- [x] **Pause/Resume Model Downloader with Network Speed Graphs**
   - Show download speed timelines (MB/s) and remaining time estimates for active pulls, with support for pausing and resuming downloads.
 - [ ] **Local Model Benchmark Suite**
   - Run standardized speed and reasoning accuracy tests across installed models, maintaining a local leaderboard ranking hardware performance.

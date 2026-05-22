@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -201,7 +202,7 @@ func (c *OllamaClient) CopyModel(source, destination string) error {
 
 
 // StreamPullModel issues a pull request and writes the raw bytes stream to an output channel
-func (c *OllamaClient) StreamPullModel(name string) (io.ReadCloser, error) {
+func (c *OllamaClient) StreamPullModel(ctx context.Context, name string) (io.ReadCloser, error) {
 	reqBody, err := json.Marshal(map[string]interface{}{
 		"name":   name,
 		"stream": true,
@@ -212,11 +213,13 @@ func (c *OllamaClient) StreamPullModel(name string) (io.ReadCloser, error) {
 
 	// Use a client without short timeout for long pulling process
 	longClient := &http.Client{}
-	resp, err := longClient.Post(
-		fmt.Sprintf("%s/api/pull", c.BaseURL),
-		"application/json",
-		bytes.NewBuffer(reqBody),
-	)
+	req, err := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/api/pull", c.BaseURL), bytes.NewBuffer(reqBody))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := longClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start pull request: %w", err)
 	}
