@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -59,6 +61,10 @@ func main() {
 		log.Fatalf("Error initializing database: %v", err)
 	}
 
+	// Start background poller and scheduler
+	startTelemetryPoller()
+	startSchedulerTicker()
+
 	r := gin.Default()
 
 	// Load HTML templates
@@ -108,6 +114,22 @@ func main() {
 		api.GET("/presets", getPresetsHandler)
 		api.POST("/presets", createPresetHandler)
 		api.DELETE("/presets/:id", deletePresetHandler)
+
+		// Telemetry & Scheduler endpoints
+		api.GET("/settings", getSettingsHandler)
+		api.PUT("/settings", updateSettingHandler)
+		api.GET("/scheduler/logs", getSchedulerLogsHandler)
+		api.POST("/scheduler/check", checkModelUpdatesNowHandler)
+		api.GET("/telemetry/stream", telemetryStreamHandler)
+
+		// Context Compression
+		api.POST("/chats/:id/compress", compressChatHandler)
+
+		// Benchmarks
+		api.GET("/benchmarks", getBenchmarksHandler)
+		api.GET("/benchmarks/run", runBenchmarkSSEHandler)
+		api.PUT("/benchmarks/:id/score", updateBenchmarkScoreHandler)
+		api.DELETE("/benchmarks/:id", deleteBenchmarkHandler)
 	}
 
 	log.Println("NEUROLLAMA is starting on http://localhost:8080")
@@ -544,20 +566,66 @@ func chatStreamHandler(c *gin.Context) {
 		chatReq.Options = options
 	}
 
+	var compressionSummary string
+	userMessageSaved := false
+
+	// Write user message to DB if chat session is active, check context length for auto-compression
+	if req.ChatID != nil && *req.ChatID > 0 && len(req.Messages) > 0 {
+		// Calculate estimated tokens
+		totalChars := 0
+		for _, m := range req.Messages {
+			totalChars += len(m.Content)
+		}
+		estimatedTokens := totalChars / 4
+
+		limitCtx := req.NumCtx
+		if limitCtx <= 0 {
+			chat, err := GetChat(*req.ChatID)
+			if err == nil && chat != nil {
+				limitCtx = chat.NumCtx
+			}
+		}
+		if limitCtx <= 0 {
+			limitCtx = 2048
+		}
+
+		if estimatedTokens > int(float64(limitCtx)*0.85) && len(req.Messages) > 2 {
+			log.Printf("Chat %d context length %d exceeds 85%% of %d, triggering auto-compression...", *req.ChatID, estimatedTokens, limitCtx)
+			// Save the user's latest message first so it is included in the summary
+			lastMsg := req.Messages[len(req.Messages)-1]
+			if err := SaveChatMessage(*req.ChatID, lastMsg.Role, lastMsg.Content, lastMsg.Images); err == nil {
+				userMessageSaved = true
+			} else {
+				log.Printf("Error saving user prompt to db before auto-compress: %v", err)
+			}
+
+			summary, err := CompressChatSession(*req.ChatID, req.Model)
+			if err == nil {
+				compressionSummary = summary
+				// Re-load the messages from DB (which now contains only the system summary message)
+				dbMsgs, err := GetChatMessages(*req.ChatID)
+				if err == nil && len(dbMsgs) > 0 {
+					chatReq.Messages = dbMsgs
+				}
+			} else {
+				log.Printf("Failed to auto-compress chat: %v", err)
+			}
+		}
+
+		if !userMessageSaved {
+			lastMsg := req.Messages[len(req.Messages)-1]
+			if err := SaveChatMessage(*req.ChatID, lastMsg.Role, lastMsg.Content, lastMsg.Images); err != nil {
+				log.Printf("Error saving user prompt to db: %v", err)
+			}
+		}
+	}
+
 	stream, err := client.StreamChat(chatReq)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
 	defer stream.Close()
-
-	// Write user message to DB if chat session is active
-	if req.ChatID != nil && *req.ChatID > 0 && len(req.Messages) > 0 {
-		lastMsg := req.Messages[len(req.Messages)-1]
-		if err := SaveChatMessage(*req.ChatID, lastMsg.Role, lastMsg.Content, lastMsg.Images); err != nil {
-			log.Printf("Error saving user prompt to db: %v", err)
-		}
-	}
 
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -567,6 +635,10 @@ func chatStreamHandler(c *gin.Context) {
 	var accumulatedContent string
 
 	c.Stream(func(w io.Writer) bool {
+		if compressionSummary != "" {
+			c.SSEvent("compressed", compressionSummary)
+		}
+
 		scanner := bufio.NewScanner(stream)
 		for scanner.Scan() {
 			line := scanner.Bytes()
@@ -600,6 +672,7 @@ func chatStreamHandler(c *gin.Context) {
 		return false
 	})
 }
+
 
 // --- CHAT HISTORY HANDLERS (v0.0.3) ---
 
@@ -1011,4 +1084,672 @@ func getModelCardHandler(c *gin.Context) {
 
 	c.String(http.StatusOK, string(body))
 }
+
+// ==========================================
+// TELEMETRY, SCHEDULER & BENCHMARK FUNCTIONS
+// ==========================================
+
+type HostStats struct {
+	CPU      float64 `json:"cpu"`
+	RAMUsed  uint64  `json:"ram_used"`
+	RAMTotal uint64  `json:"ram_total"`
+}
+
+type OllamaNodeInfo struct {
+	URL      string `json:"url"`
+	IsRemote bool   `json:"is_remote"`
+}
+
+type TelemetryPayload struct {
+	AppHost      HostStats      `json:"app_host"`
+	OllamaNode   OllamaNodeInfo `json:"ollama_node"`
+	ActiveModels []ProcessModel `json:"active_models"`
+}
+
+var (
+	telemetryMutex   sync.Mutex
+	currentTelemetry TelemetryPayload
+)
+
+func isRemoteURL(urlStr string) bool {
+	u := strings.ToLower(urlStr)
+	return !(strings.Contains(u, "localhost") || strings.Contains(u, "127.0.0.1") || strings.Contains(u, "0.0.0.0") || strings.Contains(u, "[::1]"))
+}
+
+func parsePhysMem(line string) (float64, rune, float64, rune) {
+	idxUsed := strings.Index(line, " used")
+	idxUnused := strings.Index(line, " unused")
+	if idxUsed == -1 || idxUnused == -1 {
+		return 0, 0, 0, 0
+	}
+	partUsed := line[len("PhysMem:"):idxUsed]
+	partUsed = strings.TrimSpace(partUsed)
+	if idxParen := strings.Index(partUsed, "("); idxParen != -1 {
+		partUsed = strings.TrimSpace(partUsed[:idxParen])
+	}
+	var usedVal float64
+	var usedUnit rune
+	fmt.Sscanf(partUsed, "%f%c", &usedVal, &usedUnit)
+
+	idxComma := strings.LastIndex(line[:idxUnused], ",")
+	if idxComma == -1 {
+		return 0, 0, 0, 0
+	}
+	partUnused := line[idxComma+1 : idxUnused]
+	partUnused = strings.TrimSpace(partUnused)
+	var unusedVal float64
+	var unusedUnit rune
+	fmt.Sscanf(partUnused, "%f%c", &unusedVal, &unusedUnit)
+
+	return usedVal, usedUnit, unusedVal, unusedUnit
+}
+
+func getHostStats() HostStats {
+	stats := HostStats{
+		CPU:      1.5,
+		RAMUsed:  8 * 1024 * 1024 * 1024,
+		RAMTotal: 16 * 1024 * 1024 * 1024,
+	}
+
+	// 1. Try macOS `top` command first
+	cmd := exec.Command("top", "-l", "1", "-n", "0")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err == nil {
+		lines := strings.Split(out.String(), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "CPU usage:") {
+				var user, sys, idle float64
+				_, err := fmt.Sscanf(line, "CPU usage: %f%% user, %f%% sys, %f%% idle", &user, &sys, &idle)
+				if err == nil {
+					stats.CPU = user + sys
+				}
+			} else if strings.HasPrefix(line, "PhysMem:") {
+				usedVal, usedUnit, unusedVal, unusedUnit := parsePhysMem(line)
+				if usedVal > 0 && unusedVal > 0 {
+					var usedBytes uint64
+					if usedUnit == 'G' || usedUnit == 'g' {
+						usedBytes = uint64(usedVal * 1024 * 1024 * 1024)
+					} else {
+						usedBytes = uint64(usedVal * 1024 * 1024)
+					}
+					var unusedBytes uint64
+					if unusedUnit == 'G' || unusedUnit == 'g' {
+						unusedBytes = uint64(unusedVal * 1024 * 1024 * 1024)
+					} else {
+						unusedBytes = uint64(unusedVal * 1024 * 1024)
+					}
+					stats.RAMUsed = usedBytes
+					stats.RAMTotal = usedBytes + unusedBytes
+				}
+			}
+		}
+		return stats
+	}
+
+	// 2. Try Linux /proc/meminfo and /proc/stat
+	if data, err := os.ReadFile("/proc/meminfo"); err == nil {
+		var memTotal, memFree, memAvailable uint64
+		lines := strings.Split(string(data), "\n")
+		for _, line := range lines {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				var val uint64
+				fmt.Sscanf(parts[1], "%d", &val)
+				valBytes := val * 1024 // /proc/meminfo is in kB
+				if parts[0] == "MemTotal:" {
+					memTotal = valBytes
+				} else if parts[0] == "MemFree:" {
+					memFree = valBytes
+				} else if parts[0] == "MemAvailable:" {
+					memAvailable = valBytes
+				}
+			}
+		}
+		if memTotal > 0 {
+			stats.RAMTotal = memTotal
+			if memAvailable > 0 {
+				stats.RAMUsed = memTotal - memAvailable
+			} else if memFree > 0 {
+				stats.RAMUsed = memTotal - memFree
+			}
+		}
+	}
+
+	// Dynamic CPU parsing for Linux /proc/stat
+	if data, err := os.ReadFile("/proc/stat"); err == nil {
+		lines := strings.Split(string(data), "\n")
+		if len(lines) > 0 && strings.HasPrefix(lines[0], "cpu ") {
+			parts := strings.Fields(lines[0])
+			if len(parts) >= 5 {
+				var user, nice, system, idle uint64
+				fmt.Sscanf(parts[1], "%d", &user)
+				fmt.Sscanf(parts[2], "%d", &nice)
+				fmt.Sscanf(parts[3], "%d", &system)
+				fmt.Sscanf(parts[4], "%d", &idle)
+				total := user + nice + system + idle
+				active := user + nice + system
+				if total > 0 {
+					stats.CPU = float64(active) / float64(total) * 100.0
+				}
+			}
+		}
+	}
+
+	return stats
+}
+
+func startTelemetryPoller() {
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			stats := getHostStats()
+			
+			activeSrv, err := GetActiveServer()
+			var activeModels []ProcessModel
+			nodeURL := ""
+			isRemote := false
+			
+			if err == nil {
+				nodeURL = activeSrv.URL
+				isRemote = isRemoteURL(activeSrv.URL)
+				client := NewOllamaClient(activeSrv.URL)
+				models, err := client.ListActiveModels()
+				if err == nil {
+					activeModels = models
+				}
+			}
+			
+			telemetryMutex.Lock()
+			currentTelemetry = TelemetryPayload{
+				AppHost: stats,
+				OllamaNode: OllamaNodeInfo{
+					URL:      nodeURL,
+					IsRemote: isRemote,
+				},
+				ActiveModels: activeModels,
+			}
+			telemetryMutex.Unlock()
+		}
+	}()
+}
+
+func telemetryStreamHandler(c *gin.Context) {
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Transfer-Encoding", "chunked")
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	ctx := c.Request.Context()
+
+	c.Stream(func(w io.Writer) bool {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+			telemetryMutex.Lock()
+			data, err := json.Marshal(currentTelemetry)
+			telemetryMutex.Unlock()
+
+			if err == nil {
+				c.SSEvent("telemetry", string(data))
+				return true
+			}
+		}
+		return true
+	})
+}
+
+// Settings Handlers
+func getSettingsHandler(c *gin.Context) {
+	settings, err := GetSettings()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, settings)
+}
+
+type UpdateSettingRequest struct {
+	Key   string `json:"key" binding:"required"`
+	Value string `json:"value" binding:"required"`
+}
+
+func updateSettingHandler(c *gin.Context) {
+	var req UpdateSettingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	err := UpdateSetting(req.Key, req.Value)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Setting updated successfully"})
+}
+
+func getSchedulerLogsHandler(c *gin.Context) {
+	logs, err := GetSchedulerLogs()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, logs)
+}
+
+func runModelUpdatesCheck() {
+	activeSrv, err := GetActiveServer()
+	if err != nil {
+		log.Printf("Scheduler: no active server selected: %v", err)
+		return
+	}
+
+	client := NewOllamaClient(activeSrv.URL)
+	models, err := client.ListModels()
+	if err != nil {
+		log.Printf("Scheduler: failed to list models on active server: %v", err)
+		_ = LogScheduleAction("system", "error", fmt.Sprintf("Failed to list models: %v", err))
+		return
+	}
+
+	if len(models) == 0 {
+		_ = LogScheduleAction("system", "info", "No models found to update.")
+		return
+	}
+
+	_ = LogScheduleAction("system", "info", fmt.Sprintf("Starting update check for %d models...", len(models)))
+
+	for _, m := range models {
+		log.Printf("Scheduler: updating model %s...", m.Name)
+		_ = LogScheduleAction(m.Name, "pending", "Checking/pulling updates...")
+		
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		stream, err := client.StreamPullModel(ctx, m.Name)
+		if err != nil {
+			cancel()
+			_ = LogScheduleAction(m.Name, "failed", fmt.Sprintf("Failed to start pull: %v", err))
+			continue
+		}
+
+		var lastStatus string
+		err = ParsePullProgress(stream, func(progress PullProgress) bool {
+			lastStatus = progress.Status
+			return true
+		})
+		stream.Close()
+		cancel()
+
+		if err != nil {
+			_ = LogScheduleAction(m.Name, "failed", fmt.Sprintf("Pull error: %v", err))
+		} else {
+			_ = LogScheduleAction(m.Name, "success", fmt.Sprintf("Updated successfully. Last status: %s", lastStatus))
+		}
+	}
+
+	_ = UpdateSetting("last_update_check", time.Now().Format("2006-01-02 15:04:05"))
+}
+
+func checkModelUpdatesNowHandler(c *gin.Context) {
+	go runModelUpdatesCheck()
+	c.JSON(http.StatusOK, gin.H{"message": "Model update check initiated in background."})
+}
+
+func startSchedulerTicker() {
+	go func() {
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			settings, err := GetSettings()
+			if err != nil {
+				continue
+			}
+
+			schedule := settings["update_schedule"]
+			if schedule == "off" || schedule == "" {
+				continue
+			}
+
+			now := time.Now()
+			if now.Hour() != 2 {
+				continue
+			}
+
+			lastCheckStr := settings["last_update_check"]
+			if lastCheckStr != "" {
+				lastCheck, err := time.Parse("2006-01-02 15:04:05", lastCheckStr)
+				if err == nil {
+					if schedule == "daily" {
+						if lastCheck.Year() == now.Year() && lastCheck.YearDay() == now.YearDay() {
+							continue
+						}
+					} else if schedule == "weekly" {
+						if now.Sub(lastCheck) < 6*24*time.Hour {
+							continue
+						}
+					}
+				}
+			}
+
+			log.Printf("Scheduler: triggering scheduled update. Schedule: %s", schedule)
+			runModelUpdatesCheck()
+		}
+	}()
+}
+
+// Context Compression Functions
+func CompressChatSession(chatID int64, modelName string) (string, error) {
+	messages, err := GetChatMessages(chatID)
+	if err != nil {
+		return "", err
+	}
+
+	if len(messages) <= 2 {
+		return "", fmt.Errorf("not enough messages to compress")
+	}
+
+	var sb strings.Builder
+	sb.WriteString("Summarize the following conversation history briefly. Focus only on key facts, preferences, decisions, and instructions established. Keep the summary concise (under 250 words) and direct. Do not add any introductory or concluding text.\n\nCONVERSATION HISTORY:\n")
+	for _, m := range messages {
+		sb.WriteString(fmt.Sprintf("%s: %s\n", m.Role, m.Content))
+	}
+
+	activeSrv, err := GetActiveServer()
+	if err != nil {
+		return "", fmt.Errorf("no active server selected: %w", err)
+	}
+
+	client := NewOllamaClient(activeSrv.URL)
+
+	reqBody, err := json.Marshal(map[string]interface{}{
+		"model":  modelName,
+		"prompt": sb.String(),
+		"stream": false,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := client.HTTPClient.Post(
+		fmt.Sprintf("%s/api/generate", client.BaseURL),
+		"application/json",
+		bytes.NewBuffer(reqBody),
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to contact Ollama for summary: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("summary generate failed, status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var genResp struct {
+		Response string `json:"response"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&genResp); err != nil {
+		return "", fmt.Errorf("failed to parse summary response: %w", err)
+	}
+
+	summaryText := strings.TrimSpace(genResp.Response)
+	if summaryText == "" {
+		return "", fmt.Errorf("generated summary was empty")
+	}
+
+	tx, err := DB.Begin()
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec("DELETE FROM messages WHERE chat_id = ?", chatID)
+	if err != nil {
+		return "", err
+	}
+
+	systemMsg := fmt.Sprintf("CONVERSATION SUMMARY (Auto-Compressed):\n%s", summaryText)
+	_, err = tx.Exec("INSERT INTO messages (chat_id, role, content) VALUES (?, 'system', ?)", chatID, systemMsg)
+	if err != nil {
+		return "", err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
+
+	return systemMsg, nil
+}
+
+func compressChatHandler(c *gin.Context) {
+	idStr := c.Param("id")
+	var id int64
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid chat ID"})
+		return
+	}
+
+	chat, err := GetChat(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch chat details"})
+		return
+	}
+	if chat == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Chat session not found"})
+		return
+	}
+
+	summary, err := CompressChatSession(id, chat.Model)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Chat compressed successfully", "summary": summary})
+}
+
+// Benchmarking Functions
+func getBenchmarksHandler(c *gin.Context) {
+	benchmarks, err := GetBenchmarks()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, benchmarks)
+}
+
+func runBenchmarkForPrompt(client *OllamaClient, model string, prompt string, logFunc func(string)) (float64, float64, float64, error) {
+	req := GenerateRequest{
+		Model:  model,
+		Prompt: prompt,
+		Stream: true,
+		Options: map[string]interface{}{
+			"temperature": 0.0,
+		},
+	}
+
+	start := time.Now()
+	stream, err := client.StreamGenerate(req)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	defer stream.Close()
+
+	var firstTokenTime time.Duration
+	var firstTokenReceived bool
+	var tokenCount int
+	
+	scanner := bufio.NewScanner(stream)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		var chunk struct {
+			Response string `json:"response"`
+			Done     bool   `json:"done"`
+		}
+		if err := json.Unmarshal(line, &chunk); err == nil {
+			if !firstTokenReceived && chunk.Response != "" {
+				firstTokenTime = time.Since(start)
+				firstTokenReceived = true
+			}
+			if chunk.Response != "" {
+				tokenCount++
+			}
+		}
+	}
+
+	totalDuration := time.Since(start)
+
+	if !firstTokenReceived {
+		return 0, 0, 0, fmt.Errorf("no tokens received from model")
+	}
+
+	ttftMs := float64(firstTokenTime.Milliseconds())
+	generationDurationSec := totalDuration.Seconds() - firstTokenTime.Seconds()
+	if generationDurationSec <= 0 {
+		generationDurationSec = 0.001
+	}
+	tps := float64(tokenCount) / generationDurationSec
+	avgLatency := float64(totalDuration.Milliseconds())
+
+	return ttftMs, tps, avgLatency, nil
+}
+
+func runBenchmarkSSEHandler(c *gin.Context) {
+	model := c.Query("model")
+	if model == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Model parameter is required"})
+		return
+	}
+
+	activeSrv, err := GetActiveServer()
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "No active Ollama server selected"})
+		return
+	}
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Transfer-Encoding", "chunked")
+
+	client := NewOllamaClient(activeSrv.URL)
+
+	prompts := []string{
+		"Explain the difference between TCP and UDP in one simple sentence.",
+		"Write a short Python function that checks if a string is a palindrome.",
+		"Briefly explain the theory of relativity to a 10-year-old in one paragraph.",
+	}
+
+	c.Stream(func(w io.Writer) bool {
+		c.SSEvent("status", fmt.Sprintf("Initializing benchmark for %s...", model))
+		
+		var totalTtft, totalTps, totalLatency float64
+		var successfulRuns int
+
+		for i, prompt := range prompts {
+			c.SSEvent("status", fmt.Sprintf("Running Prompt %d/3: \"%s\"", i+1, prompt))
+			
+			ttft, tps, latency, err := runBenchmarkForPrompt(client, model, prompt, func(logMsg string) {
+				c.SSEvent("status", logMsg)
+			})
+
+			if err != nil {
+				c.SSEvent("error", fmt.Sprintf("Prompt %d failed: %v", i+1, err))
+				continue
+			}
+
+			c.SSEvent("status", fmt.Sprintf("Prompt %d finished - TTFT: %.1fms, TPS: %.1f, Latency: %.1fms", i+1, ttft, tps, latency))
+			totalTtft += ttft
+			totalTps += tps
+			totalLatency += latency
+			successfulRuns++
+		}
+
+		if successfulRuns == 0 {
+			c.SSEvent("error", "Benchmark failed: all runs failed.")
+			return false
+		}
+
+		avgTtft := totalTtft / float64(successfulRuns)
+		avgTps := totalTps / float64(successfulRuns)
+		avgLatency := totalLatency / float64(successfulRuns)
+
+		id, err := SaveBenchmark(model, avgTtft, avgTps, avgLatency)
+		if err != nil {
+			c.SSEvent("error", fmt.Sprintf("Failed to save benchmark: %v", err))
+			return false
+		}
+
+		c.SSEvent("status", "Benchmark suite completed successfully.")
+		
+		resultPayload := map[string]interface{}{
+			"id":             id,
+			"model_name":     model,
+			"ttft_ms":        avgTtft,
+			"tps":            avgTps,
+			"avg_latency_ms": avgLatency,
+		}
+		
+		resBytes, _ := json.Marshal(resultPayload)
+		c.SSEvent("done", string(resBytes))
+		return false
+	})
+}
+
+type UpdateScoreRequest struct {
+	Score string `json:"score" binding:"required"`
+	Notes string `json:"notes"`
+}
+
+func updateBenchmarkScoreHandler(c *gin.Context) {
+	idStr := c.Param("id")
+	var id int64
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid benchmark ID"})
+		return
+	}
+
+	var req UpdateScoreRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	err := UpdateBenchmarkScore(id, req.Score, req.Notes)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Score updated successfully"})
+}
+
+func deleteBenchmarkHandler(c *gin.Context) {
+	idStr := c.Param("id")
+	var id int64
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid benchmark ID"})
+		return
+	}
+
+	err := DeleteBenchmark(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Benchmark deleted successfully"})
+}
+
 

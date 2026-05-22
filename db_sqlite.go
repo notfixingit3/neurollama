@@ -40,6 +40,30 @@ type Preset struct {
 	CreatedAt string `json:"created_at"`
 }
 
+type Setting struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+type SchedulerLog struct {
+	ID        int64  `json:"id"`
+	ModelName string `json:"model_name"`
+	Status    string `json:"status"`
+	Message   string `json:"message"`
+	CreatedAt string `json:"created_at"`
+}
+
+type Benchmark struct {
+	ID             int64   `json:"id"`
+	ModelName      string  `json:"model_name"`
+	TtftMs         float64 `json:"ttft_ms"`
+	Tps            float64 `json:"tps"`
+	AvgLatencyMs   float64 `json:"avg_latency_ms"`
+	ReasoningScore string  `json:"reasoning_score"`
+	Notes          string  `json:"notes"`
+	CreatedAt      string  `json:"created_at"`
+}
+
 // InitDB initializes the SQLite database connection and runs migrations
 func InitDB(dbPath string) error {
 	// Create directory if it doesn't exist
@@ -129,11 +153,44 @@ func migrate() error {
 			content TEXT NOT NULL,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);`,
+		`CREATE TABLE IF NOT EXISTS settings (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		);`,
+		`CREATE TABLE IF NOT EXISTS scheduler_logs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			model_name TEXT NOT NULL,
+			status TEXT NOT NULL,
+			message TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);`,
+		`CREATE TABLE IF NOT EXISTS benchmarks (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			model_name TEXT NOT NULL,
+			ttft_ms REAL NOT NULL,
+			tps REAL NOT NULL,
+			avg_latency_ms REAL NOT NULL,
+			reasoning_score TEXT NOT NULL DEFAULT 'Pending',
+			notes TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);`,
 	}
 
 	for _, q := range queries {
 		if _, err := DB.Exec(q); err != nil {
 			return err
+		}
+	}
+
+	// Seed default settings if they don't exist
+	defaultSettings := map[string]string{
+		"update_schedule":   "off",
+		"last_update_check": "",
+	}
+	for k, v := range defaultSettings {
+		_, err := DB.Exec("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", k, v)
+		if err != nil {
+			return fmt.Errorf("failed to seed setting %s: %w", k, err)
 		}
 	}
 
@@ -365,3 +422,119 @@ func DeletePreset(id int64) error {
 	_, err := DB.Exec("DELETE FROM presets WHERE id = ?", id)
 	return err
 }
+
+// Settings Helpers
+
+func GetSettings() (map[string]string, error) {
+	rows, err := DB.Query("SELECT key, value FROM settings")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	settings := make(map[string]string)
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		settings[k] = v
+	}
+	return settings, nil
+}
+
+func UpdateSetting(key, val string) error {
+	_, err := DB.Exec("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", key, val)
+	return err
+}
+
+// Scheduler Log Helpers
+
+func GetSchedulerLogs() ([]SchedulerLog, error) {
+	rows, err := DB.Query("SELECT id, model_name, status, message, datetime(created_at, 'localtime') FROM scheduler_logs ORDER BY id DESC LIMIT 100")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []SchedulerLog
+	for rows.Next() {
+		var l SchedulerLog
+		if err := rows.Scan(&l.ID, &l.ModelName, &l.Status, &l.Message, &l.CreatedAt); err != nil {
+			return nil, err
+		}
+		logs = append(logs, l)
+	}
+	return logs, nil
+}
+
+func LogScheduleAction(modelName, status, message string) error {
+	_, err := DB.Exec("INSERT INTO scheduler_logs (model_name, status, message) VALUES (?, ?, ?)", modelName, status, message)
+	return err
+}
+
+// Benchmark Helpers
+
+func GetBenchmarks() ([]Benchmark, error) {
+	rows, err := DB.Query("SELECT id, model_name, ttft_ms, tps, avg_latency_ms, reasoning_score, COALESCE(notes, ''), datetime(created_at, 'localtime') FROM benchmarks ORDER BY id DESC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []Benchmark
+	for rows.Next() {
+		var b Benchmark
+		if err := rows.Scan(&b.ID, &b.ModelName, &b.TtftMs, &b.Tps, &b.AvgLatencyMs, &b.ReasoningScore, &b.Notes, &b.CreatedAt); err != nil {
+			return nil, err
+		}
+		list = append(list, b)
+	}
+	return list, nil
+}
+
+func SaveBenchmark(modelName string, ttft, tps, avgLatency float64) (int64, error) {
+	res, err := DB.Exec("INSERT INTO benchmarks (model_name, ttft_ms, tps, avg_latency_ms) VALUES (?, ?, ?, ?)", modelName, ttft, tps, avgLatency)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func UpdateBenchmarkScore(id int64, score, notes string) error {
+	_, err := DB.Exec("UPDATE benchmarks SET reasoning_score = ?, notes = ? WHERE id = ?", score, notes, id)
+	return err
+}
+
+func DeleteBenchmark(id int64) error {
+	_, err := DB.Exec("DELETE FROM benchmarks WHERE id = ?", id)
+	return err
+}
+
+// Chat Context Pruning Helper
+
+func PruneChatMessages(chatID int64, keepCount int) error {
+	var count int
+	err := DB.QueryRow("SELECT COUNT(*) FROM messages WHERE chat_id = ?", chatID).Scan(&count)
+	if err != nil {
+		return err
+	}
+
+	if count <= keepCount {
+		return nil
+	}
+
+	limit := count - keepCount
+	_, err = DB.Exec(`
+		DELETE FROM messages 
+		WHERE chat_id = ? 
+		AND id IN (
+			SELECT id FROM messages 
+			WHERE chat_id = ? 
+			ORDER BY id ASC 
+			LIMIT ?
+		)
+	`, chatID, chatID, limit)
+	return err
+}
+

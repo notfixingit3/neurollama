@@ -122,6 +122,9 @@ async function init() {
     });
   }
 
+  // Start background telemetry stream
+  startTelemetrySSE();
+
   // Restore active workspace
   const savedWorkspace = localStorage.getItem('active-workspace') || 'inventory';
   switchWorkspace(savedWorkspace);
@@ -143,17 +146,19 @@ function switchWorkspace(workspace) {
   }
 
   // Toggle buttons
-  const tabs = ['inventory', 'playground', 'completion', 'builder', 'memory'];
+  const tabs = ['inventory', 'playground', 'completion', 'builder', 'memory', 'benchmark'];
   tabs.forEach(t => {
     const btn = document.getElementById(`ws-tab-${t}`);
     const panel = document.getElementById(`ws-panel-${t}`);
     
-    if (t === workspace) {
-      btn.classList.add('tab-active');
-      panel.classList.remove('hidden');
-    } else {
-      btn.classList.remove('tab-active');
-      panel.classList.add('hidden');
+    if (btn && panel) {
+      if (t === workspace) {
+        btn.classList.add('tab-active');
+        panel.classList.remove('hidden');
+      } else {
+        btn.classList.remove('tab-active');
+        panel.classList.add('hidden');
+      }
     }
   });
 
@@ -163,6 +168,11 @@ function switchWorkspace(workspace) {
   // Tab specific actions
   if (workspace === 'memory') {
     fetchActiveModels();
+    fetchSchedulerSettings();
+    fetchSchedulerLogs();
+  } else if (workspace === 'benchmark') {
+    populateModelDropdowns();
+    fetchBenchmarks();
   } else if (workspace === 'playground') {
     populateModelDropdowns();
     fetchPresets();
@@ -179,6 +189,7 @@ function populateModelDropdowns() {
   const chatSelect = document.getElementById('chat-model-select');
   const builderSelect = document.getElementById('builder-base-select');
   const completionSelect = document.getElementById('completion-model-select');
+  const benchmarkSelect = document.getElementById('benchmark-model-select');
 
   // Filter out models that might not have values
   const options = models.map(m => {
@@ -191,9 +202,11 @@ function populateModelDropdowns() {
     if (chatSelect) chatSelect.innerHTML = noModels;
     if (builderSelect) builderSelect.innerHTML = noModels;
     if (completionSelect) completionSelect.innerHTML = noModels;
+    if (benchmarkSelect) benchmarkSelect.innerHTML = noModels;
   } else {
     if (chatSelect) chatSelect.innerHTML = options;
     if (builderSelect) builderSelect.innerHTML = options;
+    if (benchmarkSelect) benchmarkSelect.innerHTML = options;
     if (completionSelect) {
       const currentSelected = completionSelect.value;
       completionSelect.innerHTML = options;
@@ -1132,7 +1145,19 @@ function renderChatHistory() {
 
   let html = '';
   chatMessages.forEach(msg => {
-    if (msg.role === 'user') {
+    if (msg.role === 'system') {
+      html += `
+        <div class="chat chat-start animate-fade-in w-full">
+          <div class="chat-image avatar">
+            <div class="w-8 h-8 rounded-full border border-[#ebcb8b] flex items-center justify-center bg-[#2e3440]">
+              <i class="fa-solid fa-compress text-[#ebcb8b] text-xs"></i>
+            </div>
+          </div>
+          <div class="chat-header text-[10px] text-[#ebcb8b] mb-1 font-bold">SYSTEM // SUMMARY</div>
+          <div class="chat-bubble bg-[#2e3440]/80 border-2 border-[#ebcb8b] text-[#ebcb8b] leading-relaxed max-w-[85%] whitespace-pre-wrap font-semibold">${escapeHTML(msg.content)}</div>
+        </div>
+      `;
+    } else if (msg.role === 'user') {
       let imgHTML = '';
       if (msg.images && msg.images.length > 0) {
         imgHTML = '<div class="flex flex-wrap gap-2 mt-2">';
@@ -1416,6 +1441,7 @@ async function sendChatMessage() {
 
     telemetry.textContent = 'GENERATING RESPONSE...';
 
+    let lastEvent = '';
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
@@ -1425,10 +1451,30 @@ async function sendChatMessage() {
       buffer = lines.pop();
 
       for (const line of lines) {
-        if (!line.trim()) continue;
+        const trimmed = line.trim();
+        if (!trimmed) continue;
 
-        if (line.startsWith('data:')) {
-          const dataStr = line.substring(5).trim();
+        if (trimmed.startsWith('event:')) {
+          lastEvent = trimmed.substring(6).trim();
+          continue;
+        }
+
+        if (trimmed.startsWith('data:')) {
+          const dataStr = trimmed.substring(5).trim();
+          const currentEvent = lastEvent;
+          lastEvent = ''; // reset immediately
+          
+          if (currentEvent === 'compressed') {
+            console.log('Chat was auto-compressed. Summary:', dataStr);
+            showToast('Chat context auto-compressed to preserve window space', 'success');
+            if (activeChatId) {
+              setTimeout(() => {
+                switchChatSession(activeChatId);
+              }, 100);
+            }
+            continue;
+          }
+
           if (dataStr === 'stream finished') {
             break;
           }
@@ -3507,3 +3553,633 @@ function closeImageLightbox() {
     modal.close();
   }
 }
+
+// ============================================================================
+// TELEMETRY SSE, MODEL UPDATE SCHEDULER & BENCHMARK INFERENCE RUNNER (v0.0.4)
+// ============================================================================
+
+let telemetryEventSource = null;
+let telemetryHistory = [];
+const MAX_TELEMETRY_POINTS = 50;
+
+function startTelemetrySSE() {
+  if (telemetryEventSource) {
+    telemetryEventSource.close();
+  }
+
+  telemetryEventSource = new EventSource('/api/telemetry/stream');
+
+  telemetryEventSource.addEventListener('telemetry', (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      handleTelemetryData(data);
+    } catch (err) {
+      console.error('Failed to parse telemetry data', err);
+    }
+  });
+
+  telemetryEventSource.onerror = (err) => {
+    console.warn('Telemetry connection lost. Retrying...');
+    const nodeBadge = document.getElementById('node-badge');
+    if (nodeBadge) {
+      nodeBadge.textContent = 'DISCONNECTED';
+      nodeBadge.className = 'badge badge-xs py-2 px-2 font-mono font-bold bg-[#bf616a] text-[#d8dee9] border-none';
+    }
+  };
+}
+
+function handleTelemetryData(data) {
+  // Update connectivity badge
+  const nodeBadge = document.getElementById('node-badge');
+  if (nodeBadge) {
+    const isRemote = data.ollama_node.is_remote;
+    let host = data.ollama_node.url;
+    try {
+      const urlObj = new URL(data.ollama_node.url);
+      host = urlObj.host;
+    } catch (e) {}
+    nodeBadge.textContent = isRemote ? `REMOTE NODE: ${host}` : "LOCAL NODE";
+    nodeBadge.className = isRemote 
+      ? 'badge badge-xs py-2 px-2 font-mono font-bold bg-[#81a1c1] text-[#2e3440] border-none shadow-sm shadow-[#81a1c1]/20' 
+      : 'badge badge-xs py-2 px-2 font-mono font-bold bg-[#a3be8c] text-[#2e3440] border-none shadow-sm shadow-[#a3be8c]/20';
+  }
+
+  // Update URL & Type
+  const nodeUrlEl = document.getElementById('telemetry-node-url');
+  if (nodeUrlEl) {
+    nodeUrlEl.textContent = data.ollama_node.url || '---';
+  }
+  const nodeTypeEl = document.getElementById('telemetry-node-type');
+  if (nodeTypeEl) {
+    nodeTypeEl.textContent = data.ollama_node.is_remote ? 'REMOTE' : 'LOCAL';
+  }
+
+  // Update CPU/RAM bars
+  const cpuText = document.getElementById('host-cpu-text');
+  const cpuBar = document.getElementById('host-cpu-bar');
+  if (cpuText && cpuBar) {
+    cpuText.textContent = `${data.app_host.cpu.toFixed(1)}%`;
+    cpuBar.style.width = `${Math.min(100, data.app_host.cpu)}%`;
+  }
+
+  const ramText = document.getElementById('host-ram-text');
+  const ramBar = document.getElementById('host-ram-bar');
+  if (ramText && ramBar) {
+    const usedGb = data.app_host.ram_used / (1024 * 1024 * 1024);
+    const totalGb = data.app_host.ram_total / (1024 * 1024 * 1024);
+    ramText.textContent = `${usedGb.toFixed(1)} GB / ${totalGb.toFixed(1)} GB`;
+    const percent = data.app_host.ram_total > 0 ? (data.app_host.ram_used / data.app_host.ram_total) * 100 : 0;
+    ramBar.style.width = `${Math.min(100, percent)}%`;
+  }
+
+  // Update active models grid and chart if Memory panel is active
+  if (activeWorkspace === 'memory') {
+    updateTelemetryChart(data);
+    renderTelemetryModels(data.active_models);
+  }
+}
+
+function renderTelemetryModels(activeModels) {
+  const container = document.getElementById('memory-models-container');
+  if (!container) return;
+  
+  if (!activeModels || activeModels.length === 0) {
+    container.innerHTML = `
+      <div class="col-span-full text-center py-16 text-[#4c566a] border border-dashed border-[#4c566a]/40 rounded-xl">
+        <i class="fa-solid fa-microchip text-2xl mb-2 animate-pulse"></i>
+        <p class="font-tech text-xs uppercase tracking-widest text-[#88c0d0]">Memory Idle</p>
+        <p class="text-[10px] mt-1 max-w-sm mx-auto">No LLM parameters are currently mapped into RAM or GPU VRAM. Active models are automatically loaded upon first inference.</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = activeModels.map(model => {
+    const totalBytes = model.size;
+    const vramBytes = model.size_vram;
+    const offloadRatio = totalBytes > 0 ? (vramBytes / totalBytes) * 100 : 0;
+    
+    const vramFormatted = formatBytes(vramBytes);
+    const systemBytes = totalBytes - vramBytes;
+    const systemFormatted = formatBytes(systemBytes);
+    
+    let offloadLabel = '';
+    let progressColorClass = 'bg-gradient-to-r from-[#81a1c1] to-[#88c0d0]';
+    
+    if (offloadRatio >= 99.9) {
+      offloadLabel = '100% GPU (VRAM)';
+      progressColorClass = 'bg-[#a3be8c]';
+    } else if (offloadRatio <= 0.1) {
+      offloadLabel = '100% CPU (SYSTEM)';
+      progressColorClass = 'bg-[#bf616a]';
+    } else {
+      offloadLabel = `${offloadRatio.toFixed(1)}% GPU / ${(100 - offloadRatio).toFixed(1)}% CPU`;
+    }
+
+    const expiresAt = new Date(model.expires_at);
+    const diffMs = expiresAt - Date.now();
+    const diffMinutes = Math.max(0, Math.round(diffMs / 1000 / 60));
+
+    return `
+      <div class="p-4 border border-[#4c566a]/60 bg-[#242933]/40 rounded-xl flex flex-col justify-between gap-4 font-mono text-xs">
+        <div>
+          <div class="flex justify-between items-start">
+            <div>
+              <h3 class="font-bold text-sm text-[#e5e9f0] truncate max-w-[200px]">${escapeHTML(model.name)}</h3>
+              <span class="badge badge-outline border-[#4c566a] text-[#81a1c1] text-[9px] mt-1 font-mono">${(model.details && model.details.parameter_size) || 'N/A'}</span>
+            </div>
+            <button onclick="unloadModel('${model.name}')" class="btn btn-xs btn-error font-tech text-[9px] gap-1">
+              <i class="fa-solid fa-power-off"></i> EVICT
+            </button>
+          </div>
+
+          <div class="mt-4 space-y-1">
+            <div class="flex justify-between text-[10px]">
+              <span class="text-[#88c0d0]">OFFLOAD RATIO:</span>
+              <span class="font-semibold text-[#e5e9f0]">${offloadLabel}</span>
+            </div>
+            <div class="w-full h-3.5 bg-[#1e222a] rounded overflow-hidden border border-[#4c566a]/40 p-0.5">
+              <div class="h-full rounded ${progressColorClass}" style="width: ${offloadRatio.toFixed(1)}%"></div>
+            </div>
+            <div class="flex justify-between text-[9px] text-[#4c566a]">
+              <span>VRAM: ${vramFormatted}</span>
+              <span>System: ${systemFormatted}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="border-t border-[#4c566a]/30 pt-2 flex justify-between items-center text-[9px] text-[#4c566a]">
+          <span>Total Weight: ${formatBytes(totalBytes)}</span>
+          <span>Unloads in: ~${diffMinutes}m</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function updateTelemetryChart(payload) {
+  const canvas = document.getElementById('telemetry-chart');
+  if (!canvas) return;
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * window.devicePixelRatio;
+  canvas.height = rect.height * window.devicePixelRatio;
+  ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+  const width = rect.width;
+  const height = rect.height;
+
+  const cpuVal = payload.app_host.cpu;
+  const ramVal = payload.app_host.ram_total > 0 
+    ? (payload.app_host.ram_used / payload.app_host.ram_total) * 100 
+    : 0;
+  
+  let totalVramBytes = 0;
+  if (payload.active_models && payload.active_models.length > 0) {
+    payload.active_models.forEach(m => {
+      totalVramBytes += m.size_vram || 0;
+    });
+  }
+  const vramGb = totalVramBytes / (1024 * 1024 * 1024);
+
+  telemetryHistory.push({ cpu: cpuVal, ram: ramVal, vram: vramGb });
+  if (telemetryHistory.length > MAX_TELEMETRY_POINTS) {
+    telemetryHistory.shift();
+  }
+
+  ctx.fillStyle = '#1a1c23';
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.strokeStyle = 'rgba(76, 86, 106, 0.15)';
+  ctx.lineWidth = 1;
+  const gridRows = 5;
+  const gridCols = 10;
+  for (let i = 1; i < gridRows; i++) {
+    const y = (height / gridRows) * i;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(width, y);
+    ctx.stroke();
+  }
+  for (let i = 1; i < gridCols; i++) {
+    const x = (width / gridCols) * i;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, height);
+    ctx.stroke();
+  }
+
+  if (telemetryHistory.length < 2) return;
+
+  let maxVramInHistory = 8;
+  telemetryHistory.forEach(pt => {
+    if (pt.vram > maxVramInHistory) {
+      maxVramInHistory = pt.vram;
+    }
+  });
+  maxVramInHistory = Math.ceil(maxVramInHistory / 4) * 4;
+
+  function drawLine(key, color, maxVal) {
+    ctx.beginPath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+
+    for (let i = 0; i < telemetryHistory.length; i++) {
+      const pt = telemetryHistory[i];
+      const val = pt[key];
+      const x = (width / (MAX_TELEMETRY_POINTS - 1)) * i;
+      const y = height - (val / maxVal) * (height - 20) - 10;
+
+      if (i === 0) {
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+    ctx.stroke();
+
+    ctx.lineTo((width / (MAX_TELEMETRY_POINTS - 1)) * (telemetryHistory.length - 1), height);
+    ctx.lineTo(0, height);
+    ctx.closePath();
+    
+    let rgbPrefix = color.substring(0, color.length - 1);
+    const grad = ctx.createLinearGradient(0, 0, 0, height);
+    grad.addColorStop(0, `${rgbPrefix}, 0.15)`);
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad;
+    ctx.fill();
+  }
+
+  drawLine('cpu', 'rgba(136, 192, 208, 1)', 100);
+  drawLine('ram', 'rgba(163, 190, 140, 1)', 100);
+  drawLine('vram', 'rgba(235, 203, 139, 1)', maxVramInHistory);
+
+  ctx.font = '9px monospace';
+  ctx.fillStyle = '#88c0d0';
+  ctx.fillText(`CPU: ${cpuVal.toFixed(1)}%`, 10, 15);
+  ctx.fillStyle = '#a3be8c';
+  ctx.fillText(`RAM: ${ramVal.toFixed(1)}%`, 10, 27);
+  ctx.fillStyle = '#ebcb8b';
+  ctx.fillText(`VRAM: ${vramGb.toFixed(2)} GB (Max Scale: ${maxVramInHistory}GB)`, 10, 39);
+}
+
+// --- MODEL UPDATE SCHEDULER ---
+
+async function fetchSchedulerSettings() {
+  try {
+    const response = await fetch('/api/settings');
+    if (!response.ok) throw new Error('Failed to fetch settings');
+    const settings = await response.json();
+    
+    const intervalSelect = document.getElementById('scheduler-interval-select');
+    if (intervalSelect && settings.update_schedule) {
+      intervalSelect.value = settings.update_schedule;
+    }
+  } catch (error) {
+    console.error('Failed to load scheduler settings:', error);
+  }
+}
+
+async function updateSchedulerSettings() {
+  const select = document.getElementById('scheduler-interval-select');
+  if (!select) return;
+  
+  const val = select.value;
+  try {
+    const response = await fetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: 'update_schedule',
+        value: val
+      })
+    });
+    
+    if (!response.ok) throw new Error('Failed to update scheduler setting');
+    showToast(`Scheduler update interval set to: ${val}`, 'success');
+    fetchSchedulerLogs();
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+}
+
+async function fetchSchedulerLogs() {
+  const container = document.getElementById('scheduler-logs-container');
+  if (!container) return;
+  
+  try {
+    const response = await fetch('/api/scheduler/logs');
+    if (!response.ok) throw new Error('Failed to fetch scheduler logs');
+    const logs = await response.json();
+    
+    if (!logs || logs.length === 0) {
+      container.innerHTML = `<div class="text-[#4c566a] italic p-2">No scheduler execution logs.</div>`;
+      return;
+    }
+    
+    container.innerHTML = logs.map(l => {
+      let statusColor = 'text-[#81a1c1]';
+      if (l.status === 'success') statusColor = 'text-[#a3be8c]';
+      if (l.status === 'error') statusColor = 'text-[#bf616a]';
+      
+      return `
+        <div class="border-b border-[#4c566a]/20 pb-1.5 mb-1.5 last:border-0 last:pb-0 font-mono text-[10px]">
+          <div class="flex justify-between text-[8px] text-[#4c566a]">
+            <span>${l.created_at}</span>
+            <span class="${statusColor} font-bold uppercase">${l.status}</span>
+          </div>
+          <div class="text-[#e5e9f0] mt-0.5">
+            <span class="text-[#88c0d0] font-bold">[${escapeHTML(l.model_name)}]</span> ${escapeHTML(l.message)}
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (error) {
+    console.error('Failed to load scheduler logs:', error);
+  }
+}
+
+async function triggerSchedulerCheckNow() {
+  const btn = document.getElementById('scheduler-check-btn');
+  if (btn) btn.disabled = true;
+  
+  try {
+    const response = await fetch('/api/scheduler/check', { method: 'POST' });
+    if (!response.ok) throw new Error('Failed to trigger update check');
+    
+    showToast('Background model update check triggered', 'success');
+    
+    setTimeout(fetchSchedulerLogs, 1000);
+    setTimeout(fetchSchedulerLogs, 3000);
+    setTimeout(fetchSchedulerLogs, 5000);
+  } catch (error) {
+    showToast(error.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// --- CONTEXT COMPRESSION ---
+
+async function triggerManualCompression() {
+  if (!activeChatId) {
+    showToast('No active chat session selected', 'warning');
+    return;
+  }
+  
+  const btn = document.getElementById('ctx-compress-btn');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<i class="fa-solid fa-circle-notch animate-spin mr-1"></i> COMPRESSING...`;
+  }
+  
+  try {
+    const response = await fetch(`/api/chats/${activeChatId}/compress`, {
+      method: 'POST'
+    });
+    
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error || 'Failed to compress chat');
+    }
+    
+    showToast('Chat context compressed with AI summary', 'success');
+    await switchChatSession(activeChatId);
+  } catch (error) {
+    showToast(error.message, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = 'COMPRESS';
+    }
+  }
+}
+
+// --- INFERENCE BENCHMARKER ---
+
+let benchmarkEventSource = null;
+
+function startBenchmark() {
+  const modelSelect = document.getElementById('benchmark-model-select');
+  if (!modelSelect) return;
+  
+  const model = modelSelect.value;
+  if (!model) {
+    showToast('Please select a model to benchmark', 'warning');
+    return;
+  }
+  
+  const runBtn = document.getElementById('run-benchmark-btn');
+  const logContainer = document.getElementById('benchmark-log');
+  
+  if (runBtn) runBtn.disabled = true;
+  if (logContainer) {
+    logContainer.innerHTML = `<div class="text-[#88c0d0] uppercase animate-pulse">Initializing sequential benchmark suite for ${model}...</div>`;
+  }
+  
+  if (benchmarkEventSource) {
+    benchmarkEventSource.close();
+  }
+  
+  const url = `/api/benchmarks/run?model=${encodeURIComponent(model)}`;
+  benchmarkEventSource = new EventSource(url);
+  
+  benchmarkEventSource.addEventListener('status', (e) => {
+    if (logContainer) {
+      const div = document.createElement('div');
+      div.className = 'py-0.5 border-b border-[#4c566a]/10 last:border-none';
+      div.textContent = e.data;
+      logContainer.appendChild(div);
+      logContainer.scrollTop = logContainer.scrollHeight;
+    }
+  });
+  
+  benchmarkEventSource.addEventListener('error', (e) => {
+    if (logContainer) {
+      const div = document.createElement('div');
+      div.className = 'text-[#bf616a] font-bold mt-1';
+      div.textContent = `[ERROR] ${e.data || 'Failed to complete benchmark runs.'}`;
+      logContainer.appendChild(div);
+      logContainer.scrollTop = logContainer.scrollHeight;
+    }
+    benchmarkEventSource.close();
+    if (runBtn) runBtn.disabled = false;
+    showToast('Benchmark run failed', 'error');
+  });
+  
+  benchmarkEventSource.addEventListener('done', (e) => {
+    try {
+      const res = JSON.parse(e.data);
+      if (logContainer) {
+        const div = document.createElement('div');
+        div.className = 'text-[#a3be8c] font-bold mt-2 border-t border-[#a3be8c]/20 pt-1';
+        div.textContent = `[COMPLETED] Leaderboard record saved: TTFT = ${res.ttft_ms.toFixed(1)}ms, TPS = ${res.tps.toFixed(1)}`;
+        logContainer.appendChild(div);
+        logContainer.scrollTop = logContainer.scrollHeight;
+      }
+      showToast('Benchmark completed and saved to leaderboard!', 'success');
+      fetchBenchmarks();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      benchmarkEventSource.close();
+      if (runBtn) runBtn.disabled = false;
+    }
+  });
+  
+  benchmarkEventSource.onerror = (err) => {
+    console.warn('Benchmark EventSource error:', err);
+    benchmarkEventSource.close();
+    if (runBtn) runBtn.disabled = false;
+  };
+}
+
+async function fetchBenchmarks() {
+  const tbody = document.getElementById('benchmark-leaderboard-body');
+  if (!tbody) return;
+  
+  try {
+    const response = await fetch('/api/benchmarks');
+    if (!response.ok) throw new Error('Failed to fetch benchmark leaderboard');
+    const list = await response.json();
+    
+    if (!list || list.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="6" class="text-center py-12 text-[#4c566a] italic">
+            No benchmarking runs recorded. Select a model on the left to begin.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+    
+    tbody.innerHTML = list.map(b => {
+      let scoreBadge = '';
+      if (b.reasoning_score.includes('S')) {
+        scoreBadge = 'bg-[#a3be8c]/25 text-[#a3be8c] border-[#a3be8c]';
+      } else if (b.reasoning_score.includes('A') || b.reasoning_score.includes('B')) {
+        scoreBadge = 'bg-[#88c0d0]/25 text-[#88c0d0] border-[#88c0d0]';
+      } else if (b.reasoning_score.includes('C')) {
+        scoreBadge = 'bg-[#ebcb8b]/25 text-[#ebcb8b] border-[#ebcb8b]';
+      } else if (b.reasoning_score.includes('F')) {
+        scoreBadge = 'bg-[#bf616a]/25 text-[#bf616a] border-[#bf616a]';
+      } else {
+        scoreBadge = 'bg-[#4c566a]/25 text-[#d8dee9] border-[#4c566a]';
+      }
+      
+      const noteHtml = b.notes 
+        ? `<div class="text-[10px] text-[#4c566a] mt-0.5 max-w-[250px] truncate" title="${escapeHTML(b.notes)}">${escapeHTML(b.notes)}</div>` 
+        : '';
+        
+      return `
+        <tr class="hover:bg-[#3b4252]/20 border-b border-[#4c566a]/20 transition-colors">
+          <td class="py-3 text-left font-mono">
+            <div class="font-bold text-[#e5e9f0]">${escapeHTML(b.model_name)}</div>
+            ${noteHtml}
+          </td>
+          <td class="text-center">${b.ttft_ms.toFixed(1)} ms</td>
+          <td class="text-center font-bold text-[#88c0d0]">${b.tps.toFixed(1)}</td>
+          <td class="text-center">${b.avg_latency_ms.toFixed(0)} ms</td>
+          <td class="text-center">
+            <span class="border px-2 py-0.5 rounded text-[9px] font-bold ${scoreBadge}">
+              ${escapeHTML(b.reasoning_score)}
+            </span>
+          </td>
+          <td class="text-right">
+            <div class="flex gap-1 justify-end">
+              <button onclick="openScoreModal(${b.id}, '${escapeHTML(b.reasoning_score)}', '${escapeHTML(b.notes)}')" 
+                      class="btn btn-xs btn-neutral border-[#4c566a] font-tech text-[9px] px-2">
+                RATE
+              </button>
+              <button onclick="deleteBenchmark(${b.id})" class="btn btn-xs btn-ghost text-[#bf616a] hover:bg-[#bf616a]/15 p-1">
+                <i class="fa-solid fa-trash-can text-[10px]"></i>
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  } catch (error) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6" class="text-center py-8 text-[#bf616a] italic">
+          Failed to load leaderboard: ${error.message}
+        </td>
+      </tr>
+    `;
+  }
+}
+
+function openScoreModal(id, currentScore, currentNotes) {
+  const modal = document.getElementById('benchmark-score-modal');
+  if (!modal) return;
+  
+  document.getElementById('modal-benchmark-id').value = id;
+  
+  const scoreSelect = document.getElementById('modal-score-select');
+  if (scoreSelect) {
+    if (currentScore === 'Pending' || !currentScore) {
+      scoreSelect.value = 'S (Phenomenal)';
+    } else {
+      scoreSelect.value = currentScore;
+    }
+  }
+  
+  const notesArea = document.getElementById('modal-notes-area');
+  if (notesArea) {
+    notesArea.value = currentNotes === 'Pending' ? '' : currentNotes;
+  }
+  
+  modal.showModal();
+}
+
+function closeScoreModal() {
+  const modal = document.getElementById('benchmark-score-modal');
+  if (modal) {
+    modal.close();
+  }
+}
+
+async function saveBenchmarkScore() {
+  const id = document.getElementById('modal-benchmark-id').value;
+  const score = document.getElementById('modal-score-select').value;
+  const notes = document.getElementById('modal-notes-area').value;
+  
+  try {
+    const response = await fetch(`/api/benchmarks/${id}/score`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ score, notes })
+    });
+    
+    if (!response.ok) throw new Error('Failed to save score');
+    
+    showToast('Benchmark rating saved successfully', 'success');
+    closeScoreModal();
+    fetchBenchmarks();
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+}
+
+async function deleteBenchmark(id) {
+  if (!confirm('Are you sure you want to delete this benchmark record?')) return;
+  
+  try {
+    const response = await fetch(`/api/benchmarks/${id}`, {
+      method: 'DELETE'
+    });
+    
+    if (!response.ok) throw new Error('Failed to delete benchmark record');
+    
+    showToast('Benchmark record deleted', 'warning');
+    fetchBenchmarks();
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+}
+
