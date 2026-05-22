@@ -80,6 +80,32 @@ type OptimizerRun struct {
 	CreatedAt       string  `json:"created_at"`
 }
 
+type RAGDocument struct {
+	ID             int64  `json:"id"`
+	Name           string `json:"name"`
+	EmbeddingModel string `json:"embedding_model"`
+	ChunkCount     int    `json:"chunk_count"`
+	CreatedAt      string `json:"created_at"`
+}
+
+type RAGChunk struct {
+	ID         int64     `json:"id"`
+	DocID      int64     `json:"doc_id"`
+	ChunkIndex int       `json:"chunk_index"`
+	Content    string    `json:"content"`
+	Embedding  []float64 `json:"embedding"`
+}
+
+type RAGChunkWithDocInfo struct {
+	ChunkID      int64     `json:"chunk_id"`
+	DocumentID   int64     `json:"document_id"`
+	DocumentName string    `json:"document_name"`
+	ChunkIndex   int       `json:"chunk_index"`
+	Content      string    `json:"content"`
+	Embedding    []float64 `json:"embedding"`
+}
+
+
 // InitDB initializes the SQLite database connection and runs migrations
 func InitDB(dbPath string) error {
 	// Create directory if it doesn't exist
@@ -204,6 +230,21 @@ func migrate() error {
 			prompt_used TEXT NOT NULL,
 			response_preview TEXT NOT NULL,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);`,
+		`CREATE TABLE IF NOT EXISTS rag_documents (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			embedding_model TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);`,
+		`CREATE TABLE IF NOT EXISTS rag_chunks (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			document_id INTEGER NOT NULL,
+			chunk_index INTEGER NOT NULL,
+			content TEXT NOT NULL,
+			embedding TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY(document_id) REFERENCES rag_documents(id) ON DELETE CASCADE
 		);`,
 	}
 
@@ -604,6 +645,106 @@ func GetOptimizerRuns() ([]OptimizerRun, error) {
 func DeleteOptimizerRun(id int64) error {
 	_, err := DB.Exec("DELETE FROM optimizer_runs WHERE id = ?", id)
 	return err
+}
+
+// RAG Helper Functions
+
+func SaveRAGDocument(name string, embeddingModel string, chunks []RAGChunk) (int64, error) {
+	tx, err := DB.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.Exec("INSERT INTO rag_documents (name, embedding_model) VALUES (?, ?)", name, embeddingModel)
+	if err != nil {
+		return 0, err
+	}
+
+	docID, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+
+	for _, chunk := range chunks {
+		embeddingJSON, err := json.Marshal(chunk.Embedding)
+		if err != nil {
+			return 0, fmt.Errorf("failed to marshal embedding: %w", err)
+		}
+
+		_, err = tx.Exec(`
+			INSERT INTO rag_chunks (document_id, chunk_index, content, embedding)
+			VALUES (?, ?, ?, ?)`,
+			docID, chunk.ChunkIndex, chunk.Content, string(embeddingJSON))
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+
+	return docID, nil
+}
+
+func GetRAGDocuments() ([]RAGDocument, error) {
+	rows, err := DB.Query(`
+		SELECT d.id, d.name, d.embedding_model, 
+		       (SELECT COUNT(*) FROM rag_chunks WHERE document_id = d.id) AS chunk_count,
+		       datetime(d.created_at, 'localtime') 
+		FROM rag_documents d 
+		ORDER BY d.id DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []RAGDocument
+	for rows.Next() {
+		var doc RAGDocument
+		if err := rows.Scan(&doc.ID, &doc.Name, &doc.EmbeddingModel, &doc.ChunkCount, &doc.CreatedAt); err != nil {
+			return nil, err
+		}
+		list = append(list, doc)
+	}
+	return list, nil
+}
+
+func DeleteRAGDocument(id int64) error {
+	_, err := DB.Exec("DELETE FROM rag_chunks WHERE document_id = ?", id)
+	if err != nil {
+		return err
+	}
+	_, err = DB.Exec("DELETE FROM rag_documents WHERE id = ?", id)
+	return err
+}
+
+func GetRAGChunksForModel(embeddingModel string) ([]RAGChunkWithDocInfo, error) {
+	rows, err := DB.Query(`
+		SELECT c.id, c.document_id, d.name, c.chunk_index, c.content, c.embedding 
+		FROM rag_chunks c 
+		JOIN rag_documents d ON c.document_id = d.id 
+		WHERE d.embedding_model = ?`, embeddingModel)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []RAGChunkWithDocInfo
+	for rows.Next() {
+		var c RAGChunkWithDocInfo
+		var embedStr string
+		if err := rows.Scan(&c.ChunkID, &c.DocumentID, &c.DocumentName, &c.ChunkIndex, &c.Content, &embedStr); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(embedStr), &c.Embedding); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal embedding: %w", err)
+		}
+		list = append(list, c)
+	}
+	return list, nil
 }
 
 

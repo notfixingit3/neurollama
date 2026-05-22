@@ -1,0 +1,113 @@
+version: '3.8'
+
+services:
+  neurollama:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: neurollama:latest
+    container_name: neurollama
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - GIN_MODE=release
+    # Note: If running behind a reverse proxy (Caddy/Traefik/Nginx), you may want to remove the port mapping above 
+    # to prevent direct external access and force connections through the secure proxy.
+    
+    # --- TRAEFIK REVERSE PROXY CONFIGURATION (OPTIONAL) ---
+    # To run behind Traefik, uncomment the labels below and configure your network:
+    # networks:
+    #   - web
+    # labels:
+    #   - "traefik.enable=true"
+    #   - "traefik.http.routers.neurollama.rule=Host(`neurollama.example.com`)"
+    #   - "traefik.http.routers.neurollama.entrypoints=websecure"
+    #   - "traefik.http.routers.neurollama.tls=true"
+    #   - "traefik.http.routers.neurollama.tls.certresolver=letsencrypt"
+    #   - "traefik.http.services.neurollama.loadbalancer.server.port=8080"
+
+  # --- CROWDSEC SECURED MIDDLEWARE CONFIGURATION (OPTIONAL) ---
+  # CrowdSec detects and blocks malicious IP addresses scanning or attacking services.
+  # To enable CrowdSec, uncomment this service block.
+  # crowdsec:
+  #   image: crowdsecurity/crowdsec:latest
+  #   container_name: crowdsec
+  #   restart: unless-stopped
+  #   environment:
+  #     - COLLECTIONS=crowdsecurity/linux crowdsecurity/http-cve
+  #   volumes:
+  #     - ./crowdsec/config:/etc/crowdsec
+  #     - ./crowdsec/data:/var/lib/crowdsec/data
+  #     - ./data:/app/logs:ro  # Mount application logs if Gin log redirection is configured
+  #   ports:
+  #     - "8000:8000"
+
+# ==============================================================================
+#                      REVERSE PROXY DEPLOYMENT GUIDE (SSL)
+# ==============================================================================
+#
+# 1. CADDY (Recommended for simplicity)
+# ------------------------------------------------------------------------------
+# Create a Caddyfile in your deployment folder:
+#
+# neurollama.example.com {
+#     reverse_proxy neurollama:8080
+# }
+#
+# Caddy will automatically manage Let's Encrypt / ZeroSSL TLS certificates.
+#
+# 2. NGINX
+# ------------------------------------------------------------------------------
+# In your server site configuration (/etc/nginx/sites-available/neurollama):
+#
+# server {
+#     listen 80;
+#     server_name neurollama.example.com;
+#     return 301 https://$host$request_uri;
+# }
+#
+# server {
+#     listen 443 ssl http2;
+#     server_name neurollama.example.com;
+#
+#     ssl_certificate /etc/letsencrypt/live/neurollama.example.com/fullchain.pem;
+#     ssl_certificate_key /etc/letsencrypt/live/neurollama.example.com/privkey.pem;
+#     include /etc/letsencrypt/options-ssl-nginx.conf;
+#     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+#
+#     location / {
+#         proxy_pass http://localhost:8080;
+#         proxy_set_header Host $host;
+#         proxy_set_header X-Real-IP $remote_addr;
+#         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+#         proxy_set_header X-Forwarded-Proto $scheme;
+#
+#         # WebSocket support for streaming responses
+#         proxy_http_version 1.1;
+#         proxy_set_header Upgrade $http_upgrade;
+#         proxy_set_header Connection "upgrade";
+#         proxy_read_timeout 3600s;
+#         proxy_send_timeout 3600s;
+#     }
+# }
+#
+# 3. SECURING OLLAMA SERVERS BEHIND PROXIES
+# ------------------------------------------------------------------------------
+# To run Ollama nodes securely (e.g. over SSL and requiring authentication):
+# Use a reverse proxy in front of the Ollama server node (port 11434) and enforce
+# Bearer Token or Basic Auth, e.g. using Caddy:
+#
+# ollama-node.example.com {
+#     # Enforce Bearer token authorization using Caddy config (or header checks)
+#     @auth not header Authorization "Bearer my-super-secret-token"
+#     respond @auth "Unauthorized" 401
+#
+#     reverse_proxy localhost:11434
+# }
+#
+# Then, in the NEUROLLAMA Web UI, configure the node with the URL:
+# https://ollama-node.example.com and set Auth Type to Bearer with token "my-super-secret-token".
+# ==============================================================================

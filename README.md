@@ -12,7 +12,7 @@
   <a href="https://golang.org/"><img src="https://img.shields.io/badge/Go-1.21%2B-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go Version" /></a>
   <a href="https://tailwindcss.com/"><img src="https://img.shields.io/badge/Tailwind_CSS-3.4%2B-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white" alt="Tailwind CSS" /></a>
   <a href="https://daisyui.com/"><img src="https://img.shields.io/badge/daisyUI-4.7%2B-5A0EF8?style=for-the-badge&logo=daisyui&logoColor=white" alt="DaisyUI" /></a>
-  <a href="https://github.com/notfixingit/ollama-manager/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-a3be8c?style=for-the-badge" alt="MIT License" /></a>
+  <a href="https://github.com/notfixingit3/ollama-manager/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-a3be8c?style=for-the-badge" alt="MIT License" /></a>
   <a href="https://buymeacoffee.com/notfixingit"><img src="https://img.shields.io/badge/Buy%20Me%20A%20Coffee-notfixingit-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me A Coffee" /></a>
 </p>
 
@@ -79,7 +79,7 @@ With NEUROLLAMA, you can connect to multiple local or remote servers, monitor ac
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/notfixingit/ollama-manager.git
+   git clone https://github.com/notfixingit3/ollama-manager.git
    cd ollama-manager
    ```
 

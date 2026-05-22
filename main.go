@@ -8,9 +8,12 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"os/exec"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,13 +29,25 @@ type ServerStatusResponse struct {
 }
 
 type AddServerRequest struct {
-	Name string `json:"name" binding:"required"`
-	URL  string `json:"url" binding:"required"`
+	Name           string `json:"name" binding:"required"`
+	URL            string `json:"url" binding:"required"`
+	AuthType       string `json:"authType"`
+	AuthToken      string `json:"authToken"`
+	AuthUsername   string `json:"authUsername"`
+	AuthPassword   string `json:"authPassword"`
+	AuthHeaderName string `json:"authHeaderName"`
+	AuthHeaderVal  string `json:"authHeaderVal"`
 }
 
 type EditServerRequest struct {
-	Name string `json:"name" binding:"required"`
-	URL  string `json:"url" binding:"required"`
+	Name           string `json:"name" binding:"required"`
+	URL            string `json:"url" binding:"required"`
+	AuthType       string `json:"authType"`
+	AuthToken      string `json:"authToken"`
+	AuthUsername   string `json:"authUsername"`
+	AuthPassword   string `json:"authPassword"`
+	AuthHeaderName string `json:"authHeaderName"`
+	AuthHeaderVal  string `json:"authHeaderVal"`
 }
 
 type BatchDeleteRequest struct {
@@ -135,6 +150,12 @@ func main() {
 		api.GET("/optimizer/runs", getOptimizerRunsHandler)
 		api.GET("/optimizer/run", runOptimizerSSEHandler)
 		api.DELETE("/optimizer/runs/:id", deleteOptimizerRunHandler)
+
+		// Document RAG Panel Endpoints
+		api.GET("/rag/documents", getRAGDocumentsHandler)
+		api.POST("/rag/documents", uploadRAGDocumentHandler)
+		api.DELETE("/rag/documents/:id", deleteRAGDocumentHandler)
+		api.POST("/rag/query", queryRAGSimilarityHandler)
 	}
 
 	log.Println("NEUROLLAMA is starting on http://localhost:8080")
@@ -154,7 +175,7 @@ func getServersHandler(c *gin.Context) {
 		wg.Add(1)
 		go func(idx int, s Server) {
 			defer wg.Done()
-			client := NewOllamaClient(s.URL)
+			client := NewOllamaClient(s)
 			version, latency, err := client.CheckStatus()
 
 			status := "online"
@@ -185,14 +206,19 @@ func addServerHandler(c *gin.Context) {
 		return
 	}
 
-	newSrv, err := AddServer(req.Name, req.URL)
+	newSrv, err := AddServer(
+		req.Name, req.URL,
+		req.AuthType, req.AuthToken,
+		req.AuthUsername, req.AuthPassword,
+		req.AuthHeaderName, req.AuthHeaderVal,
+	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	// Fetch status immediately to return complete record
-	client := NewOllamaClient(newSrv.URL)
+	client := NewOllamaClient(newSrv)
 	version, latency, err := client.CheckStatus()
 	status := "online"
 	if err != nil {
@@ -218,13 +244,18 @@ func editServerHandler(c *gin.Context) {
 		return
 	}
 
-	updatedSrv, err := EditServer(id, req.Name, req.URL)
+	updatedSrv, err := EditServer(
+		id, req.Name, req.URL,
+		req.AuthType, req.AuthToken,
+		req.AuthUsername, req.AuthPassword,
+		req.AuthHeaderName, req.AuthHeaderVal,
+	)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
 
-	client := NewOllamaClient(updatedSrv.URL)
+	client := NewOllamaClient(updatedSrv)
 	version, latency, err := client.CheckStatus()
 	status := "online"
 	if err != nil {
@@ -260,7 +291,7 @@ func selectServerHandler(c *gin.Context) {
 		return
 	}
 
-	client := NewOllamaClient(srv.URL)
+	client := NewOllamaClient(srv)
 	version, latency, err := client.CheckStatus()
 	status := "online"
 	if err != nil {
@@ -285,7 +316,7 @@ func getModelsHandler(c *gin.Context) {
 		return
 	}
 
-	client := NewOllamaClient(activeSrv.URL)
+	client := NewOllamaClient(activeSrv)
 	models, err := client.ListModels()
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{
@@ -316,7 +347,7 @@ func getModelDetailHandler(c *gin.Context) {
 		return
 	}
 
-	client := NewOllamaClient(activeSrv.URL)
+	client := NewOllamaClient(activeSrv)
 	details, err := client.GetModelDetails(name)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
@@ -340,7 +371,7 @@ func deleteModelsHandler(c *gin.Context) {
 		return
 	}
 
-	client := NewOllamaClient(activeSrv.URL)
+	client := NewOllamaClient(activeSrv)
 	errors := make(map[string]string)
 	successes := []string{}
 
@@ -384,7 +415,7 @@ func copyModelHandler(c *gin.Context) {
 		return
 	}
 
-	client := NewOllamaClient(activeSrv.URL)
+	client := NewOllamaClient(activeSrv)
 	if err := client.CopyModel(req.Source, req.Destination); err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
@@ -407,7 +438,7 @@ func pullModelSSEHandler(c *gin.Context) {
 		return
 	}
 
-	client := NewOllamaClient(activeSrv.URL)
+	client := NewOllamaClient(activeSrv)
 	var ctx context.Context = c.Request.Context()
 	stream, err := client.StreamPullModel(ctx, name)
 	if err != nil {
@@ -455,7 +486,7 @@ func getActiveModelsHandler(c *gin.Context) {
 		return
 	}
 
-	client := NewOllamaClient(activeSrv.URL)
+	client := NewOllamaClient(activeSrv)
 	activeModels, err := client.ListActiveModels()
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
@@ -482,7 +513,7 @@ func unloadModelHandler(c *gin.Context) {
 		return
 	}
 
-	client := NewOllamaClient(activeSrv.URL)
+	client := NewOllamaClient(activeSrv)
 	if err := client.UnloadModel(req.Name); err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
@@ -507,6 +538,9 @@ type ChatStreamRequest struct {
 	NumPredict       *int          `json:"num_predict"`
 	NumGPU           *int          `json:"num_gpu"`
 	NumThread        *int          `json:"num_thread"`
+	RagEnabled       *bool         `json:"rag_enabled"`
+	RagEmbeddingModel string       `json:"rag_embedding_model"`
+	RagTopK          *int          `json:"rag_top_k"`
 }
 
 func chatStreamHandler(c *gin.Context) {
@@ -522,7 +556,7 @@ func chatStreamHandler(c *gin.Context) {
 		return
 	}
 
-	client := NewOllamaClient(activeSrv.URL)
+	client := NewOllamaClient(activeSrv)
 
 	options := make(map[string]interface{})
 	if req.Temperature != nil {
@@ -625,6 +659,69 @@ func chatStreamHandler(c *gin.Context) {
 		}
 	}
 
+	var ragSources []gin.H
+	if req.RagEnabled != nil && *req.RagEnabled && req.RagEmbeddingModel != "" && len(chatReq.Messages) > 0 {
+		lastUserMsgIdx := -1
+		for i := len(chatReq.Messages) - 1; i >= 0; i-- {
+			if chatReq.Messages[i].Role == "user" {
+				lastUserMsgIdx = i
+				break
+			}
+		}
+
+		if lastUserMsgIdx != -1 {
+			embeddings, err := client.GetEmbeddings(req.RagEmbeddingModel, []string{chatReq.Messages[lastUserMsgIdx].Content})
+			if err == nil && len(embeddings) > 0 {
+				queryEmbed := embeddings[0]
+				allChunks, err := GetRAGChunksForModel(req.RagEmbeddingModel)
+				if err == nil && len(allChunks) > 0 {
+					type matchResult struct {
+						chunk RAGChunkWithDocInfo
+						score float64
+					}
+					var matches []matchResult
+					for _, chunk := range allChunks {
+						score := cosineSimilarity(queryEmbed, chunk.Embedding)
+						if score > 0.25 {
+							matches = append(matches, matchResult{chunk: chunk, score: score})
+						}
+					}
+
+					if len(matches) > 0 {
+						sort.Slice(matches, func(i, j int) bool {
+							return matches[i].score > matches[j].score
+						})
+
+						topK := 3
+						if req.RagTopK != nil && *req.RagTopK > 0 {
+							topK = *req.RagTopK
+						}
+						if len(matches) < topK {
+							topK = len(matches)
+						}
+
+						var contextBuilder strings.Builder
+						contextBuilder.WriteString("Use the following pieces of context to answer the user request. If you don't know the answer, just say you don't know, don't try to make up an answer.\n\n")
+						for idx := 0; idx < topK; idx++ {
+							match := matches[idx]
+							contextBuilder.WriteString(fmt.Sprintf("--- CONTEXT CHUNK #%d (Source: %s) ---\n%s\n\n", idx+1, match.chunk.DocumentName, match.chunk.Content))
+							ragSources = append(ragSources, gin.H{
+								"document_name": match.chunk.DocumentName,
+								"chunk_index":   match.chunk.ChunkIndex,
+								"score":         match.score,
+								"content":       match.chunk.Content,
+							})
+						}
+						contextBuilder.WriteString(fmt.Sprintf("User Request: %s", chatReq.Messages[lastUserMsgIdx].Content))
+						chatReq.Messages[lastUserMsgIdx].Content = contextBuilder.String()
+					}
+				}
+			} else {
+				log.Printf("RAG embedding failed: %v", err)
+			}
+		}
+	}
+
 	stream, err := client.StreamChat(chatReq)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
@@ -640,6 +737,10 @@ func chatStreamHandler(c *gin.Context) {
 	var accumulatedContent string
 
 	c.Stream(func(w io.Writer) bool {
+		if len(ragSources) > 0 {
+			sourcesJSON, _ := json.Marshal(ragSources)
+			c.SSEvent("rag_sources", string(sourcesJSON))
+		}
 		if compressionSummary != "" {
 			c.SSEvent("compressed", compressionSummary)
 		}
@@ -862,7 +963,7 @@ func createModelStreamHandler(c *gin.Context) {
 		return
 	}
 
-	client := NewOllamaClient(activeSrv.URL)
+	client := NewOllamaClient(activeSrv)
 
 	createReq := CreateRequest{
 		Name:      req.Name,
@@ -931,7 +1032,7 @@ func generateStreamHandler(c *gin.Context) {
 		return
 	}
 
-	client := NewOllamaClient(activeSrv.URL)
+	client := NewOllamaClient(activeSrv)
 
 	options := make(map[string]interface{})
 	if req.Temperature != nil {
@@ -1149,6 +1250,68 @@ func parsePhysMem(line string) (float64, rune, float64, rune) {
 	return usedVal, usedUnit, unusedVal, unusedUnit
 }
 
+func getMacRAM() (uint64, uint64, error) {
+	out, err := exec.Command("sysctl", "-n", "hw.memsize").Output()
+	if err != nil {
+		return 0, 0, err
+	}
+	total, err := strconv.ParseUint(strings.TrimSpace(string(out)), 10, 64)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	vmOut, err := exec.Command("vm_stat").Output()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	lines := strings.Split(string(vmOut), "\n")
+	var pageSize uint64 = 4096
+	var active, speculative, wired, compressed uint64
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.Contains(line, "page size of") {
+			parts := strings.Split(line, "page size of ")
+			if len(parts) > 1 {
+				subparts := strings.Fields(parts[1])
+				if len(subparts) > 0 {
+					if size, err := strconv.ParseUint(subparts[0], 10, 64); err == nil {
+						pageSize = size
+					}
+				}
+			}
+			continue
+		}
+
+		parts := strings.Split(line, ":")
+		if len(parts) < 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		valStr := strings.TrimSuffix(strings.TrimSpace(parts[1]), ".")
+
+		val, err := strconv.ParseUint(valStr, 10, 64)
+		if err != nil {
+			continue
+		}
+
+		switch key {
+		case "Pages active":
+			active = val
+		case "Pages speculative":
+			speculative = val
+		case "Pages wired down":
+			wired = val
+		case "Pages occupied by compressor":
+			compressed = val
+		}
+	}
+
+	used := (active + speculative + wired + compressed) * pageSize
+	return total, used, nil
+}
+
 func getHostStats() HostStats {
 	stats := HostStats{
 		CPU:      1.5,
@@ -1189,6 +1352,11 @@ func getHostStats() HostStats {
 					stats.RAMTotal = usedBytes + unusedBytes
 				}
 			}
+		}
+		// Overwrite with accurate macOS RAM metrics if available
+		if ramTotal, ramUsed, err := getMacRAM(); err == nil {
+			stats.RAMTotal = ramTotal
+			stats.RAMUsed = ramUsed
 		}
 		return stats
 	}
@@ -1260,7 +1428,7 @@ func startTelemetryPoller() {
 			if err == nil {
 				nodeURL = activeSrv.URL
 				isRemote = isRemoteURL(activeSrv.URL)
-				client := NewOllamaClient(activeSrv.URL)
+				client := NewOllamaClient(activeSrv)
 				models, err := client.ListActiveModels()
 				if err == nil {
 					activeModels = models
@@ -1357,7 +1525,7 @@ func runModelUpdatesCheck() {
 		return
 	}
 
-	client := NewOllamaClient(activeSrv.URL)
+	client := NewOllamaClient(activeSrv)
 	models, err := client.ListModels()
 	if err != nil {
 		log.Printf("Scheduler: failed to list models on active server: %v", err)
@@ -1471,7 +1639,7 @@ func CompressChatSession(chatID int64, modelName string) (string, error) {
 		return "", fmt.Errorf("no active server selected: %w", err)
 	}
 
-	client := NewOllamaClient(activeSrv.URL)
+	client := NewOllamaClient(activeSrv)
 
 	reqBody, err := json.Marshal(map[string]interface{}{
 		"model":  modelName,
@@ -1648,7 +1816,7 @@ func runBenchmarkSSEHandler(c *gin.Context) {
 	c.Header("Connection", "keep-alive")
 	c.Header("Transfer-Encoding", "chunked")
 
-	client := NewOllamaClient(activeSrv.URL)
+	client := NewOllamaClient(activeSrv)
 
 	prompts := []string{
 		"Explain the difference between TCP and UDP in one simple sentence.",
@@ -1846,7 +2014,7 @@ func runOptimizerSSEHandler(c *gin.Context) {
 	c.Header("Connection", "keep-alive")
 	c.Header("Transfer-Encoding", "chunked")
 
-	client := NewOllamaClient(activeSrv.URL)
+	client := NewOllamaClient(activeSrv)
 
 	type ConfigSet struct {
 		Name string
@@ -1933,6 +2101,194 @@ func deleteOptimizerRunHandler(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Optimizer run deleted successfully"})
 }
+
+// --- RAG HANDLERS ---
+
+func getRAGDocumentsHandler(c *gin.Context) {
+	docs, err := GetRAGDocuments()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, docs)
+}
+
+func uploadRAGDocumentHandler(c *gin.Context) {
+	var req struct {
+		Name           string `json:"name" binding:"required"`
+		EmbeddingModel string `json:"embedding_model" binding:"required"`
+		Chunks         []struct {
+			ChunkIndex int    `json:"chunk_index"`
+			Content    string `json:"content" binding:"required"`
+		} `json:"chunks" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if len(req.Chunks) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No document chunks provided"})
+		return
+	}
+
+	activeSrv, err := GetActiveServer()
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "No active Ollama server selected"})
+		return
+	}
+
+	client := NewOllamaClient(activeSrv)
+
+	// Extract text contents to embed
+	texts := make([]string, len(req.Chunks))
+	for i, ch := range req.Chunks {
+		texts[i] = ch.Content
+	}
+
+	// Fetch embeddings from Ollama in one batch
+	embeddings, err := client.GetEmbeddings(req.EmbeddingModel, texts)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("Failed to generate embeddings from Ollama: %v", err)})
+		return
+	}
+
+	if len(embeddings) != len(req.Chunks) {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Mismatch in generated embeddings count"})
+		return
+	}
+
+	// Prepare chunks for saving
+	var chunksToSave []RAGChunk
+	for i, ch := range req.Chunks {
+		chunksToSave = append(chunksToSave, RAGChunk{
+			ChunkIndex: ch.ChunkIndex,
+			Content:    ch.Content,
+			Embedding:  embeddings[i],
+		})
+	}
+
+	docID, err := SaveRAGDocument(req.Name, req.EmbeddingModel, chunksToSave)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":     "Document uploaded and indexed successfully",
+		"document_id": docID,
+		"chunks":      len(chunksToSave),
+	})
+}
+
+func deleteRAGDocumentHandler(c *gin.Context) {
+	idStr := c.Param("id")
+	var id int64
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid document ID"})
+		return
+	}
+
+	err := DeleteRAGDocument(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Document deleted successfully"})
+}
+
+func queryRAGSimilarityHandler(c *gin.Context) {
+	var req struct {
+		Query          string `json:"query" binding:"required"`
+		EmbeddingModel string `json:"embedding_model" binding:"required"`
+		TopK           int    `json:"top_k"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	activeSrv, err := GetActiveServer()
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "No active Ollama server selected"})
+		return
+	}
+
+	client := NewOllamaClient(activeSrv)
+
+	// Fetch query embedding
+	embeddings, err := client.GetEmbeddings(req.EmbeddingModel, []string{req.Query})
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("Failed to embed query: %v", err)})
+		return
+	}
+	if len(embeddings) == 0 {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "No query embedding returned"})
+		return
+	}
+	queryEmbed := embeddings[0]
+
+	// Fetch all chunks for target model
+	allChunks, err := GetRAGChunksForModel(req.EmbeddingModel)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	type searchResult struct {
+		DocumentName string  `json:"document_name"`
+		ChunkIndex   int     `json:"chunk_index"`
+		Content      string  `json:"content"`
+		Similarity   float64 `json:"similarity"`
+	}
+
+	var results []searchResult
+	for _, chunk := range allChunks {
+		sim := cosineSimilarity(queryEmbed, chunk.Embedding)
+		results = append(results, searchResult{
+			DocumentName: chunk.DocumentName,
+			ChunkIndex:   chunk.ChunkIndex,
+			Content:      chunk.Content,
+			Similarity:   sim,
+		})
+	}
+
+	// Sort by similarity descending
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Similarity > results[j].Similarity
+	})
+
+	topK := 3
+	if req.TopK > 0 {
+		topK = req.TopK
+	}
+	if len(results) < topK {
+		topK = len(results)
+	}
+
+	c.JSON(http.StatusOK, results[:topK])
+}
+
+// cosineSimilarity calculates cosine similarity between two vector slices.
+func cosineSimilarity(a, b []float64) float64 {
+	if len(a) != len(b) || len(a) == 0 {
+		return 0.0
+	}
+	var dotProduct, normA, normB float64
+	for i := 0; i < len(a); i++ {
+		dotProduct += a[i] * b[i]
+		normA += a[i] * a[i]
+		normB += b[i] * b[i]
+	}
+	if normA == 0.0 || normB == 0.0 {
+		return 0.0
+	}
+	return dotProduct / (math.Sqrt(normA) * math.Sqrt(normB))
+}
+
 
 
 

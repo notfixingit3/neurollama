@@ -11,6 +11,8 @@
   <link rel="stylesheet" href="/static/css/output.css?v=0.0.9">
   <!-- Marked Markdown Parser -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
+  <!-- PDF.js library for client-side PDF parsing -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
 </head>
 <body class="bg-[#2e3440] text-[#e5e9f0] h-screen overflow-hidden cyber-grid flex flex-col font-sans">
 
@@ -25,7 +27,7 @@
       </div>
       <div>
         <h1 class="text-xl font-bold font-tech tracking-wider text-[#88c0d0] glow-text-blue flex items-center gap-2">
-          NEUROLLAMA <span class="text-xs px-2 py-0.5 bg-[#4c566a] text-[#d8dee9] rounded font-mono">v0.0.8</span>
+          NEUROLLAMA <span class="text-xs px-2 py-0.5 bg-[#4c566a] text-[#d8dee9] rounded font-mono">v0.1.0</span>
         </h1>
         <p class="text-[10px] uppercase font-mono tracking-widest text-[#4c566a] mt-0.5">Control Interface // Epoch 2026</p>
       </div>
@@ -83,24 +85,27 @@
     <section id="main-workspace-section" class="lg:col-span-9 flex flex-col h-full overflow-hidden gap-4 transition-all duration-300">
       
       <!-- Top Workspace Tabs Bar -->
-      <div class="grid grid-cols-2 md:grid-cols-6 gap-2 bg-[#242933]/60 p-1.5 border border-[#4c566a]/40 rounded-xl font-tech font-bold text-[10px] md:text-xs">
-        <button id="ws-tab-inventory" onclick="switchWorkspace('inventory')" class="ws-tab tab-active flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
-          <i class="fa-solid fa-tags text-[10px]"></i> INVENTORY & TELEMETRY
+      <div class="flex overflow-x-auto whitespace-nowrap gap-2 bg-[#242933]/60 p-1.5 border border-[#4c566a]/40 rounded-xl font-tech font-bold text-[10px] md:text-xs scrollbar-none">
+        <button id="ws-tab-inventory" onclick="switchWorkspace('inventory')" class="ws-tab tab-active flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
+          <i class="fa-solid fa-tags text-[10px]"></i> INVENTORY
         </button>
-        <button id="ws-tab-playground" onclick="switchWorkspace('playground')" class="ws-tab flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
-          <i class="fa-solid fa-terminal text-[10px]"></i> PLAYGROUND (CHAT)
+        <button id="ws-tab-playground" onclick="switchWorkspace('playground')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
+          <i class="fa-solid fa-terminal text-[10px]"></i> PLAYGROUND
         </button>
-        <button id="ws-tab-completion" onclick="switchWorkspace('completion')" class="ws-tab flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
+        <button id="ws-tab-completion" onclick="switchWorkspace('completion')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
           <i class="fa-solid fa-align-left text-[10px]"></i> COMPLETION
         </button>
-        <button id="ws-tab-builder" onclick="switchWorkspace('builder')" class="ws-tab flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
-          <i class="fa-solid fa-wrench text-[10px]"></i> MODEL BUILDER
+        <button id="ws-tab-builder" onclick="switchWorkspace('builder')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
+          <i class="fa-solid fa-wrench text-[10px]"></i> BUILDER
         </button>
-        <button id="ws-tab-memory" onclick="switchWorkspace('memory')" class="ws-tab flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
-          <i class="fa-solid fa-memory text-[10px]"></i> MEMORY STATUS
+        <button id="ws-tab-memory" onclick="switchWorkspace('memory')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
+          <i class="fa-solid fa-memory text-[10px]"></i> MEMORY
         </button>
-        <button id="ws-tab-benchmark" onclick="switchWorkspace('benchmark')" class="ws-tab flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
+        <button id="ws-tab-benchmark" onclick="switchWorkspace('benchmark')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
           <i class="fa-solid fa-gauge-high text-[10px]"></i> BENCHMARKS
+        </button>
+        <button id="ws-tab-rag" onclick="switchWorkspace('rag')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
+          <i class="fa-solid fa-file-shield text-[10px]"></i> RAG
         </button>
       </div>
 
@@ -111,9 +116,9 @@
         <div id="ws-panel-inventory" class="ws-panel absolute inset-0 grid grid-cols-1 lg:grid-cols-12 gap-6 h-full overflow-hidden">
           
           <!-- Middle Panel: Model Registry & Pull Form (7 cols) -->
-          <div class="lg:col-span-7 flex flex-col h-full overflow-hidden gap-6">
+          <div class="lg:col-span-7 flex flex-col h-full overflow-y-auto pr-1 gap-6">
             <!-- Pull Model panel -->
-            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col">
+            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col flex-shrink-0">
               <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] mb-3">
                 <i class="fa-solid fa-cloud-arrow-down mr-2"></i>Interrogate & Pull Model
               </h2>
@@ -160,7 +165,7 @@
             </div>
 
             <!-- Models Registry List panel -->
-            <div class="tech-panel tech-header-accent rounded-xl flex-1 min-h-[180px] flex flex-col p-4 overflow-hidden">
+            <div class="tech-panel tech-header-accent rounded-xl flex-1 min-h-[220px] flex flex-col p-4 overflow-hidden">
               <div class="flex justify-between items-center mb-3 pb-2 border-b border-[#4c566a]/40">
                 <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
                   <i class="fa-solid fa-tags mr-2"></i>Model Inventory
@@ -197,7 +202,7 @@
             </div>
 
             <!-- Model Registry Explorer -->
-            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col h-[220px] overflow-hidden">
+            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col h-[260px] flex-shrink-0 overflow-hidden">
               <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] mb-3 flex justify-between items-center">
                 <span><i class="fa-solid fa-compass mr-2"></i>Model Registry Explorer</span>
                 <span class="text-[10px] text-[#4c566a] uppercase font-mono">Ollama Library + Hugging Face</span>
@@ -361,6 +366,30 @@
                 <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">System Override</span></label>
                 <textarea id="chat-system-prompt" rows="3" placeholder="Define custom behavior..."
                           class="textarea textarea-sm textarea-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full resize-none"></textarea>
+              </div>
+
+              <!-- Document RAG Integration -->
+              <div class="border border-[#4c566a]/30 bg-[#2e3440]/30 rounded-lg p-4 space-y-3">
+                <div class="flex items-center justify-between border-b border-[#4c566a]/30 pb-1.5 mb-2">
+                  <div class="font-tech text-[10px] uppercase text-[#88c0d0] font-bold flex items-center gap-1.5">
+                    <i class="fa-solid fa-file-shield text-xs"></i> Document RAG
+                  </div>
+                  <input type="checkbox" id="chat-rag-enabled" class="checkbox checkbox-xs checkbox-info" />
+                </div>
+                <div class="form-control" id="chat-rag-model-container">
+                  <label class="label pt-0"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Embedding Model</span></label>
+                  <select id="chat-rag-model-select" class="select select-xs select-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                    <option value="">-- Select Embedding Model --</option>
+                  </select>
+                </div>
+                <div class="form-control" id="chat-rag-top-k-container">
+                  <div class="flex justify-between items-center mb-1">
+                    <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Inject Chunks (Top K)</span>
+                    <span id="chat-rag-top-k-value" class="text-xs font-mono text-[#88c0d0]">3</span>
+                  </div>
+                  <input type="range" id="chat-rag-top-k" min="1" max="10" step="1" value="3" oninput="document.getElementById('chat-rag-top-k-value').textContent = this.value"
+                         class="range range-xs range-info bg-[#4c566a]" />
+                </div>
               </div>
 
               <!-- Advanced options section -->
@@ -769,7 +798,7 @@
               <!-- Base model select -->
               <div class="form-control">
                 <label class="label pt-0"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Base Model (FROM)</span></label>
-                <select id="builder-base-select" onchange="generateModelfilePreview()" class="select select-sm select-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                <select id="builder-base-select" onchange="onBaseModelChange()" class="select select-sm select-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
                   <option value="">-- No models available --</option>
                 </select>
               </div>
@@ -867,7 +896,7 @@
           <div class="lg:col-span-7 flex flex-col h-full overflow-hidden gap-4">
             
             <!-- Modelfile Preview -->
-            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col overflow-hidden h-[45%]">
+            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col overflow-hidden flex-4 min-h-[180px]">
               <h2 class="text-xs font-tech font-bold uppercase tracking-wider text-[#88c0d0] mb-2 flex justify-between items-center">
                 <span>Modelfile Generation Preview</span>
                 <span class="text-[9px] text-[#4c566a] uppercase">Auto-Generated</span>
@@ -881,7 +910,7 @@
             </div>
 
             <!-- Build Progress Console -->
-            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col overflow-hidden h-[55%] bg-[#1a1c23] scanline-effect border-[#4c566a]/70">
+            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col overflow-hidden flex-5 min-h-[220px] bg-[#1a1c23] scanline-effect border-[#4c566a]/70">
               <h2 class="text-xs font-tech font-bold uppercase tracking-wider text-[#88c0d0] mb-2 border-b border-[#4c566a]/40 pb-1 flex justify-between items-center">
                 <span>Compiler Status Output</span>
                 <span id="compiler-indicator" class="h-2 w-2 rounded-full bg-[#4c566a]"></span>
@@ -923,7 +952,7 @@
                 <div class="grid grid-cols-2 gap-4 text-xs font-mono">
                   <div>
                     <div class="flex justify-between text-[11px] mb-1">
-                      <span class="text-[#4c566a]">HOST CPU:</span>
+                      <span id="host-cpu-label" class="text-[#4c566a]">HOST CPU:</span>
                       <span id="host-cpu-text" class="text-[#a3be8c]">0.0%</span>
                     </div>
                     <div class="w-full bg-[#3b4252] rounded-full h-1.5 overflow-hidden">
@@ -932,7 +961,7 @@
                   </div>
                   <div>
                     <div class="flex justify-between text-[11px] mb-1">
-                      <span class="text-[#4c566a]">HOST RAM:</span>
+                      <span id="host-ram-label" class="text-[#4c566a]">HOST RAM:</span>
                       <span id="host-ram-text" class="text-[#a3be8c]">0.0 GB / 0.0 GB</span>
                     </div>
                     <div class="w-full bg-[#3b4252] rounded-full h-1.5 overflow-hidden">
@@ -1173,6 +1202,114 @@
           </div>
         </div>
 
+        <!-- PANEL 7: DOCUMENT RAG -->
+        <div id="ws-panel-rag" class="ws-panel hidden absolute inset-0 grid grid-cols-1 lg:grid-cols-12 gap-6 h-full overflow-hidden">
+          
+          <!-- Left column: Upload & Config & Similarity Query Tester (5 cols) -->
+          <div class="lg:col-span-5 flex flex-col h-full overflow-hidden gap-4">
+            
+            <!-- Upload & Config Panel -->
+            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col shrink-0 gap-3">
+              <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] border-b border-[#4c566a]/40 pb-2">
+                <i class="fa-solid fa-file-arrow-up mr-2"></i>Index New Documents
+              </h2>
+              
+              <!-- Embedding model selection -->
+              <div class="form-control w-full">
+                <label class="label py-1">
+                  <span class="label-text text-[10px] font-mono text-[#88c0d0] uppercase font-bold">Embedding Model</span>
+                </label>
+                <select id="rag-model-select" class="select select-sm select-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none text-[#d8dee9] w-full">
+                  <!-- Populated dynamically -->
+                </select>
+              </div>
+
+              <!-- Drag and drop zone -->
+              <div class="form-control w-full">
+                <label class="label py-1">
+                  <span class="label-text text-[10px] font-mono text-[#88c0d0] uppercase font-bold">Upload TXT, MD, or PDF</span>
+                </label>
+                <div id="rag-drag-zone" class="border-2 border-dashed border-[#4c566a] hover:border-[#88c0d0] rounded-xl p-6 text-center cursor-pointer transition-all bg-[#2e3440]/30 hover:bg-[#2e3440]/60 flex flex-col items-center justify-center gap-2 group">
+                  <i class="fa-solid fa-cloud-arrow-up text-3xl text-[#4c566a] group-hover:text-[#88c0d0] transition-colors"></i>
+                  <span class="text-xs text-[#d8dee9]">Drag files here or click to browse</span>
+                  <span class="text-[9px] text-[#4c566a] uppercase">Max size: 10MB // Client-side parsed</span>
+                  <input type="file" id="rag-file-input" accept=".txt,.md,.pdf" class="hidden" />
+                </div>
+              </div>
+
+              <!-- Upload progress & logs -->
+              <div id="rag-upload-progress" class="hidden text-xs bg-[#161820] border border-[#4c566a]/40 rounded-lg p-2.5 font-mono space-y-1">
+                <div class="flex items-center justify-between text-[10px] text-[#88c0d0] font-bold">
+                  <span id="rag-progress-status">Uploading document...</span>
+                  <span id="rag-progress-percent">0%</span>
+                </div>
+                <div class="w-full bg-[#2e3440] rounded-full h-1.5 overflow-hidden">
+                  <div id="rag-progress-bar" class="bg-[#88c0d0] h-full transition-all duration-300 w-0"></div>
+                </div>
+                <div id="rag-upload-logs" class="text-[9px] text-[#4c566a] max-h-24 overflow-y-auto scrollbar-thin space-y-0.5 mt-1 pt-1 border-t border-[#4c566a]/20"></div>
+              </div>
+            </div>
+
+            <!-- Similarity Query Tester -->
+            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col flex-1 overflow-hidden">
+              <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] border-b border-[#4c566a]/40 pb-2 mb-3">
+                <i class="fa-solid fa-magnifying-glass-chart mr-2"></i>Test Similarity Query
+              </h2>
+              
+              <div class="flex gap-2 mb-3 shrink-0">
+                <input type="text" id="rag-test-query" placeholder="Type a prompt to test chunk matching..." class="input input-sm input-bordered flex-1 bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none text-[#d8dee9]" />
+                <button onclick="runRAGSimilarityQuery()" class="btn btn-sm btn-info font-tech uppercase tracking-wide px-4">Search</button>
+              </div>
+
+              <!-- Query results -->
+              <div class="flex-1 overflow-y-auto pr-1">
+                <div id="rag-query-results" class="space-y-3">
+                  <div class="text-[#4c566a] italic text-xs text-center py-8">Run a query to inspect cosine similarity scores and retrieved chunks.</div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Right column: Document Index & List (7 cols) -->
+          <div class="lg:col-span-7 flex flex-col h-full overflow-hidden">
+            <div class="tech-panel tech-header-accent rounded-xl flex-1 flex flex-col p-4 overflow-hidden">
+              <div class="flex justify-between items-center mb-4 pb-2 border-b border-[#4c566a]/40">
+                <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
+                  <i class="fa-solid fa-folder-open mr-2"></i>Indexed Documents
+                </h2>
+                <button onclick="loadRAGDocuments()" class="btn btn-xs btn-outline btn-info font-tech gap-1">
+                  <i class="fa-solid fa-rotate-right text-[10px]"></i> REFRESH_INDEX
+                </button>
+              </div>
+
+              <!-- Document table container -->
+              <div class="flex-1 overflow-y-auto">
+                <table class="table table-compact w-full font-mono text-[11px] text-[#d8dee9]">
+                  <thead>
+                    <tr class="text-[#88c0d0] border-b border-[#4c566a]/30 uppercase text-[9px] font-tech font-bold">
+                      <th class="bg-transparent pl-0">Document Name</th>
+                      <th class="bg-transparent">Embedding Model</th>
+                      <th class="bg-transparent text-center">Chunks</th>
+                      <th class="bg-transparent">Indexed At</th>
+                      <th class="bg-transparent text-center pr-0">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="rag-documents-list">
+                    <!-- Dynamic document rows injected here -->
+                  </tbody>
+                </table>
+                <div id="rag-empty-message" class="hidden text-center py-16 text-[#4c566a] text-xs">
+                  <i class="fa-solid fa-file-circle-exclamation text-2xl mb-2"></i>
+                  <p>No documents indexed yet.</p>
+                  <p class="text-[10px] mt-1 text-[#4c566a]/70">Upload document files to get started with RAG context injection.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
       </div>
     </section>
   </main>
@@ -1187,7 +1324,7 @@
       </span>
     </div>
     <div class="flex items-center gap-4">
-      <a href="https://github.com/notfixingit/ollama-manager" target="_blank" rel="noopener noreferrer" class="hover:text-[#88c0d0] transition-colors flex items-center gap-1.5">
+      <a href="https://github.com/notfixingit3/ollama-manager" target="_blank" rel="noopener noreferrer" class="hover:text-[#88c0d0] transition-colors flex items-center gap-1.5">
         <i class="fa-brands fa-github text-xs"></i> GitHub
       </a>
       <span class="text-[#4c566a]">//</span>
@@ -1201,7 +1338,7 @@
 
   <!-- Add Server Modal -->
   <dialog id="add-server-modal" class="modal">
-    <div class="modal-box bg-[#2e3440] border border-[#4c566a] shadow-2xl p-6 max-w-sm rounded-xl">
+    <div class="modal-box bg-[#2e3440] border border-[#4c566a] shadow-2xl p-6 max-w-md rounded-xl">
       <h3 class="font-tech font-bold text-sm text-[#88c0d0] uppercase tracking-wider mb-4 border-b border-[#4c566a]/40 pb-2">
         <i class="fa-solid fa-server mr-2"></i>Add Ollama Node
       </h3>
@@ -1209,13 +1346,61 @@
         <div class="form-control">
           <label class="label pt-0"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Node Name</span></label>
           <input type="text" id="add-server-name" placeholder="e.g. Local Machine, Remote Cloud" required 
-                 class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none" />
+                 class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
         </div>
         <div class="form-control">
           <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Base URL</span></label>
           <input type="url" id="add-server-url" placeholder="http://localhost:11434" required 
-                 class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none" />
+                 class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
         </div>
+
+        <!-- Authentication Configuration -->
+        <div class="border-t border-[#4c566a]/30 pt-3">
+          <label class="label pt-0"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Authentication Type</span></label>
+          <select id="add-server-auth-type" onchange="toggleAuthFields('add')"
+                  class="select select-sm select-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+            <option value="none">None</option>
+            <option value="bearer">Bearer Token</option>
+            <option value="basic">Basic Auth</option>
+            <option value="custom">Custom Header</option>
+          </select>
+        </div>
+
+        <!-- Auth fields (conditionally visible) -->
+        <div id="add-auth-fields-bearer" class="hidden space-y-2">
+          <div class="form-control">
+            <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Token</span></label>
+            <input type="password" id="add-server-auth-token" placeholder="Bearer token value"
+                   class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+          </div>
+        </div>
+
+        <div id="add-auth-fields-basic" class="hidden grid grid-cols-2 gap-2">
+          <div class="form-control">
+            <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Username</span></label>
+            <input type="text" id="add-server-auth-username" placeholder="Username"
+                   class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Password</span></label>
+            <input type="password" id="add-server-auth-password" placeholder="Password"
+                   class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+          </div>
+        </div>
+
+        <div id="add-auth-fields-custom" class="hidden grid grid-cols-2 gap-2">
+          <div class="form-control">
+            <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Header Name</span></label>
+            <input type="text" id="add-server-auth-header-name" placeholder="X-API-Key"
+                   class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Header Value</span></label>
+            <input type="text" id="add-server-auth-header-val" placeholder="token-secret"
+                   class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+          </div>
+        </div>
+
         <div class="modal-action mt-6 gap-2">
           <button type="button" onclick="closeAddServerModal()" class="btn btn-sm btn-ghost font-tech text-xs">CANCEL</button>
           <button type="submit" class="btn btn-sm btn-info font-tech text-xs">SAVE_NODE</button>
@@ -1226,7 +1411,7 @@
 
   <!-- Edit Server Modal -->
   <dialog id="edit-server-modal" class="modal">
-    <div class="modal-box bg-[#2e3440] border border-[#4c566a] shadow-2xl p-6 max-w-sm rounded-xl">
+    <div class="modal-box bg-[#2e3440] border border-[#4c566a] shadow-2xl p-6 max-w-md rounded-xl">
       <h3 class="font-tech font-bold text-sm text-[#88c0d0] uppercase tracking-wider mb-4 border-b border-[#4c566a]/40 pb-2">
         <i class="fa-solid fa-pen mr-2"></i>Edit Ollama Node
       </h3>
@@ -1235,13 +1420,61 @@
         <div class="form-control">
           <label class="label pt-0"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Node Name</span></label>
           <input type="text" id="edit-server-name" placeholder="e.g. Local Machine, Remote Cloud" required 
-                 class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none" />
+                 class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
         </div>
         <div class="form-control">
           <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Base URL</span></label>
           <input type="url" id="edit-server-url" placeholder="http://localhost:11434" required 
-                 class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none" />
+                 class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
         </div>
+
+        <!-- Authentication Configuration -->
+        <div class="border-t border-[#4c566a]/30 pt-3">
+          <label class="label pt-0"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Authentication Type</span></label>
+          <select id="edit-server-auth-type" onchange="toggleAuthFields('edit')"
+                  class="select select-sm select-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+            <option value="none">None</option>
+            <option value="bearer">Bearer Token</option>
+            <option value="basic">Basic Auth</option>
+            <option value="custom">Custom Header</option>
+          </select>
+        </div>
+
+        <!-- Auth fields (conditionally visible) -->
+        <div id="edit-auth-fields-bearer" class="hidden space-y-2">
+          <div class="form-control">
+            <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Token</span></label>
+            <input type="password" id="edit-server-auth-token" placeholder="Bearer token value"
+                   class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+          </div>
+        </div>
+
+        <div id="edit-auth-fields-basic" class="hidden grid grid-cols-2 gap-2">
+          <div class="form-control">
+            <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Username</span></label>
+            <input type="text" id="edit-server-auth-username" placeholder="Username"
+                   class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Password</span></label>
+            <input type="password" id="edit-server-auth-password" placeholder="Password"
+                   class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+          </div>
+        </div>
+
+        <div id="edit-auth-fields-custom" class="hidden grid grid-cols-2 gap-2">
+          <div class="form-control">
+            <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Header Name</span></label>
+            <input type="text" id="edit-server-auth-header-name" placeholder="X-API-Key"
+                   class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Header Value</span></label>
+            <input type="text" id="edit-server-auth-header-val" placeholder="token-secret"
+                   class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+          </div>
+        </div>
+
         <div class="modal-action mt-6 gap-2">
           <button type="button" onclick="closeEditServerModal()" class="btn btn-sm btn-ghost font-tech text-xs">CANCEL</button>
           <button type="submit" class="btn btn-sm btn-info font-tech text-xs">UPDATE_NODE</button>

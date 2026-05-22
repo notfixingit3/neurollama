@@ -60,7 +60,10 @@ async function init() {
     'chat-frequency-penalty',
     'chat-num-predict',
     'chat-num-gpu',
-    'chat-num-thread'
+    'chat-num-thread',
+    'chat-rag-enabled',
+    'chat-rag-model-select',
+    'chat-rag-top-k'
   ];
   playgroundConfigIds.forEach(id => {
     const el = document.getElementById(id);
@@ -71,8 +74,119 @@ async function init() {
         }
         updateContextVisualizer();
       });
+      if (el.type === 'range' || el.type === 'checkbox') {
+        el.addEventListener('input', () => {
+          if (activeChatId) {
+            updateActiveChatConfig();
+          }
+          updateContextVisualizer();
+        });
+      }
     }
   });
+
+  // Initialize RAG chat sidebar controls
+  const chatRagEnabledEl = document.getElementById('chat-rag-enabled');
+  const chatRagModelContainer = document.getElementById('chat-rag-model-container');
+  const chatRagTopKContainer = document.getElementById('chat-rag-top-k-container');
+  
+  function updateChatRAGControlsState() {
+    if (!chatRagEnabledEl) return;
+    const enabled = chatRagEnabledEl.checked;
+    
+    localStorage.setItem('chat-rag-enabled', enabled);
+    
+    if (chatRagModelContainer) {
+      if (enabled) {
+        chatRagModelContainer.classList.remove('opacity-50', 'pointer-events-none');
+        const select = chatRagModelContainer.querySelector('select');
+        if (select) select.disabled = false;
+      } else {
+        chatRagModelContainer.classList.add('opacity-50', 'pointer-events-none');
+        const select = chatRagModelContainer.querySelector('select');
+        if (select) select.disabled = true;
+      }
+    }
+    if (chatRagTopKContainer) {
+      if (enabled) {
+        chatRagTopKContainer.classList.remove('opacity-50', 'pointer-events-none');
+        const range = chatRagTopKContainer.querySelector('input');
+        if (range) range.disabled = false;
+      } else {
+        chatRagTopKContainer.classList.add('opacity-50', 'pointer-events-none');
+        const range = chatRagTopKContainer.querySelector('input');
+        if (range) range.disabled = true;
+      }
+    }
+  }
+
+  if (chatRagEnabledEl) {
+    chatRagEnabledEl.addEventListener('change', updateChatRAGControlsState);
+    
+    const savedRagEnabled = localStorage.getItem('chat-rag-enabled') === 'true';
+    chatRagEnabledEl.checked = savedRagEnabled;
+    
+    const savedRagModel = localStorage.getItem('chat-rag-model-select');
+    const chatRagSelect = document.getElementById('chat-rag-model-select');
+    if (savedRagModel && chatRagSelect) {
+      chatRagSelect.value = savedRagModel;
+    }
+    
+    const savedRagTopK = localStorage.getItem('chat-rag-top-k');
+    const chatRagTopKVal = document.getElementById('chat-rag-top-k');
+    if (savedRagTopK && chatRagTopKVal) {
+      chatRagTopKVal.value = savedRagTopK;
+      const valDisp = document.getElementById('chat-rag-top-k-value');
+      if (valDisp) valDisp.textContent = savedRagTopK;
+    }
+
+    updateChatRAGControlsState();
+  }
+
+  const chatRagSelectEl = document.getElementById('chat-rag-model-select');
+  if (chatRagSelectEl) {
+    chatRagSelectEl.addEventListener('change', () => {
+      localStorage.setItem('chat-rag-model-select', chatRagSelectEl.value);
+    });
+  }
+
+  const chatRagTopKRange = document.getElementById('chat-rag-top-k');
+  if (chatRagTopKRange) {
+    chatRagTopKRange.addEventListener('change', () => {
+      localStorage.setItem('chat-rag-top-k', chatRagTopKRange.value);
+    });
+  }
+
+  // Initialize RAG drag-and-drop & file input listeners
+  const dragZone = document.getElementById('rag-drag-zone');
+  const fileInput = document.getElementById('rag-file-input');
+
+  if (dragZone && fileInput) {
+    dragZone.addEventListener('click', () => fileInput.click());
+
+    dragZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dragZone.classList.add('border-[#88c0d0]', 'bg-[#2e3440]/60');
+    });
+
+    dragZone.addEventListener('dragleave', () => {
+      dragZone.classList.remove('border-[#88c0d0]', 'bg-[#2e3440]/60');
+    });
+
+    dragZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dragZone.classList.remove('border-[#88c0d0]', 'bg-[#2e3440]/60');
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        handleRAGUpload(e.dataTransfer.files[0]);
+      }
+    });
+
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files.length > 0) {
+        handleRAGUpload(e.target.files[0]);
+      }
+    });
+  }
 
   // Initialize collapsible sidebars state
   initSidebarState();
@@ -146,7 +260,7 @@ function switchWorkspace(workspace) {
   }
 
   // Toggle buttons
-  const tabs = ['inventory', 'playground', 'completion', 'builder', 'memory', 'benchmark'];
+  const tabs = ['inventory', 'playground', 'completion', 'builder', 'memory', 'benchmark', 'rag'];
   tabs.forEach(t => {
     const btn = document.getElementById(`ws-tab-${t}`);
     const panel = document.getElementById(`ws-panel-${t}`);
@@ -182,6 +296,9 @@ function switchWorkspace(workspace) {
   } else if (workspace === 'builder') {
     populateModelDropdowns();
     generateModelfilePreview();
+  } else if (workspace === 'rag') {
+    populateModelDropdowns();
+    loadRAGDocuments();
   }
 }
 
@@ -191,6 +308,8 @@ function populateModelDropdowns() {
   const completionSelect = document.getElementById('completion-model-select');
   const benchmarkSelect = document.getElementById('benchmark-model-select');
   const optimizerSelect = document.getElementById('optimizer-model-select');
+  const ragSelect = document.getElementById('rag-model-select');
+  const chatRagSelect = document.getElementById('chat-rag-model-select');
 
   // Filter out models that might not have values
   const options = models.map(m => {
@@ -205,11 +324,33 @@ function populateModelDropdowns() {
     if (completionSelect) completionSelect.innerHTML = noModels;
     if (benchmarkSelect) benchmarkSelect.innerHTML = noModels;
     if (optimizerSelect) optimizerSelect.innerHTML = noModels;
+    if (ragSelect) ragSelect.innerHTML = noModels;
+    if (chatRagSelect) chatRagSelect.innerHTML = noModels;
   } else {
     if (chatSelect) chatSelect.innerHTML = options;
-    if (builderSelect) builderSelect.innerHTML = options;
+    if (builderSelect) {
+      const currentSelected = builderSelect.value;
+      builderSelect.innerHTML = '<option value="">-- Select a base model --</option>' + options;
+      if (currentSelected && builderSelect.querySelector(`option[value="${currentSelected}"]`)) {
+        builderSelect.value = currentSelected;
+      }
+    }
     if (benchmarkSelect) benchmarkSelect.innerHTML = options;
     if (optimizerSelect) optimizerSelect.innerHTML = options;
+    if (ragSelect) {
+      const currentSelected = ragSelect.value;
+      ragSelect.innerHTML = options;
+      if (currentSelected && ragSelect.querySelector(`option[value="${currentSelected}"]`)) {
+        ragSelect.value = currentSelected;
+      }
+    }
+    if (chatRagSelect) {
+      const currentSelected = chatRagSelect.value;
+      chatRagSelect.innerHTML = options;
+      if (currentSelected && chatRagSelect.querySelector(`option[value="${currentSelected}"]`)) {
+        chatRagSelect.value = currentSelected;
+      }
+    }
     if (completionSelect) {
       const currentSelected = completionSelect.value;
       completionSelect.innerHTML = options;
@@ -301,18 +442,25 @@ function renderServers() {
       ? 'border-[#88c0d0] bg-[#3b4252]/40 shadow-sm shadow-[#88c0d0]/10' 
       : 'border-[#4c566a]/30 hover:border-[#4c566a]/70';
 
+    const hasAuth = srv.authType && srv.authType !== 'none';
+    const authLock = hasAuth 
+      ? '<i class="fa-solid fa-lock text-[10px] text-[#a3be8c] ml-1.5" title="Auth Configured"></i>' 
+      : '';
+
     return `
       <div class="p-3 border rounded-lg flex flex-col justify-between gap-2 transition-all ${activeBorder} group">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2 cursor-pointer flex-1" onclick="selectServer('${srv.id}')">
             ${statusDot}
             <div>
-              <h3 class="font-bold text-xs truncate max-w-[130px] text-[#e5e9f0] group-hover:text-[#88c0d0] transition-colors">${srv.name}</h3>
+              <h3 class="font-bold text-xs truncate max-w-[130px] text-[#e5e9f0] group-hover:text-[#88c0d0] transition-colors flex items-center">
+                ${srv.name}${authLock}
+              </h3>
               <p class="text-[9px] font-mono text-[#4c566a] truncate max-w-[130px]">${srv.url}</p>
             </div>
           </div>
           <div class="flex items-center gap-1 opacity-40 group-hover:opacity-100 transition-opacity">
-            <button onclick="openEditServerModal('${srv.id}', '${srv.name}', '${srv.url}')" class="btn btn-ghost btn-xs p-1 text-[#88c0d0]" title="Edit Node">
+            <button onclick="openEditServerModal('${srv.id}')" class="btn btn-ghost btn-xs p-1 text-[#88c0d0]" title="Edit Node">
               <i class="fa-solid fa-pen"></i>
             </button>
             <button onclick="deleteServer('${srv.id}')" class="btn btn-ghost btn-xs p-1 text-[#bf616a]" title="Delete Node">
@@ -395,12 +543,27 @@ async function handleAddServer(event) {
   event.preventDefault();
   const name = document.getElementById('add-server-name').value;
   const url = document.getElementById('add-server-url').value;
+  const authType = document.getElementById('add-server-auth-type').value;
+  const authToken = document.getElementById('add-server-auth-token').value;
+  const authUsername = document.getElementById('add-server-auth-username').value;
+  const authPassword = document.getElementById('add-server-auth-password').value;
+  const authHeaderName = document.getElementById('add-server-auth-header-name').value;
+  const authHeaderVal = document.getElementById('add-server-auth-header-val').value;
 
   try {
     const response = await fetch('/api/servers', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, url })
+      body: JSON.stringify({
+        name,
+        url,
+        authType,
+        authToken,
+        authUsername,
+        authPassword,
+        authHeaderName,
+        authHeaderVal
+      })
     });
 
     if (!response.ok) {
@@ -411,6 +574,7 @@ async function handleAddServer(event) {
     showToast(`Node '${name}' registered successfully`, 'success');
     closeAddServerModal();
     document.getElementById('add-server-form').reset();
+    toggleAuthFields('add');
     
     await fetchServers();
     // If we only have 1 server now, it became active automatically. Fetch models.
@@ -428,12 +592,27 @@ async function handleEditServer(event) {
   const id = document.getElementById('edit-server-id').value;
   const name = document.getElementById('edit-server-name').value;
   const url = document.getElementById('edit-server-url').value;
+  const authType = document.getElementById('edit-server-auth-type').value;
+  const authToken = document.getElementById('edit-server-auth-token').value;
+  const authUsername = document.getElementById('edit-server-auth-username').value;
+  const authPassword = document.getElementById('edit-server-auth-password').value;
+  const authHeaderName = document.getElementById('edit-server-auth-header-name').value;
+  const authHeaderVal = document.getElementById('edit-server-auth-header-val').value;
 
   try {
     const response = await fetch(`/api/servers/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, url })
+      body: JSON.stringify({
+        name,
+        url,
+        authType,
+        authToken,
+        authUsername,
+        authPassword,
+        authHeaderName,
+        authHeaderVal
+      })
     });
 
     if (!response.ok) {
@@ -493,16 +672,56 @@ async function deleteServer(id) {
 }
 
 // Modals control
+function toggleAuthFields(prefix) {
+  const selectEl = document.getElementById(`${prefix}-server-auth-type`);
+  if (!selectEl) return;
+  const type = selectEl.value;
+  
+  const bearerDiv = document.getElementById(`${prefix}-auth-fields-bearer`);
+  const basicDiv = document.getElementById(`${prefix}-auth-fields-basic`);
+  const customDiv = document.getElementById(`${prefix}-auth-fields-custom`);
+  
+  if (bearerDiv) bearerDiv.classList.toggle('hidden', type !== 'bearer');
+  if (basicDiv) basicDiv.classList.toggle('hidden', type !== 'basic');
+  if (customDiv) customDiv.classList.toggle('hidden', type !== 'custom');
+}
+
 function openAddServerModal() {
+  const form = document.getElementById('add-server-form');
+  if (form) form.reset();
+  toggleAuthFields('add');
   document.getElementById('add-server-modal').showModal();
 }
 function closeAddServerModal() {
   document.getElementById('add-server-modal').close();
 }
-function openEditServerModal(id, name, url) {
-  document.getElementById('edit-server-id').value = id;
-  document.getElementById('edit-server-name').value = name;
-  document.getElementById('edit-server-url').value = url;
+function openEditServerModal(id) {
+  const srv = servers.find(s => s.id === id);
+  if (!srv) return;
+
+  document.getElementById('edit-server-id').value = srv.id;
+  document.getElementById('edit-server-name').value = srv.name;
+  document.getElementById('edit-server-url').value = srv.url;
+  
+  const typeEl = document.getElementById('edit-server-auth-type');
+  if (typeEl) typeEl.value = srv.authType || 'none';
+  
+  const tokenEl = document.getElementById('edit-server-auth-token');
+  if (tokenEl) tokenEl.value = srv.authToken || '';
+  
+  const usernameEl = document.getElementById('edit-server-auth-username');
+  if (usernameEl) usernameEl.value = srv.authUsername || '';
+  
+  const passwordEl = document.getElementById('edit-server-auth-password');
+  if (passwordEl) passwordEl.value = srv.authPassword || '';
+  
+  const headerNameEl = document.getElementById('edit-server-auth-header-name');
+  if (headerNameEl) headerNameEl.value = srv.authHeaderName || '';
+  
+  const headerValEl = document.getElementById('edit-server-auth-header-val');
+  if (headerValEl) headerValEl.value = srv.authHeaderVal || '';
+  
+  toggleAuthFields('edit');
   document.getElementById('edit-server-modal').showModal();
 }
 function closeEditServerModal() {
@@ -1179,6 +1398,40 @@ function renderChatHistory() {
     } else {
       const formattedContent = formatMessageContent(msg.content, showThinking);
       const modelName = document.getElementById('chat-model-select').value || 'ASSISTANT';
+      
+      let ragHTML = '';
+      if (msg.ragSources && msg.ragSources.length > 0) {
+        ragHTML = `
+          <div class="mb-2.5 border border-[#4c566a]/40 rounded-lg overflow-hidden bg-[#2e3440]/40 text-xs text-[#d8dee9]">
+            <details class="group">
+              <summary class="flex items-center justify-between p-2 cursor-pointer bg-[#2e3440]/60 hover:bg-[#3b4252] transition-colors select-none font-tech text-[10px] uppercase text-[#88c0d0]">
+                <span class="flex items-center gap-1.5 font-bold">
+                  <i class="fa-solid fa-file-shield text-[10px]"></i>
+                  Retrieved ${msg.ragSources.length} Context Chunks
+                </span>
+                <i class="fa-solid fa-chevron-down text-[8px] transition-transform group-open:rotate-180"></i>
+              </summary>
+              <div class="p-2.5 space-y-2 border-t border-[#4c566a]/20 max-h-60 overflow-y-auto scrollbar-thin">
+        `;
+        msg.ragSources.forEach((src) => {
+          const scorePercent = (src.score * 100).toFixed(0);
+          ragHTML += `
+            <div class="bg-[#161820]/40 border border-[#4c566a]/15 rounded p-2 text-[11px] leading-relaxed">
+              <div class="flex items-center justify-between mb-1 text-[9px] text-[#4c566a] font-mono">
+                <span class="truncate max-w-[70%]"><i class="fa-regular fa-file text-[#88c0d0]/70"></i> ${escapeHTML(src.document_name)} (Chunk #${src.chunk_index})</span>
+                <span class="bg-[#a3be8c]/15 text-[#a3be8c] border border-[#a3be8c]/35 rounded px-1 font-bold">${scorePercent}% Match</span>
+              </div>
+              <div class="text-[#d8dee9]/90 italic font-sans whitespace-pre-wrap select-text">"${escapeHTML(src.content)}"</div>
+            </div>
+          `;
+        });
+        ragHTML += `
+              </div>
+            </details>
+          </div>
+        `;
+      }
+
       html += `
         <div class="chat chat-start animate-fade-in">
           <div class="chat-image avatar">
@@ -1187,7 +1440,7 @@ function renderChatHistory() {
             </div>
           </div>
           <div class="chat-header text-[10px] text-[#4c566a] mb-1">${modelName.toUpperCase()}</div>
-          <div class="chat-bubble bg-[#242933] border border-[#4c566a]/50 text-[#e5e9f0] leading-relaxed max-w-[85%] whitespace-pre-wrap">${formattedContent}</div>
+          <div class="chat-bubble bg-[#242933] border border-[#4c566a]/50 text-[#e5e9f0] leading-relaxed max-w-[85%] whitespace-pre-wrap">${ragHTML}${formattedContent}</div>
         </div>
       `;
     }
@@ -1392,9 +1645,40 @@ async function sendChatMessage() {
   const numPredictInputVal = document.getElementById('chat-num-predict').value;
   const numPredict = (numPredictInputVal === '' || isNaN(parseInt(numPredictInputVal))) ? -1 : parseInt(numPredictInputVal);
   const numGpuInputVal = document.getElementById('chat-num-gpu').value;
-  const numGpu = (numGpuInputVal === '' || isNaN(parseInt(numGpuInputVal))) ? -1 : parseInt(numGpuInputVal);
-  const numThreadInputVal = document.getElementById('chat-num-thread').value;
-  const numThread = (numThreadInputVal === '' || isNaN(parseInt(numThreadInputVal))) ? -1 : parseInt(numThreadInputVal);
+  const ragEnabled = document.getElementById('chat-rag-enabled')?.checked || false;
+  const ragModel = document.getElementById('chat-rag-model-select')?.value || '';
+  const ragTopK = parseInt(document.getElementById('chat-rag-top-k')?.value || '3');
+  
+  if (ragEnabled && !ragModel) {
+    showToast('Please select a RAG Embedding Model in the sidebar settings.', 'warning');
+    // Re-enable controls
+    if (sendBtn) sendBtn.disabled = false;
+    if (tempInput) tempInput.disabled = false;
+    if (ctxInput) ctxInput.disabled = false;
+    if (modelSelect) modelSelect.disabled = false;
+    if (resetBtn) resetBtn.disabled = false;
+    if (thinkingToggle) thinkingToggle.disabled = false;
+    if (topKInput) topKInput.disabled = false;
+    if (topPInput) topPInput.disabled = false;
+    if (repeatPenaltyInput) repeatPenaltyInput.disabled = false;
+    if (seedInputVal) seedInputVal.disabled = false;
+    if (presetSelect) presetSelect.disabled = false;
+    if (systemPromptTextarea) systemPromptTextarea.disabled = false;
+    if (newChatBtn) newChatBtn.disabled = false;
+    if (deletePresetBtn) deletePresetBtn.disabled = false;
+    if (chatInputText) chatInputText.disabled = false;
+    if (minPInput) minPInput.disabled = false;
+    if (presencePenaltyInput) presencePenaltyInput.disabled = false;
+    if (frequencyPenaltyInput) frequencyPenaltyInput.disabled = false;
+    if (numPredictInput) numPredictInput.disabled = false;
+    if (numGpuInput) numGpuInput.disabled = false;
+    if (numThreadInput) numThreadInput.disabled = false;
+    
+    telemetry.textContent = 'CANCELLED';
+    telemetry.className = 'text-[#ebcb8b]';
+    isGeneratingChat = false;
+    return;
+  }
 
   // Create messages payload
   const messagesToSend = [...chatMessages.slice(0, -1)];
@@ -1416,7 +1700,10 @@ async function sendChatMessage() {
     frequency_penalty: frequencyPenalty,
     num_predict: numPredict,
     num_gpu: numGpu,
-    num_thread: numThread
+    num_thread: numThread,
+    rag_enabled: ragEnabled,
+    rag_embedding_model: ragModel,
+    rag_top_k: ragTopK
   };
   if (seedVal) {
     payload.seed = parseInt(seedVal);
@@ -1474,6 +1761,17 @@ async function sendChatMessage() {
               setTimeout(() => {
                 switchChatSession(activeChatId);
               }, 100);
+            }
+            continue;
+          }
+
+          if (currentEvent === 'rag_sources') {
+            try {
+              const sources = JSON.parse(dataStr);
+              chatMessages[assistantMsgIndex].ragSources = sources;
+              renderChatHistory();
+            } catch (e) {
+              console.error('Error parsing rag_sources:', e);
             }
             continue;
           }
@@ -1661,6 +1959,102 @@ function toggleMergeInputs() {
       inputsDiv.classList.add('hidden');
     }
   }
+}
+
+async function onBaseModelChange() {
+  const baseSelect = document.getElementById('builder-base-select');
+  if (!baseSelect) return;
+  const baseModel = baseSelect.value;
+  if (!baseModel) {
+    // Reset/clear preview
+    document.getElementById('builder-system-input').value = "";
+    document.getElementById('builder-template-input').value = "";
+    document.getElementById('builder-temp').value = "0.7";
+    document.getElementById('builder-temp-value').textContent = "0.7";
+    document.getElementById('builder-ctx-select').value = "2048";
+    document.getElementById('builder-stop-input').value = "";
+    generateModelfilePreview();
+    return;
+  }
+
+  // Clear inputs first or set defaults before fetching
+  document.getElementById('builder-system-input').value = "";
+  document.getElementById('builder-template-input').value = "";
+  document.getElementById('builder-temp').value = "0.7";
+  document.getElementById('builder-temp-value').textContent = "0.7";
+  document.getElementById('builder-ctx-select').value = "2048";
+  document.getElementById('builder-stop-input').value = "";
+
+  try {
+    const response = await fetch(`/api/models/detail?name=${encodeURIComponent(baseModel)}`);
+    if (!response.ok) {
+      console.error('Failed to fetch model details', response.statusText);
+      generateModelfilePreview();
+      return;
+    }
+    const data = await response.json();
+    
+    // Populate templates
+    if (data.system) {
+      document.getElementById('builder-system-input').value = data.system.trim();
+    }
+    if (data.template) {
+      document.getElementById('builder-template-input').value = data.template.trim();
+    }
+
+    // Parse parameters
+    if (data.parameters) {
+      const lines = data.parameters.split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const parts = trimmed.split(/\s+/);
+        if (parts.length >= 2) {
+          const key = parts[0].toLowerCase();
+          let val = parts.slice(1).join(' ');
+          
+          if (key === 'temperature') {
+            const parsedTemp = parseFloat(val);
+            if (!isNaN(parsedTemp)) {
+              document.getElementById('builder-temp').value = parsedTemp;
+              document.getElementById('builder-temp-value').textContent = parsedTemp;
+            }
+          } else if (key === 'num_ctx') {
+            const parsedCtx = parseInt(val, 10);
+            if (!isNaN(parsedCtx)) {
+              const ctxSelect = document.getElementById('builder-ctx-select');
+              let found = false;
+              for (let i = 0; i < ctxSelect.options.length; i++) {
+                if (parseInt(ctxSelect.options[i].value, 10) === parsedCtx) {
+                  ctxSelect.value = parsedCtx.toString();
+                  found = true;
+                  break;
+                }
+              }
+              if (!found) {
+                const opt = document.createElement('option');
+                opt.value = parsedCtx.toString();
+                opt.textContent = `${parsedCtx} tokens`;
+                ctxSelect.appendChild(opt);
+                ctxSelect.value = parsedCtx.toString();
+              }
+            }
+          } else if (key === 'stop') {
+            // Remove quotes if present
+            if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+              val = val.substring(1, val.length - 1);
+            }
+            document.getElementById('builder-stop-input').value = val;
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error fetching model details:', err);
+  }
+
+  // Regenerate preview
+  generateModelfilePreview();
 }
 
 async function buildCustomModel() {
@@ -3100,16 +3494,18 @@ function generateHtmlExportString(model, sysPrompt, temp, ctx, topK, topP, messa
     messageHtml += `
       <div class="message \${roleClass}">
         <div class="message-header">\${roleLabel}</div>
-        <div class="message-body">\${body}</div>
+      <div class="message ${roleClass}">
+        <div class="message-header">${roleLabel}</div>
+        <div class="message-body">${body}</div>
       </div>
     `;
   });
 
-  return \`<!DOCTYPE html>
+  return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Chat Log - \${model}</title>
+  <title>Chat Log - ${model}</title>
   <style>
     :root {
       --nord-bg-dark: #1a1c23;
@@ -3127,8 +3523,7 @@ function generateHtmlExportString(model, sysPrompt, temp, ctx, topK, topP, messa
       background-color: var(--nord-bg-dark);
       color: var(--nord-fg);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      line-height: 1.6;
-      margin: 0;
+      line-height: 1.5;
       padding: 40px 20px;
     }
     
@@ -3138,28 +3533,27 @@ function generateHtmlExportString(model, sysPrompt, temp, ctx, topK, topP, messa
     }
     
     header {
-      background-color: var(--nord-bg-panel);
+      background-color: var(--nord-bg);
       border: 1px solid var(--nord-border);
-      border-radius: 12px;
+      border-radius: 8px;
       padding: 24px;
       margin-bottom: 30px;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
     
     h1 {
-      margin: 0 0 10px 0;
+      margin-top: 0;
+      margin-bottom: 12px;
       font-size: 24px;
       color: var(--nord-blue);
-      letter-spacing: 0.5px;
     }
     
     .metadata {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 12px;
-      margin-top: 15px;
-      font-size: 13px;
-      color: #81a1c1;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 15px;
+      font-size: 12px;
+      color: #a3be8c;
     }
     
     .meta-item strong {
@@ -3175,44 +3569,14 @@ function generateHtmlExportString(model, sysPrompt, temp, ctx, topK, topP, messa
     .message {
       background-color: var(--nord-bg);
       border: 1px solid var(--nord-border);
-      border-radius: 12px;
-      padding: 16px 20px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.15);
-    }
-    
-    .message.user {
-      border-left: 4px solid var(--nord-blue);
-      background-color: var(--nord-bg-hover);
-    }
-    
-    .message.assistant {
-      border-left: 4px solid var(--nord-green);
-    }
-    
-    .message.system {
-      border-left: 4px solid var(--nord-yellow);
-      background-color: var(--nord-bg-panel);
-      font-style: italic;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
     
     .message-header {
       font-size: 11px;
       font-weight: bold;
-      letter-spacing: 1px;
-      margin-bottom: 8px;
-      color: #88c0d0;
-    }
-    
-    .message.user .message-header {
-      color: var(--nord-blue);
-    }
-    
-    .message.assistant .message-header {
-      color: var(--nord-green);
-    }
-    
-    .message.system .message-header {
-      color: var(--nord-yellow);
     }
     
     .message-body {
@@ -3244,32 +3608,6 @@ function generateHtmlExportString(model, sysPrompt, temp, ctx, topK, topP, messa
       padding: 0;
       font-size: inherit;
     }
-    
-    @media print {
-      body {
-        background-color: #ffffff;
-        color: #000000;
-        padding: 0;
-      }
-      
-      .message {
-        page-break-inside: avoid;
-        box-shadow: none;
-        border: 1px solid #cccccc;
-        background-color: #ffffff !important;
-      }
-      
-      header {
-        box-shadow: none;
-        border: 1px solid #cccccc;
-        background-color: #f9f9f9 !important;
-      }
-      
-      pre {
-        border: 1px solid #cccccc;
-        background-color: #f5f5f5 !important;
-      }
-    }
   </style>
 </head>
 <body>
@@ -3277,29 +3615,29 @@ function generateHtmlExportString(model, sysPrompt, temp, ctx, topK, topP, messa
     <header>
       <h1>Chat Session Export</h1>
       <div class="metadata">
-        <div class="meta-item"><strong>Model:</strong> \\\${escapeHTML(model)}</div>
-        <div class="meta-item"><strong>Date:</strong> \\\${new Date().toLocaleString()}</div>
-        <div class="meta-item"><strong>Temp:</strong> \\\${temp}</div>
-        <div class="meta-item"><strong>Ctx Limit:</strong> \\\${ctx} tokens</div>
-        <div class="meta-item"><strong>Top P:</strong> \\\${topP}</div>
-        <div class="meta-item"><strong>Top K:</strong> \\\${topK}</div>
+        <div class="meta-item"><strong>Model:</strong> ${escapeHTML(model)}</div>
+        <div class="meta-item"><strong>Date:</strong> ${new Date().toLocaleString()}</div>
+        <div class="meta-item"><strong>Temp:</strong> ${temp}</div>
+        <div class="meta-item"><strong>Ctx Limit:</strong> ${ctx} tokens</div>
+        <div class="meta-item"><strong>Top P:</strong> ${topP}</div>
+        <div class="meta-item"><strong>Top K:</strong> ${topK}</div>
       </div>
     </header>
     
     <div class="messages-list">
-      \\\${messageHtml}
+      ${messageHtml}
     </div>
   </div>
 </body>
-</html>\`;
+</html>`;
 }
 
 // --- 3. MODEL CARD FETCHING & PARSING ---
 async function fetchModelCard(modelName, container) {
   try {
-    const resp = await fetch(`/api/models/card?name=\${encodeURIComponent(modelName)}`);
+    const resp = await fetch(`/api/models/card?name=${encodeURIComponent(modelName)}`);
     if (!resp.ok) {
-      throw new Error(\`Failed to fetch card: status \${resp.status}\`);
+      throw new Error(`Failed to fetch card: status ${resp.status}`);
     }
     const body = await resp.text();
 
@@ -3331,7 +3669,7 @@ async function fetchModelCard(modelName, container) {
       }
     }
   } catch (err) {
-    container.textContent = \`Error loading model card: \${err.message}\\n\\nYou can view the library page online at:\\n- Ollama: https://ollama.com/library/\${modelName.split(':')[0]}\\n- HuggingFace: https://huggingface.co/\${modelName}\`;
+    container.textContent = `Error loading model card: ${err.message}\n\nYou can view the library page online at:\n- Ollama: https://ollama.com/library/${modelName.split(':')[0]}\n- HuggingFace: https://huggingface.co/${modelName}`;
   }
 }
 
@@ -3491,7 +3829,7 @@ async function generateCompletion() {
 
     if (!response.ok) {
       const errText = await response.text();
-      throw new Error(\`Server returned \${response.status}: \${errText}\`);
+      throw new Error(`Server returned ${response.status}: ${errText}`);
     }
 
     const reader = response.body.getReader();
@@ -3503,7 +3841,7 @@ async function generateCompletion() {
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\\n');
+      const lines = buffer.split('\n');
       buffer = lines.pop();
 
       for (const line of lines) {
@@ -3537,7 +3875,7 @@ async function generateCompletion() {
       statusText.textContent = "COMPLETION ABORTED";
     } else {
       statusText.textContent = "ERROR: " + err.message;
-      showToast(\`Generation error: \${err.message}\`, 'error');
+      showToast(`Generation error: ${err.message}`, 'error');
     }
   } finally {
     isGeneratingCompletion = false;
@@ -3693,7 +4031,17 @@ function handleTelemetryData(data) {
     nodeTypeEl.textContent = data.ollama_node.is_remote ? 'REMOTE' : 'LOCAL';
   }
 
-  // Update CPU/RAM bars
+  // Update CPU/RAM bars & labels
+  const isRemote = data.ollama_node && data.ollama_node.is_remote;
+  const cpuLabel = document.getElementById('host-cpu-label');
+  const ramLabel = document.getElementById('host-ram-label');
+  if (cpuLabel) {
+    cpuLabel.textContent = isRemote ? 'MANAGER CPU:' : 'HOST CPU:';
+  }
+  if (ramLabel) {
+    ramLabel.textContent = isRemote ? 'MANAGER RAM:' : 'HOST RAM:';
+  }
+
   const cpuText = document.getElementById('host-cpu-text');
   const cpuBar = document.getElementById('host-cpu-bar');
   if (cpuText && cpuBar) {
@@ -4569,6 +4917,321 @@ async function deleteOptimizerRun(id) {
     showToast('Optimizer run record deleted', 'warning');
     loadOptimizerHistory();
   } catch (error) {
+    showToast(error.message, 'error');
+  }
+}
+
+// --- DOCUMENT RAG CONTROLLER ---
+
+// Configure PDF.js worker
+if (window.pdfjsLib) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+}
+
+function chunkText(text, size = 800, overlap = 100) {
+  text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  if (text.length <= size) return [text];
+  
+  const chunks = [];
+  let start = 0;
+  while (start < text.length) {
+    let end = start + size;
+    if (end > text.length) {
+      end = text.length;
+    }
+    
+    if (end < text.length) {
+      const maxSearch = Math.min(100, end - start);
+      let foundBoundary = false;
+      for (let searchIdx = 0; searchIdx < maxSearch; searchIdx++) {
+        const char = text.charAt(end - searchIdx);
+        if (char === '\n' || char === ' ' || char === '.' || char === '?') {
+          end = end - searchIdx + 1;
+          foundBoundary = true;
+          break;
+        }
+      }
+    }
+    
+    chunks.push(text.substring(start, end).trim());
+    start = end - overlap;
+    
+    if (start >= end) {
+      start = end;
+    }
+  }
+  return chunks.filter(c => c.length > 0);
+}
+
+async function handleRAGUpload(file) {
+  const modelSelect = document.getElementById('rag-model-select');
+  if (!modelSelect || !modelSelect.value) {
+    showToast('Please select an embedding model first.', 'warning');
+    return;
+  }
+  const model = modelSelect.value;
+  
+  const progressDiv = document.getElementById('rag-upload-progress');
+  const progressStatus = document.getElementById('rag-progress-status');
+  const progressPercent = document.getElementById('rag-progress-percent');
+  const progressBar = document.getElementById('rag-progress-bar');
+  const uploadLogs = document.getElementById('rag-upload-logs');
+  
+  if (progressDiv) progressDiv.classList.remove('hidden');
+  if (uploadLogs) uploadLogs.innerHTML = '';
+  
+  const logMessage = (msg, isError = false) => {
+    const time = new Date().toLocaleTimeString();
+    const style = isError ? 'text-[#bf616a]' : 'text-[#d8dee9]/80';
+    if (uploadLogs) {
+      uploadLogs.innerHTML += `<div class="${style}">[${time}] ${msg}</div>`;
+      uploadLogs.scrollTop = uploadLogs.scrollHeight;
+    }
+  };
+  
+  const updateProgress = (pct, status) => {
+    if (progressPercent) progressPercent.textContent = `${pct}%`;
+    if (progressBar) progressBar.style.width = `${pct}%`;
+    if (progressStatus) progressStatus.textContent = status;
+  };
+  
+  try {
+    logMessage(`Initializing parse for: ${file.name} (${(file.size / 1024).toFixed(1)} KB)...`);
+    updateProgress(10, 'Reading file...');
+    
+    let text = '';
+    const extension = file.name.split('.').pop().toLowerCase();
+    
+    if (extension === 'pdf') {
+      if (!window.pdfjsLib) {
+        throw new Error('PDF.js library is not loaded.');
+      }
+      logMessage('Parsing PDF pages client-side using PDF.js...');
+      updateProgress(20, 'Parsing PDF...');
+      
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      logMessage(`Found ${pdf.numPages} pages in PDF.`);
+      
+      for (let i = 1; i <= pdf.numPages; i++) {
+        logMessage(`Extracting text from page ${i}/${pdf.numPages}...`);
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const pageText = content.items.map(item => item.str).join(' ');
+        text += pageText + '\n';
+        
+        const pct = 20 + Math.round((i / pdf.numPages) * 30);
+        updateProgress(pct, `Parsing PDF (page ${i}/${pdf.numPages})...`);
+      }
+    } else if (extension === 'txt' || extension === 'md') {
+      text = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = (err) => reject(err);
+        reader.readAsText(file);
+      });
+      updateProgress(50, 'Text extracted successfully.');
+    } else {
+      throw new Error('Unsupported file format. Only .txt, .md, and .pdf files are allowed.');
+    }
+    
+    if (!text.trim()) {
+      throw new Error('Extracted document text is empty.');
+    }
+    
+    logMessage(`Extracted ${text.length} characters of plain text.`);
+    logMessage('Chunking document contents into ~800 char blocks with 100 char overlap...');
+    updateProgress(60, 'Chunking text...');
+    
+    const chunks = chunkText(text, 800, 100);
+    logMessage(`Created ${chunks.length} chunks to index.`);
+    
+    updateProgress(70, 'Generating embeddings & submitting to indexer...');
+    
+    const payload = {
+      name: file.name,
+      embedding_model: model,
+      chunks: chunks.map((c, idx) => ({
+        chunk_index: idx,
+        content: c
+      }))
+    };
+    
+    const response = await fetch('/api/rag/documents', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    
+    if (!response.ok) {
+      const errData = await response.json();
+      throw new Error(errData.error || 'Failed to index document');
+    }
+    
+    const resData = await response.json();
+    logMessage(`Indexer response: ${resData.message} (ID: ${resData.document_id}, Chunks: ${resData.chunks})`);
+    updateProgress(100, 'Indexing complete!');
+    showToast(`Successfully indexed "${file.name}" with ${resData.chunks} chunks.`, 'success');
+    
+    loadRAGDocuments();
+    
+    const fileInput = document.getElementById('rag-file-input');
+    if (fileInput) fileInput.value = '';
+    
+  } catch (error) {
+    console.error('RAG Upload Error:', error);
+    logMessage(`ERROR: ${error.message}`, true);
+    updateProgress(0, 'Indexing failed.');
+    showToast(error.message, 'error');
+  }
+}
+
+async function loadRAGDocuments() {
+  const tbody = document.getElementById('rag-documents-list');
+  const emptyMessage = document.getElementById('rag-empty-message');
+  if (!tbody) return;
+  
+  try {
+    const response = await fetch('/api/rag/documents');
+    if (!response.ok) throw new Error('Failed to load documents');
+    
+    const docs = await response.json();
+    
+    if (!docs || docs.length === 0) {
+      tbody.innerHTML = '';
+      if (emptyMessage) emptyMessage.classList.remove('hidden');
+      return;
+    }
+    
+    if (emptyMessage) emptyMessage.classList.add('hidden');
+    
+    let html = '';
+    docs.forEach(doc => {
+      const createdDate = new Date(doc.created_at).toLocaleString();
+      html += `
+        <tr class="hover:bg-[#3b4252]/20 border-b border-[#4c566a]/20 last:border-none transition-colors">
+          <td class="py-2.5 pl-0 font-bold text-[#d8dee9] max-w-[200px] truncate" title="${escapeHTML(doc.name)}">
+            <i class="fa-regular fa-file-code text-[#88c0d0] mr-1.5"></i>${escapeHTML(doc.name)}
+          </td>
+          <td class="py-2.5 text-[#4c566a] text-xs font-mono select-all">${escapeHTML(doc.embedding_model)}</td>
+          <td class="py-2.5 text-center text-[#88c0d0] font-bold">${doc.chunk_count || 0}</td>
+          <td class="py-2.5 text-[#4c566a] text-[10px]">${createdDate}</td>
+          <td class="py-2.5 text-center pr-0">
+            <button onclick="deleteRAGDocument(${doc.id}, '${escapeHTML(doc.name)}')" class="btn btn-ghost btn-xs text-[#bf616a] hover:bg-[#bf616a]/15 p-1 h-auto min-h-0">
+              <i class="fa-solid fa-trash-can text-[10px]"></i>
+            </button>
+          </td>
+        </tr>
+      `;
+    });
+    tbody.innerHTML = html;
+  } catch (error) {
+    console.error('Error loading RAG documents:', error);
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="5" class="text-center py-6 text-[#bf616a] italic text-xs">
+          Failed to load indexed documents: ${error.message}
+        </td>
+      </tr>
+    `;
+  }
+}
+
+async function deleteRAGDocument(id, name) {
+  if (!confirm(`Are you sure you want to delete and un-index document "${name}"? This cannot be undone.`)) {
+    return;
+  }
+  
+  try {
+    const response = await fetch(`/api/rag/documents/${id}`, {
+      method: 'DELETE'
+    });
+    
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error || 'Failed to delete document');
+    }
+    
+    showToast(`Successfully deleted document "${name}"`, 'warning');
+    loadRAGDocuments();
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+}
+
+async function runRAGSimilarityQuery() {
+  const queryInput = document.getElementById('rag-test-query');
+  const resultsDiv = document.getElementById('rag-query-results');
+  const modelSelect = document.getElementById('rag-model-select');
+  
+  if (!queryInput || !resultsDiv || !modelSelect) return;
+  
+  const query = queryInput.value.trim();
+  if (!query) {
+    showToast('Please enter a test query first.', 'warning');
+    return;
+  }
+  
+  if (!modelSelect.value) {
+    showToast('Please select an embedding model first.', 'warning');
+    return;
+  }
+  
+  resultsDiv.innerHTML = `
+    <div class="flex items-center justify-center gap-2 py-8 text-xs text-[#88c0d0]">
+      <i class="fa-solid fa-circle-notch animate-spin text-sm"></i>
+      <span>Performing cosine similarity check...</span>
+    </div>
+  `;
+  
+  try {
+    const response = await fetch('/api/rag/query', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: query,
+        embedding_model: modelSelect.value,
+        top_k: 3
+      })
+    });
+    
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error || 'Failed to query similarity');
+    }
+    
+    const results = await response.json();
+    
+    if (!results || results.length === 0) {
+      resultsDiv.innerHTML = `
+        <div class="text-[#4c566a] italic text-xs text-center py-8">
+          No matching chunks found in database for the selected model. Index documents under this model first.
+        </div>
+      `;
+      return;
+    }
+    
+    let html = '';
+    results.forEach((res) => {
+      const scorePercent = (res.similarity * 100).toFixed(1);
+      html += `
+        <div class="border border-[#4c566a]/30 rounded-lg p-3 bg-[#2e3440]/40 font-mono text-[11px] leading-relaxed transition-all hover:border-[#88c0d0]/50">
+          <div class="flex items-center justify-between mb-2 text-[9px] text-[#88c0d0] border-b border-[#4c566a]/15 pb-1">
+            <span class="truncate max-w-[70%] font-bold"><i class="fa-regular fa-file-code"></i> ${escapeHTML(res.document_name)} (Chunk #${res.chunk_index})</span>
+            <span class="bg-[#a3be8c]/15 text-[#a3be8c] border border-[#a3be8c]/35 rounded px-1.5 py-0.5 font-bold">${scorePercent}% Match</span>
+          </div>
+          <div class="text-[#d8dee9] select-text whitespace-pre-wrap">${escapeHTML(res.content)}</div>
+        </div>
+      `;
+    });
+    resultsDiv.innerHTML = html;
+  } catch (error) {
+    console.error('Similarity search error:', error);
+    resultsDiv.innerHTML = `
+      <div class="text-center py-8 text-[#bf616a] italic text-xs border border-[#bf616a]/35 bg-[#bf616a]/5 rounded-lg">
+        Failed to query similarity: ${error.message}
+      </div>
+    `;
     showToast(error.message, 'error');
   }
 }

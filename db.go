@@ -11,10 +11,16 @@ import (
 )
 
 type Server struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	URL      string `json:"url"`
-	IsActive bool   `json:"isActive"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	URL            string `json:"url"`
+	IsActive       bool   `json:"isActive"`
+	AuthType       string `json:"authType,omitempty"`
+	AuthToken      string `json:"authToken,omitempty"`
+	AuthUsername   string `json:"authUsername,omitempty"`
+	AuthPassword   string `json:"authPassword,omitempty"`
+	AuthHeaderName string `json:"authHeaderName,omitempty"`
+	AuthHeaderVal  string `json:"authHeaderVal,omitempty"`
 }
 
 type Config struct {
@@ -152,7 +158,7 @@ func GetActiveServer() (Server, error) {
 }
 
 // AddServer adds a new server and returns it
-func AddServer(name, url string) (Server, error) {
+func AddServer(name, url, authType, authToken, authUsername, authPassword, authHeaderName, authHeaderVal string) (Server, error) {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -162,10 +168,16 @@ func AddServer(name, url string) (Server, error) {
 	}
 
 	newServer := Server{
-		ID:       generateID(),
-		Name:     name,
-		URL:      url,
-		IsActive: len(servers) == 0, // make active if it's the first server
+		ID:             generateID(),
+		Name:           name,
+		URL:            url,
+		IsActive:       len(servers) == 0, // make active if it's the first server
+		AuthType:       authType,
+		AuthToken:      authToken,
+		AuthUsername:   authUsername,
+		AuthPassword:   authPassword,
+		AuthHeaderName: authHeaderName,
+		AuthHeaderVal:  authHeaderVal,
 	}
 
 	servers = append(servers, newServer)
@@ -177,7 +189,7 @@ func AddServer(name, url string) (Server, error) {
 }
 
 // EditServer updates an existing server's details
-func EditServer(id, name, url string) (Server, error) {
+func EditServer(id, name, url, authType, authToken, authUsername, authPassword, authHeaderName, authHeaderVal string) (Server, error) {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -190,6 +202,12 @@ func EditServer(id, name, url string) (Server, error) {
 		if s.ID == id {
 			servers[i].Name = name
 			servers[i].URL = url
+			servers[i].AuthType = authType
+			servers[i].AuthToken = authToken
+			servers[i].AuthUsername = authUsername
+			servers[i].AuthPassword = authPassword
+			servers[i].AuthHeaderName = authHeaderName
+			servers[i].AuthHeaderVal = authHeaderVal
 			if err := SaveConfigInternal(); err != nil {
 				return Server{}, err
 			}

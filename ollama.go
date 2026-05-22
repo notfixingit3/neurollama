@@ -53,17 +53,57 @@ type PullProgress struct {
 	Completed int64  `json:"completed,omitempty"`
 }
 
+type authTransport struct {
+	underlying http.RoundTripper
+	authType   string
+	token      string
+	username   string
+	password   string
+	headerName string
+	headerVal  string
+}
+
+func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Add auth headers depending on type
+	switch t.authType {
+	case "bearer":
+		if t.token != "" {
+			req.Header.Set("Authorization", "Bearer "+t.token)
+		}
+	case "basic":
+		if t.username != "" || t.password != "" {
+			req.SetBasicAuth(t.username, t.password)
+		}
+	case "custom":
+		if t.headerName != "" {
+			req.Header.Set(t.headerName, t.headerVal)
+		}
+	}
+	return t.underlying.RoundTrip(req)
+}
+
 // OllamaClient interfaces with an Ollama Server
 type OllamaClient struct {
 	BaseURL    string
 	HTTPClient *http.Client
 }
 
-func NewOllamaClient(baseURL string) *OllamaClient {
+func NewOllamaClient(srv Server) *OllamaClient {
+	transport := &authTransport{
+		underlying: http.DefaultTransport,
+		authType:   srv.AuthType,
+		token:      srv.AuthToken,
+		username:   srv.AuthUsername,
+		password:   srv.AuthPassword,
+		headerName: srv.AuthHeaderName,
+		headerVal:  srv.AuthHeaderVal,
+	}
+
 	return &OllamaClient{
-		BaseURL: baseURL,
+		BaseURL: srv.URL,
 		HTTPClient: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout:   10 * time.Second,
+			Transport: transport,
 		},
 	}
 }
@@ -212,7 +252,9 @@ func (c *OllamaClient) StreamPullModel(ctx context.Context, name string) (io.Rea
 	}
 
 	// Use a client without short timeout for long pulling process
-	longClient := &http.Client{}
+	longClient := &http.Client{
+		Transport: c.HTTPClient.Transport,
+	}
 	req, err := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/api/pull", c.BaseURL), bytes.NewBuffer(reqBody))
 	if err != nil {
 		return nil, err
@@ -354,7 +396,9 @@ func (c *OllamaClient) StreamChat(chatReq ChatRequest) (io.ReadCloser, error) {
 		return nil, err
 	}
 
-	longClient := &http.Client{}
+	longClient := &http.Client{
+		Transport: c.HTTPClient.Transport,
+	}
 	resp, err := longClient.Post(
 		fmt.Sprintf("%s/api/chat", c.BaseURL),
 		"application/json",
@@ -380,7 +424,9 @@ func (c *OllamaClient) StreamGenerate(genReq GenerateRequest) (io.ReadCloser, er
 		return nil, err
 	}
 
-	longClient := &http.Client{}
+	longClient := &http.Client{
+		Transport: c.HTTPClient.Transport,
+	}
 	resp, err := longClient.Post(
 		fmt.Sprintf("%s/api/generate", c.BaseURL),
 		"application/json",
@@ -407,7 +453,9 @@ func (c *OllamaClient) StreamCreate(createReq CreateRequest) (io.ReadCloser, err
 		return nil, err
 	}
 
-	longClient := &http.Client{}
+	longClient := &http.Client{
+		Transport: c.HTTPClient.Transport,
+	}
 	resp, err := longClient.Post(
 		fmt.Sprintf("%s/api/create", c.BaseURL),
 		"application/json",
@@ -424,4 +472,74 @@ func (c *OllamaClient) StreamCreate(createReq CreateRequest) (io.ReadCloser, err
 	}
 
 	return resp.Body, nil
+}
+
+// GetEmbeddings retrieves vector representations of texts using active Ollama server, trying /api/embed first then /api/embeddings.
+func (c *OllamaClient) GetEmbeddings(model string, inputs []string) ([][]float64, error) {
+	reqBody, err := json.Marshal(map[string]interface{}{
+		"model": model,
+		"input": inputs,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.HTTPClient.Post(
+		fmt.Sprintf("%s/api/embed", c.BaseURL),
+		"application/json",
+		bytes.NewBuffer(reqBody),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to Ollama: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		var embedResp struct {
+			Embeddings [][]float64 `json:"embeddings"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&embedResp); err != nil {
+			return nil, fmt.Errorf("failed to parse embed response: %w", err)
+		}
+		return embedResp.Embeddings, nil
+	}
+
+	// Fallback to older /api/embeddings endpoint (which takes one prompt string at a time)
+	embeddings := make([][]float64, len(inputs))
+	for i, input := range inputs {
+		reqBodyOld, err := json.Marshal(map[string]string{
+			"model":  model,
+			"prompt": input,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		respOld, err := c.HTTPClient.Post(
+			fmt.Sprintf("%s/api/embeddings", c.BaseURL),
+			"application/json",
+			bytes.NewBuffer(reqBodyOld),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to connect to Ollama fallback: %w", err)
+		}
+
+		if respOld.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(respOld.Body)
+			respOld.Body.Close()
+			return nil, fmt.Errorf("fallback embeddings failed with status %d: %s", respOld.StatusCode, string(bodyBytes))
+		}
+
+		var embedRespOld struct {
+			Embedding []float64 `json:"embedding"`
+		}
+		decodeErr := json.NewDecoder(respOld.Body).Decode(&embedRespOld)
+		respOld.Body.Close()
+		if decodeErr != nil {
+			return nil, fmt.Errorf("failed to parse fallback embedding: %w", decodeErr)
+		}
+		embeddings[i] = embedRespOld.Embedding
+	}
+
+	return embeddings, nil
 }
