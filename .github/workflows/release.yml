@@ -1,0 +1,47 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Tailwind CSS dependencies
+        run: |
+          cd tailwind
+          npm install
+
+      - name: Build CSS
+        run: |
+          cd tailwind
+          npx tailwindcss -i input.css -o ../static/css/output.css
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.3'
+
+      - name: Build macOS binary
+        run: go build -o ollama-manager
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ollama-manager
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

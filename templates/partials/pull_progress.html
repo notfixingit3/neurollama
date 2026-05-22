@@ -1,0 +1,25 @@
+{{define "pull_progress"}}
+<div id="pull-progress-{{.Name}}" class="card bg-base-200 shadow-sm p-4 mt-4"
+     hx-ext="sse"
+     sse-connect="/events/pull/{{.Name}}"
+     sse-swap="progress"
+     hx-swap="innerHTML">
+  <div class="flex flex-col gap-2">
+    <div class="flex items-center justify-between">
+      <span class="font-semibold">Pulling {{.Name}}</span>
+      <span id="pull-status-{{.Name}}" class="text-sm opacity-70">Starting...</span>
+    </div>
+    <progress id="pull-bar-{{.Name}}" class="progress progress-primary w-full" value="0" max="100"></progress>
+  </div>
+
+  <script type="text/template" id="pull-progress-template-{{.Name}}">
+    <div class="flex flex-col gap-2">
+      <div class="flex items-center justify-between">
+        <span class="font-semibold">Pulling {{.Name}}</span>
+        <span class="text-sm opacity-70" id="pull-status-{{.Name}}">{{status}}</span>
+      </div>
+      <progress class="progress progress-primary w-full" value="{{percent}}" max="100"></progress>
+    </div>
+  </script>
+</div>
+{{end}}

@@ -1,5 +1,4 @@
-# Compiled binary
-ollama-manager
+# Compiled binary (ignored for dev builds, but release binary is force-added)
 
 # Go build artifacts
 *.exe
@@ -29,3 +28,7 @@ vendor/
 # OS
 .DS_Store
 Thumbs.db
+
+# Sisyphus
+.sisyphus/
+node_modules/

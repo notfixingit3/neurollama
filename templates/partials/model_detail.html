@@ -1,0 +1,35 @@
+{{define "model_detail"}}
+<tr class="model-detail-row">
+  <td colspan="5" class="bg-base-200 p-4">
+    <div class="card bg-base-100 shadow-sm">
+      <div class="card-body gap-3 p-4">
+        <div class="flex items-center justify-between gap-3">
+          <h3 class="font-semibold">{{.Name}}</h3>
+          <span class="badge badge-primary badge-outline">metadata</span>
+        </div>
+
+        {{if .Err}}
+          <div class="alert alert-error">
+            <span>Could not load model details.</span>
+          </div>
+        {{else if .KVs}}
+          <dl class="grid gap-3 md:grid-cols-2">
+            {{range .KVs}}
+              <div class="rounded-box border border-base-300 bg-base-200 p-3">
+                <dt class="text-xs uppercase tracking-wide opacity-60">{{.Key}}</dt>
+                <dd class="mt-1 font-medium">{{.Val}}</dd>
+              </div>
+            {{end}}
+          </dl>
+        {{else}}
+          <div class="alert">
+            <span>No metadata returned for this model.</span>
+          </div>
+        {{end}}
+      </div>
+    </div>
+  </td>
+</tr>
+{{end}}
+
+{{define "content"}}{{template "model_detail" .}}{{end}}
