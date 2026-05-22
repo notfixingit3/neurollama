@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="static/img/logo.png" alt="NEUROLLAMA Logo" width="220" height="220" style="border-radius: 16px; box-shadow: 0 8px 30px rgba(0,0,0,0.35);" />
+  <img src="static/img/logo.png" alt="NEUROLLAMA Logo" width="220" height="220" style="border-radius: 28px; box-shadow: 0 8px 30px rgba(0,0,0,0.35);" />
 </p>
 
 <h1 align="center">NEUROLLAMA</h1>
