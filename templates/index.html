@@ -8,7 +8,9 @@
   <!-- Font Awesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <!-- Tailwind Output -->
-  <link rel="stylesheet" href="/static/css/output.css?v=0.0.8">
+  <link rel="stylesheet" href="/static/css/output.css?v=0.0.9">
+  <!-- Marked Markdown Parser -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
 </head>
 <body class="bg-[#2e3440] text-[#e5e9f0] h-screen overflow-hidden cyber-grid flex flex-col font-sans">
 
@@ -81,12 +83,15 @@
     <section id="main-workspace-section" class="lg:col-span-9 flex flex-col h-full overflow-hidden gap-4 transition-all duration-300">
       
       <!-- Top Workspace Tabs Bar -->
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-2 bg-[#242933]/60 p-1.5 border border-[#4c566a]/40 rounded-xl font-tech font-bold text-[10px] md:text-xs">
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-2 bg-[#242933]/60 p-1.5 border border-[#4c566a]/40 rounded-xl font-tech font-bold text-[10px] md:text-xs">
         <button id="ws-tab-inventory" onclick="switchWorkspace('inventory')" class="ws-tab tab-active flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
           <i class="fa-solid fa-tags text-[10px]"></i> INVENTORY & TELEMETRY
         </button>
         <button id="ws-tab-playground" onclick="switchWorkspace('playground')" class="ws-tab flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
           <i class="fa-solid fa-terminal text-[10px]"></i> PLAYGROUND (CHAT)
+        </button>
+        <button id="ws-tab-completion" onclick="switchWorkspace('completion')" class="ws-tab flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
+          <i class="fa-solid fa-align-left text-[10px]"></i> COMPLETION
         </button>
         <button id="ws-tab-builder" onclick="switchWorkspace('builder')" class="ws-tab flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
           <i class="fa-solid fa-wrench text-[10px]"></i> MODEL BUILDER
@@ -243,11 +248,12 @@
                   </div>
 
                   <!-- Tab Selectors -->
-                  <div class="tabs tabs-boxed bg-[#242933]/60 p-1 border border-[#4c566a]/40 mb-3 grid grid-cols-4 text-center">
+                  <div class="tabs tabs-boxed bg-[#242933]/60 p-1 border border-[#4c566a]/40 mb-3 grid grid-cols-5 text-center">
                     <button id="ws-tab-modelfile" onclick="switchDetailTab('modelfile')" class="tab tab-xs tab-active text-[10px] font-tech font-bold transition-all">FILE</button>
                     <button id="ws-tab-parameters" onclick="switchDetailTab('parameters')" class="tab tab-xs text-[10px] font-tech font-bold transition-all">PARAMS</button>
                     <button id="ws-tab-template" onclick="switchDetailTab('template')" class="tab tab-xs text-[10px] font-tech font-bold transition-all">TEMPLATE</button>
                     <button id="ws-tab-system" onclick="switchDetailTab('system')" class="tab tab-xs text-[10px] font-tech font-bold transition-all">SYSTEM</button>
+                    <button id="ws-tab-card" onclick="switchDetailTab('card')" class="tab tab-xs text-[10px] font-tech font-bold transition-all">CARD</button>
                   </div>
 
                   <!-- Tab Contents -->
@@ -318,6 +324,19 @@
                 </div>
                 <select id="chat-preset-select" onchange="applyPresetPrompt()" class="select select-sm select-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
                   <option value="">-- Custom Prompt --</option>
+                </select>
+              </div>
+
+              <!-- Prompt Templates selector -->
+              <div class="form-control">
+                <label class="label p-0"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Prompt Templates</span></label>
+                <select id="chat-template-select" onchange="applyPromptTemplate()" class="select select-sm select-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                  <option value="">-- Select Template --</option>
+                  <option value="chain_of_thought">Chain of Thought (CoT)</option>
+                  <option value="few_shot">Few-Shot Examples</option>
+                  <option value="react">ReAct (Reason + Action)</option>
+                  <option value="code_gen">Code Generation</option>
+                  <option value="refine">Refinement/Polishing</option>
                 </select>
               </div>
 
@@ -460,10 +479,15 @@
                 </label>
               </div>
 
-              <!-- Session reset -->
-              <button onclick="resetChatSession()" class="btn btn-sm btn-outline btn-error mt-auto font-tech tracking-wider gap-2">
-                <i class="fa-solid fa-trash-arrow-up"></i> RESET_SESSION
-              </button>
+              <!-- Action buttons -->
+              <div class="flex gap-2 mt-auto">
+                <button onclick="resetChatSession()" class="btn btn-sm btn-outline btn-error flex-1 font-tech tracking-wider gap-1.5 text-[10px]">
+                  <i class="fa-solid fa-trash-arrow-up"></i> RESET
+                </button>
+                <button onclick="openExportModal()" class="btn btn-sm btn-outline btn-info flex-1 font-tech tracking-wider gap-1.5 text-[10px]">
+                  <i class="fa-solid fa-download"></i> EXPORT
+                </button>
+              </div>
             </div>
           </div>
 
@@ -513,6 +537,172 @@
               </div>
             </div>
           </div>
+        </div>
+
+        <!-- PANEL: COMPLETION WORKSPACE -->
+        <div id="ws-panel-completion" class="ws-panel hidden absolute inset-0 grid grid-cols-1 lg:grid-cols-12 gap-6 h-full overflow-hidden">
+          
+          <!-- Left sidebar (3 cols) -->
+          <div id="completion-config-sidebar" class="lg:col-span-3 flex flex-col h-full overflow-hidden transition-all duration-300">
+            <div class="tech-panel tech-header-accent rounded-xl flex-1 min-h-0 p-4 flex flex-col overflow-y-auto gap-4">
+              <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] border-b border-[#4c566a]/40 pb-2">
+                <i class="fa-solid fa-align-left mr-2"></i>Completion Config
+              </h2>
+
+              <!-- Model select -->
+              <div class="form-control">
+                <label class="label pt-0"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Model Selection</span></label>
+                <select id="completion-model-select" class="select select-sm select-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                  <option value="">-- No models available --</option>
+                </select>
+              </div>
+
+              <!-- System prompt configuration -->
+              <div class="form-control">
+                <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">System Prompt</span></label>
+                <textarea id="completion-system-prompt" rows="3" placeholder="Define completion system instruction..."
+                          class="textarea textarea-sm textarea-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full resize-none"></textarea>
+              </div>
+
+              <!-- Advanced options section -->
+              <div class="border border-[#4c566a]/30 bg-[#2e3440]/30 rounded-lg p-4 space-y-3">
+                <div class="font-tech text-[10px] uppercase text-[#88c0d0] border-b border-[#4c566a]/30 pb-1.5 mb-2 font-bold">
+                  Parameters
+                </div>
+                <!-- Temperature slider -->
+                <div class="form-control">
+                  <div class="flex justify-between items-center mb-1">
+                    <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Temperature</span>
+                    <span id="completion-temp-value" class="text-xs font-mono text-[#88c0d0]">0.7</span>
+                  </div>
+                  <input type="range" id="completion-temp" min="0" max="1.5" step="0.1" value="0.7" oninput="document.getElementById('completion-temp-value').textContent = this.value"
+                         class="range range-xs range-info bg-[#4c566a]" />
+                </div>
+
+                <!-- Context limit input -->
+                <div class="form-control">
+                  <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Context Limit</span></label>
+                  <select id="completion-ctx-limit" class="select select-xs select-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                    <option value="2048" selected>2048 tokens</option>
+                    <option value="4096">4096 tokens</option>
+                    <option value="8192">8192 tokens</option>
+                    <option value="16384">16384 tokens</option>
+                  </select>
+                </div>
+
+                <!-- Top K -->
+                <div class="form-control">
+                  <div class="flex justify-between items-center mb-1">
+                    <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Top K</span>
+                    <span id="completion-top-k-value" class="text-xs font-mono text-[#88c0d0]">40</span>
+                  </div>
+                  <input type="range" id="completion-top-k" min="1" max="100" step="1" value="40" oninput="document.getElementById('completion-top-k-value').textContent = this.value"
+                         class="range range-xs range-info bg-[#4c566a]" />
+                </div>
+
+                <!-- Top P -->
+                <div class="form-control">
+                  <div class="flex justify-between items-center mb-1">
+                    <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Top P</span>
+                    <span id="completion-top-p-value" class="text-xs font-mono text-[#88c0d0]">0.90</span>
+                  </div>
+                  <input type="range" id="completion-top-p" min="0" max="1" step="0.05" value="0.9" oninput="document.getElementById('completion-top-p-value').textContent = parseFloat(this.value).toFixed(2)"
+                         class="range range-xs range-info bg-[#4c566a]" />
+                </div>
+
+                <!-- Repeat Penalty -->
+                <div class="form-control">
+                  <div class="flex justify-between items-center mb-1">
+                    <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Repeat Penalty</span>
+                    <span id="completion-repeat-penalty-value" class="text-xs font-mono text-[#88c0d0]">1.10</span>
+                  </div>
+                  <input type="range" id="completion-repeat-penalty" min="0.5" max="2" step="0.05" value="1.1" oninput="document.getElementById('completion-repeat-penalty-value').textContent = parseFloat(this.value).toFixed(2)"
+                         class="range range-xs range-info bg-[#4c566a]" />
+                </div>
+
+                <!-- Max Tokens (num_predict) -->
+                <div class="form-control">
+                  <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Max Tokens (num_predict)</span></label>
+                  <input type="number" id="completion-num-predict" placeholder="-1 (default)"
+                         class="input input-xs input-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                </div>
+
+                <!-- GPU Layers (num_gpu) -->
+                <div class="form-control">
+                  <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">GPU Layers (num_gpu)</span></label>
+                  <input type="number" id="completion-num-gpu" placeholder="-1 (default)"
+                         class="input input-xs input-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                </div>
+
+                <!-- CPU Threads (num_thread) -->
+                <div class="form-control">
+                  <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">CPU Threads (num_thread)</span></label>
+                  <input type="number" id="completion-num-thread" placeholder="-1 (default)"
+                         class="input input-xs input-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                </div>
+              </div>
+
+              <!-- Generation action buttons -->
+              <div class="flex gap-2 mt-auto pt-2 border-t border-[#4c566a]/30">
+                <button id="completion-generate-btn" onclick="generateCompletion()" class="btn btn-sm btn-info flex-1 font-tech tracking-wider gap-1.5 text-[10px]">
+                  <i class="fa-solid fa-play"></i> GENERATE
+                </button>
+                <button id="completion-stop-btn" onclick="abortCompletion()" class="btn btn-sm btn-outline btn-error flex-1 font-tech tracking-wider gap-1.5 text-[10px]" disabled>
+                  <i class="fa-solid fa-stop"></i> STOP
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Main Editor (9 cols) -->
+          <div id="completion-editor-column" class="lg:col-span-9 flex flex-col h-full overflow-hidden transition-all duration-300">
+            <div class="tech-panel tech-header-accent rounded-xl flex-1 flex flex-col overflow-hidden bg-[#1a1c23] border-[#4c566a]/70">
+              
+              <!-- Console Top Status Info -->
+              <div class="p-3 border-b border-[#4c566a]/40 bg-[#242933]/40 flex justify-between items-center text-[10px] font-tech text-[#81a1c1]">
+                <div class="flex items-center gap-2">
+                  <span class="inline-block w-2.5 h-2.5 rounded-full bg-[#a3be8c] animate-pulse"></span>
+                  <span id="completion-status-text">SINGLE COMPLETION WORKSPACE READY</span>
+                </div>
+                <div class="flex items-center gap-2 font-mono">
+                  <span>Tokens generated: <span id="completion-token-count" class="text-[#88c0d0]">0</span></span>
+                </div>
+              </div>
+
+              <!-- Split Layout: Prompt input top, Document/Completion editor bottom -->
+              <div class="flex-1 flex flex-col p-4 gap-4 overflow-hidden min-h-0">
+                
+                <!-- Prompt Input -->
+                <div class="flex-1 flex flex-col min-h-[150px] relative">
+                  <label class="label p-0 pb-1.5 flex justify-between items-center">
+                    <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Completion Prompt</span>
+                    <button onclick="clearCompletionPrompt()" class="btn btn-xs btn-ghost text-[#bf616a] hover:bg-[#bf616a]/15 text-[9px] font-tech font-bold px-1.5">CLEAR PROMPT</button>
+                  </label>
+                  <textarea id="completion-prompt-text" placeholder="Type instructions or prefix context here to start completion generation..."
+                            class="textarea textarea-bordered bg-[#2e3440]/40 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full flex-1 resize-none p-3 leading-relaxed"></textarea>
+                </div>
+
+                <!-- Document Editor -->
+                <div class="flex-1 flex flex-col min-h-[200px] relative">
+                  <label class="label p-0 pb-1.5 flex justify-between items-center">
+                    <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Document Output Editor</span>
+                    <div class="flex gap-1.5">
+                      <button onclick="copyCompletionDocument()" class="btn btn-xs btn-neutral border-[#4c566a] text-[#88c0d0] text-[9px] font-tech font-bold px-1.5 py-0">
+                        <i class="fa-regular fa-copy mr-1"></i> COPY DOCUMENT
+                      </button>
+                      <button onclick="clearCompletionDocument()" class="btn btn-xs btn-neutral border-[#4c566a] text-[#bf616a] text-[9px] font-tech font-bold px-1.5 py-0">
+                        <i class="fa-solid fa-eraser mr-1"></i> CLEAR EDITOR
+                      </button>
+                    </div>
+                  </label>
+                  <textarea id="completion-document-text" placeholder="Completion results will stream here. You can also edit this text..."
+                            class="textarea textarea-bordered bg-[#2e3440]/40 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full flex-1 resize-none p-3 leading-relaxed"></textarea>
+                </div>
+
+              </div>
+            </div>
+          </div>
+
         </div>
 
         <!-- PANEL 3: MODEL BUILDER -->
@@ -738,12 +928,48 @@
     </div>
   </dialog>
 
+  <dialog id="chat-export-modal" class="modal">
+    <div class="modal-box bg-[#2e3440] border border-[#4c566a] shadow-2xl p-6 max-w-md rounded-xl text-xs font-mono">
+      <div class="flex justify-between items-center border-b border-[#4c566a]/40 pb-3 mb-4">
+        <h3 class="text-sm font-tech font-bold text-[#88c0d0] uppercase tracking-wider">
+          <i class="fa-solid fa-download mr-2"></i> Export Chat Session
+        </h3>
+        <button onclick="closeExportModal()" class="btn btn-sm btn-circle btn-ghost text-[#d8dee9] hover:bg-[#bf616a]/15 hover:text-[#bf616a] h-7 w-7 min-h-0">&times;</button>
+      </div>
+      
+      <p class="text-[11px] mb-4 text-[#d8dee9]/80 font-tech">Select your preferred format to export the active chat session (messages and configurations):</p>
+      
+      <div class="grid grid-cols-2 gap-3 mb-4">
+        <button onclick="exportChat('markdown')" class="btn btn-sm btn-outline border-[#4c566a] hover:bg-[#88c0d0]/25 hover:text-[#88c0d0] font-tech text-[10px] flex flex-col items-center gap-1.5 py-3 h-auto">
+          <i class="fa-brands fa-markdown text-lg"></i>
+          <span>MARKDOWN (.md)</span>
+        </button>
+        <button onclick="exportChat('json')" class="btn btn-sm btn-outline border-[#4c566a] hover:bg-[#8fbcbb]/25 hover:text-[#8fbcbb] font-tech text-[10px] flex flex-col items-center gap-1.5 py-3 h-auto">
+          <i class="fa-solid fa-code text-lg"></i>
+          <span>JSON DATA (.json)</span>
+        </button>
+        <button onclick="exportChat('html')" class="btn btn-sm btn-outline border-[#4c566a] hover:bg-[#a3be8c]/25 hover:text-[#a3be8c] font-tech text-[10px] flex flex-col items-center gap-1.5 py-3 h-auto">
+          <i class="fa-solid fa-file-code text-lg"></i>
+          <span>HTML PAGE (.html)</span>
+        </button>
+        <button onclick="exportChat('pdf')" class="btn btn-sm btn-outline border-[#4c566a] hover:bg-[#b48ead]/25 hover:text-[#b48ead] font-tech text-[10px] flex flex-col items-center gap-1.5 py-3 h-auto">
+          <i class="fa-solid fa-file-pdf text-lg"></i>
+          <span>PRINT / PDF (.pdf)</span>
+        </button>
+      </div>
+
+      <div class="modal-action mt-4">
+        <button onclick="closeExportModal()" class="btn btn-xs btn-neutral border-[#4c566a] font-tech text-[10px]">CLOSE</button>
+      </div>
+    </div>
+  </dialog>
+
   <!-- Toast Notification System -->
   <div id="toast-container" class="toast toast-end toast-bottom z-50 p-6 space-y-2">
     <!-- Toast notifications dynamically injected here -->
   </div>
 
   <!-- App Script -->
-  <script src="/static/js/app.js?v=0.0.8"></script>
+  <script src="/static/js/app.js?v=0.0.9"></script>
 </body>
 </html>

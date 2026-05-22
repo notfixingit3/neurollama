@@ -7,7 +7,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -75,11 +77,13 @@ func main() {
 		api.POST("/models/delete", deleteModelsHandler)  // POST batch delete
 		api.POST("/models/copy", copyModelHandler)      // POST clone model
 		api.GET("/models/pull", pullModelSSEHandler)    // GET /api/models/pull?name=llama3 (SSE)
+		api.GET("/models/card", getModelCardHandler)    // GET /api/models/card?name=llama3
 
 		// Handlers for v0.0.2
 		api.GET("/models/active", getActiveModelsHandler)
 		api.POST("/models/unload", unloadModelHandler)
 		api.POST("/chat", chatStreamHandler)
+		api.POST("/generate", generateStreamHandler)
 		api.POST("/models/create", createModelStreamHandler)
 
 		// Handlers for v0.0.3 SQLite Persistence & Presets
@@ -797,3 +801,194 @@ func createModelStreamHandler(c *gin.Context) {
 		return false
 	})
 }
+
+type GenerateStreamRequest struct {
+	Model            string   `json:"model" binding:"required"`
+	Prompt           string   `json:"prompt" binding:"required"`
+	SystemPrompt     string   `json:"system_prompt"`
+	Temperature      *float64 `json:"temperature"`
+	NumCtx           int      `json:"num_ctx"`
+	TopK             *int     `json:"top_k"`
+	TopP             *float64 `json:"top_p"`
+	RepeatPenalty    *float64 `json:"repeat_penalty"`
+	Seed             *int     `json:"seed"`
+	MinP             *float64 `json:"min_p"`
+	PresencePenalty  *float64 `json:"presence_penalty"`
+	FrequencyPenalty *float64 `json:"frequency_penalty"`
+	NumPredict       *int     `json:"num_predict"`
+	NumGPU           *int     `json:"num_gpu"`
+	NumThread        *int     `json:"num_thread"`
+}
+
+func generateStreamHandler(c *gin.Context) {
+	var req GenerateStreamRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	activeSrv, err := GetActiveServer()
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "No active Ollama server selected"})
+		return
+	}
+
+	client := NewOllamaClient(activeSrv.URL)
+
+	options := make(map[string]interface{})
+	if req.Temperature != nil {
+		options["temperature"] = *req.Temperature
+	}
+	if req.NumCtx > 0 {
+		options["num_ctx"] = req.NumCtx
+	}
+	if req.TopK != nil {
+		options["top_k"] = *req.TopK
+	}
+	if req.TopP != nil {
+		options["top_p"] = *req.TopP
+	}
+	if req.RepeatPenalty != nil {
+		options["repeat_penalty"] = *req.RepeatPenalty
+	}
+	if req.Seed != nil {
+		options["seed"] = *req.Seed
+	}
+	if req.MinP != nil {
+		options["min_p"] = *req.MinP
+	}
+	if req.PresencePenalty != nil {
+		options["presence_penalty"] = *req.PresencePenalty
+	}
+	if req.FrequencyPenalty != nil {
+		options["frequency_penalty"] = *req.FrequencyPenalty
+	}
+	if req.NumPredict != nil && *req.NumPredict >= 0 {
+		options["num_predict"] = *req.NumPredict
+	}
+	if req.NumGPU != nil && *req.NumGPU >= 0 {
+		options["num_gpu"] = *req.NumGPU
+	}
+	if req.NumThread != nil && *req.NumThread >= 0 {
+		options["num_thread"] = *req.NumThread
+	}
+
+	genReq := GenerateRequest{
+		Model:  req.Model,
+		Prompt: req.Prompt,
+		Stream: true,
+	}
+	if req.SystemPrompt != "" {
+		genReq.System = req.SystemPrompt
+	}
+	if len(options) > 0 {
+		genReq.Options = options
+	}
+
+	stream, err := client.StreamGenerate(genReq)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	defer stream.Close()
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Transfer-Encoding", "chunked")
+
+	c.Stream(func(w io.Writer) bool {
+		scanner := bufio.NewScanner(stream)
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			if len(line) == 0 {
+				continue
+			}
+			c.SSEvent("message", string(line))
+		}
+		if err := scanner.Err(); err != nil {
+			c.SSEvent("error", err.Error())
+		} else {
+			c.SSEvent("done", "stream finished")
+		}
+		return false
+	})
+}
+
+func getModelCardHandler(c *gin.Context) {
+	name := c.Query("name")
+	if name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name parameter is required"})
+		return
+	}
+
+	// 1. Check if Hugging Face model
+	if strings.Contains(name, "hf.co/") || strings.Contains(name, "/") {
+		cleaned := name
+		if strings.HasPrefix(cleaned, "hf.co/") {
+			cleaned = strings.TrimPrefix(cleaned, "hf.co/")
+		}
+		parts := strings.Split(cleaned, ":")
+		repo := parts[0]
+
+		url := fmt.Sprintf("https://huggingface.co/%s/raw/main/README.md", repo)
+		httpClient := &http.Client{Timeout: 8 * time.Second}
+		resp, err := httpClient.Get(url)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("Failed to fetch Hugging Face README: %v", err)})
+			return
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			// Fallback to master
+			urlFallback := fmt.Sprintf("https://huggingface.co/%s/raw/master/README.md", repo)
+			respFallback, err := httpClient.Get(urlFallback)
+			if err == nil {
+				defer respFallback.Body.Close()
+				if respFallback.StatusCode == http.StatusOK {
+					body, _ := io.ReadAll(respFallback.Body)
+					c.String(http.StatusOK, string(body))
+					return
+				}
+			}
+			c.JSON(resp.StatusCode, gin.H{"error": fmt.Sprintf("Hugging Face raw README returned status: %d", resp.StatusCode)})
+			return
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to read body: %v", err)})
+			return
+		}
+		c.String(http.StatusOK, string(body))
+		return
+	}
+
+	// 2. Otherwise Ollama Library model
+	parts := strings.Split(name, ":")
+	baseName := parts[0]
+
+	url := fmt.Sprintf("https://ollama.com/library/%s", baseName)
+	httpClient := &http.Client{Timeout: 8 * time.Second}
+	resp, err := httpClient.Get(url)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("Failed to fetch Ollama Library page: %v", err)})
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		c.JSON(resp.StatusCode, gin.H{"error": fmt.Sprintf("Ollama Library page returned status: %d", resp.StatusCode)})
+		return
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to read body: %v", err)})
+		return
+	}
+
+	c.String(http.StatusOK, string(body))
+}
+

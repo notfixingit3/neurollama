@@ -279,6 +279,15 @@ type ChatRequest struct {
 	Options  map[string]interface{} `json:"options,omitempty"`
 }
 
+type GenerateRequest struct {
+	Model    string                 `json:"model"`
+	Prompt   string                 `json:"prompt"`
+	System   string                 `json:"system,omitempty"`
+	Template string                 `json:"template,omitempty"`
+	Stream   bool                   `json:"stream"`
+	Options  map[string]interface{} `json:"options,omitempty"`
+}
+
 type CreateRequest struct {
 	Name      string `json:"name"`
 	Modelfile string `json:"modelfile"`
@@ -359,6 +368,33 @@ func (c *OllamaClient) StreamChat(chatReq ChatRequest) (io.ReadCloser, error) {
 
 	return resp.Body, nil
 }
+
+// StreamGenerate issues a raw text completion generation stream request
+func (c *OllamaClient) StreamGenerate(genReq GenerateRequest) (io.ReadCloser, error) {
+	reqBody, err := json.Marshal(genReq)
+	if err != nil {
+		return nil, err
+	}
+
+	longClient := &http.Client{}
+	resp, err := longClient.Post(
+		fmt.Sprintf("%s/api/generate", c.BaseURL),
+		"application/json",
+		bytes.NewBuffer(reqBody),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start generate stream: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("generate stream failed, status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	return resp.Body, nil
+}
+
 
 // StreamCreate issues a model creation request
 func (c *OllamaClient) StreamCreate(createReq CreateRequest) (io.ReadCloser, error) {

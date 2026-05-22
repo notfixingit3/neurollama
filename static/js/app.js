@@ -73,6 +73,32 @@ async function init() {
   // Initialize collapsible sidebars state
   initSidebarState();
 
+  // Load Completion workspace configurations
+  loadCompletionSettings();
+
+  // Bind change/input event listeners to auto-save completion parameters
+  const completionConfigIdsList = [
+    'completion-model-select',
+    'completion-system-prompt',
+    'completion-temp',
+    'completion-ctx-limit',
+    'completion-top-k',
+    'completion-top-p',
+    'completion-repeat-penalty',
+    'completion-num-predict',
+    'completion-num-gpu',
+    'completion-num-thread',
+    'completion-prompt-text',
+    'completion-document-text'
+  ];
+  completionConfigIdsList.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('input', saveCompletionSettings);
+      el.addEventListener('change', saveCompletionSettings);
+    }
+  });
+
   // Restore active workspace
   const savedWorkspace = localStorage.getItem('active-workspace') || 'inventory';
   switchWorkspace(savedWorkspace);
@@ -84,13 +110,17 @@ function switchWorkspace(workspace) {
     showToast('A chat stream is in progress. Please wait.', 'warning');
     return;
   }
+  if (isGeneratingCompletion) {
+    showToast('A completion generation is in progress. Please wait.', 'warning');
+    return;
+  }
   if (isBuildingModel) {
     showToast('A model compilation is in progress.', 'warning');
     return;
   }
 
   // Toggle buttons
-  const tabs = ['inventory', 'playground', 'builder', 'memory'];
+  const tabs = ['inventory', 'playground', 'completion', 'builder', 'memory'];
   tabs.forEach(t => {
     const btn = document.getElementById(`ws-tab-${t}`);
     const panel = document.getElementById(`ws-panel-${t}`);
@@ -114,6 +144,8 @@ function switchWorkspace(workspace) {
     populateModelDropdowns();
     fetchPresets();
     fetchSavedChats();
+  } else if (workspace === 'completion') {
+    populateModelDropdowns();
   } else if (workspace === 'builder') {
     populateModelDropdowns();
     generateModelfilePreview();
@@ -123,6 +155,7 @@ function switchWorkspace(workspace) {
 function populateModelDropdowns() {
   const chatSelect = document.getElementById('chat-model-select');
   const builderSelect = document.getElementById('builder-base-select');
+  const completionSelect = document.getElementById('completion-model-select');
 
   // Filter out models that might not have values
   const options = models.map(m => {
@@ -131,11 +164,20 @@ function populateModelDropdowns() {
   }).join('');
 
   if (models.length === 0) {
-    chatSelect.innerHTML = '<option value="">-- No models available --</option>';
-    builderSelect.innerHTML = '<option value="">-- No models available --</option>';
+    const noModels = '<option value="">-- No models available --</option>';
+    if (chatSelect) chatSelect.innerHTML = noModels;
+    if (builderSelect) builderSelect.innerHTML = noModels;
+    if (completionSelect) completionSelect.innerHTML = noModels;
   } else {
-    chatSelect.innerHTML = options;
-    builderSelect.innerHTML = options;
+    if (chatSelect) chatSelect.innerHTML = options;
+    if (builderSelect) builderSelect.innerHTML = options;
+    if (completionSelect) {
+      const currentSelected = completionSelect.value;
+      completionSelect.innerHTML = options;
+      if (currentSelected && completionSelect.querySelector(`option[value="${currentSelected}"]`)) {
+        completionSelect.value = currentSelected;
+      }
+    }
   }
 }
 
@@ -844,13 +886,15 @@ function clearInspectedModel() {
 
 function switchDetailTab(tabName) {
   // Update buttons
-  const tabs = ['modelfile', 'parameters', 'template', 'system'];
+  const tabs = ['modelfile', 'parameters', 'template', 'system', 'card'];
   tabs.forEach(t => {
     const btn = document.getElementById(`ws-tab-${t}`);
-    if (t === tabName) {
-      btn.classList.add('tab-active');
-    } else {
-      btn.classList.remove('tab-active');
+    if (btn) {
+      if (t === tabName) {
+        btn.classList.add('tab-active');
+      } else {
+        btn.classList.remove('tab-active');
+      }
     }
   });
 
@@ -862,28 +906,33 @@ function renderTabContent() {
   if (!inspectedModel) return;
 
   const tabContent = document.getElementById('tab-content-text');
-  let content = '';
+  
+  // Clear HTML rendering styles
+  tabContent.className = "whitespace-pre-wrap break-all pr-8 leading-relaxed font-tech text-[11px] font-mono text-[#d8dee9]";
 
   switch (activeDetailTab) {
     case 'modelfile':
-      content = inspectedModel.modelfile || '# No Modelfile information available';
+      tabContent.textContent = inspectedModel.modelfile || '# No Modelfile information available';
       break;
     case 'parameters':
-      content = inspectedModel.parameters || '# No custom parameters defined';
+      tabContent.textContent = inspectedModel.parameters || '# No custom parameters defined';
       break;
     case 'template':
-      content = inspectedModel.template || '# No template prompt defined';
+      tabContent.textContent = inspectedModel.template || '# No template prompt defined';
       break;
     case 'system':
-      content = inspectedModel.system || '# No system prompt defined';
+      tabContent.textContent = inspectedModel.system || '# No system prompt defined';
+      break;
+    case 'card':
+      tabContent.textContent = 'Loading model card...';
+      fetchModelCard(inspectedModel.name, tabContent);
       break;
   }
-
-  tabContent.textContent = content;
 }
 
 function copyTabContent() {
-  const text = document.getElementById('tab-content-text').textContent;
+  const container = document.getElementById('tab-content-text');
+  const text = container.innerText || container.textContent;
   if (!text || text.startsWith('Retrieving') || text.startsWith('Loading')) return;
 
   navigator.clipboard.writeText(text).then(() => {
@@ -2515,6 +2564,683 @@ func main() {
 }
 `;
   }
+
+  return '';
+}
+
+// ==========================================
+// TIER 2 FEATURES (v0.0.9)
+// ==========================================
+
+// --- 1. PROMPT ENGINEERING TEMPLATES ---
+const PROMPT_TEMPLATES = {
+  chain_of_thought: `[System Instruction]
+You are a highly analytical assistant. Break down your reasoning step-by-step.
+
+[User Prompt]
+Problem: <Describe your problem here>
+Let's think step by step:
+1.`,
+  few_shot: `[System Instruction]
+You are a precise classifier. Follow the pattern shown in the examples.
+
+[User Prompt]
+Input: The product quality is amazing!
+Sentiment: Positive
+---
+Input: It took three weeks to arrive and was broken.
+Sentiment: Negative
+---
+Input: It works as expected, nothing special.
+Sentiment: Neutral
+---
+Input: <Insert your input here>
+Sentiment:`,
+  react: `[System Instruction]
+Solve the problem using the ReAct (Reason + Action) framework. Loop through Thought, Action, and Observation.
+
+[User Prompt]
+Question: <Describe your question here>
+Thought 1:`,
+  code_gen: `[System Instruction]
+You are an expert software engineer. Write clean, well-commented, and robust code.
+
+[User Prompt]
+Task: Write a function in <Programming Language> to <Describe task here>.
+Requirements:
+- Input: <Specify inputs>
+- Output: <Specify outputs>
+- Constraints: <Specify constraints>
+
+Code:`,
+  refine: `[System Instruction]
+You are a professional editor. Improve the clarity, flow, and correctness of the provided text.
+
+[User Prompt]
+Original Text:
+"""
+<Insert original text here>
+"""
+
+Instructions:
+1. Correct grammar and syntax errors.
+2. Improve word choice for a more professional tone.
+3. Output the polished text followed by a brief summary of changes.`
+};
+
+function applyPromptTemplate() {
+  const select = document.getElementById('chat-template-select');
+  if (!select) return;
+  const val = select.value;
+  if (!val) return;
+
+  const templateText = PROMPT_TEMPLATES[val];
+  if (!templateText) return;
+
+  const textarea = document.getElementById('chat-input-text');
+  if (!textarea) return;
+
+  const currentVal = textarea.value.trim();
+  if (currentVal.length > 0) {
+    if (confirm("Would you like to overwrite the current input? (Click Cancel to append instead)")) {
+      textarea.value = templateText;
+    } else {
+      textarea.value = currentVal + "\n\n" + templateText;
+    }
+  } else {
+    textarea.value = templateText;
+  }
+
+  select.value = "";
+  textarea.focus();
+}
+
+// --- 2. EXPORT & SHARE SYSTEM ---
+function openExportModal() {
+  const modal = document.getElementById('chat-export-modal');
+  if (modal) modal.showModal();
+}
+
+function closeExportModal() {
+  const modal = document.getElementById('chat-export-modal');
+  if (modal) modal.close();
+}
+
+function exportChat(format) {
+  if (chatMessages.length === 0) {
+    showToast('Cannot export empty chat session', 'warning');
+    return;
+  }
+
+  const model = document.getElementById('chat-model-select').value || 'unknown-model';
+  const sysPrompt = document.getElementById('chat-system-prompt').value;
+  const temp = document.getElementById('chat-temp').value;
+  const ctx = document.getElementById('chat-ctx-limit').value;
+  const topK = document.getElementById('chat-top-k').value;
+  const topP = document.getElementById('chat-top-p').value;
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const filename = `chat_export_${model.replace(/[^a-zA-Z0-9]/g, '_')}_${timestamp}`;
+
+  if (format === 'markdown') {
+    let md = `# Chat Session Export\\n`;
+    md += `- **Date**: \${new Date().toLocaleString()}\\n`;
+    md += `- **Model**: \\\`\${model}\\\`\\n`;
+    md += `- **Parameters**: Temperature: \\\`\${temp}\\\` | Context Limit: \\\`\${ctx}\\\` | Top P: \\\`\${topP}\\\` | Top K: \\\`\${topK}\\\`\\n\\n`;
+    
+    if (sysPrompt) {
+      md += `### System Prompt\\n\\\`\\\`\\\`\\n\${sysPrompt}\\n\\\`\\\`\\\`\\n\\n`;
+    }
+    md += `---\\n\\n`;
+
+    chatMessages.forEach(msg => {
+      const roleUpper = msg.role.toUpperCase();
+      md += `## \${roleUpper}\\n\\n\${msg.content}\\n\\n`;
+    });
+
+    downloadFile(md, `\${filename}.md`, 'text/markdown');
+    showToast('Chat exported as Markdown', 'success');
+  } 
+  else if (format === 'json') {
+    const data = {
+      exported_at: new Date().toISOString(),
+      model: model,
+      system_prompt: sysPrompt,
+      parameters: {
+        temperature: parseFloat(temp),
+        num_ctx: parseInt(ctx),
+        top_k: parseInt(topK),
+        top_p: parseFloat(topP),
+        repeat_penalty: parseFloat(document.getElementById('chat-repeat-penalty').value),
+        seed: document.getElementById('chat-seed').value ? parseInt(document.getElementById('chat-seed').value) : null,
+        min_p: parseFloat(document.getElementById('chat-min-p').value),
+        presence_penalty: parseFloat(document.getElementById('chat-presence-penalty').value),
+        frequency_penalty: parseFloat(document.getElementById('chat-frequency-penalty').value),
+        num_predict: parseInt(document.getElementById('chat-num-predict').value) || -1,
+        num_gpu: parseInt(document.getElementById('chat-num-gpu').value) || -1,
+        num_thread: parseInt(document.getElementById('chat-num-thread').value) || -1
+      },
+      messages: chatMessages
+    };
+
+    downloadFile(JSON.stringify(data, null, 2), `\${filename}.json`, 'application/json');
+    showToast('Chat exported as JSON', 'success');
+  } 
+  else if (format === 'html' || format === 'pdf') {
+    const htmlContent = generateHtmlExportString(model, sysPrompt, temp, ctx, topK, topP, chatMessages);
+    
+    if (format === 'html') {
+      downloadFile(htmlContent, `\${filename}.html`, 'text/html');
+      showToast('Chat exported as HTML', 'success');
+    } else {
+      const printWindow = window.open('', '_blank');
+      if (printWindow) {
+        printWindow.document.write(htmlContent);
+        printWindow.document.close();
+        
+        const printScript = printWindow.document.createElement('script');
+        printScript.innerHTML = `
+          window.addEventListener('load', () => {
+            setTimeout(() => {
+              window.print();
+            }, 500);
+          });
+        `;
+        printWindow.document.body.appendChild(printScript);
+        showToast('Print dialog requested', 'success');
+      } else {
+        showToast('Pop-up blocked! Please allow pop-ups to print/export PDF.', 'error');
+      }
+    }
+  }
+
+  closeExportModal();
+}
+
+function downloadFile(content, filename, contentType) {
+  const blob = new Blob([content], { type: contentType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function generateHtmlExportString(model, sysPrompt, temp, ctx, topK, topP, messages) {
+  let messageHtml = '';
+  
+  if (sysPrompt) {
+    messageHtml += `
+      <div class="message system">
+        <div class="message-header">SYSTEM PROMPT</div>
+        <div class="message-body">\${escapeHTML(sysPrompt)}</div>
+      </div>
+    `;
+  }
+
+  messages.forEach(msg => {
+    const roleClass = msg.role;
+    const roleLabel = msg.role.toUpperCase();
+    let body = escapeHTML(msg.content);
+    body = body.replace(/\`\`\`([\s\S]*?)\`\`\`/g, '<pre><code>$1</code></pre>');
+    
+    messageHtml += `
+      <div class="message \${roleClass}">
+        <div class="message-header">\${roleLabel}</div>
+        <div class="message-body">\${body}</div>
+      </div>
+    `;
+  });
+
+  return \`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Chat Log - \${model}</title>
+  <style>
+    :root {
+      --nord-bg-dark: #1a1c23;
+      --nord-bg: #2e3440;
+      --nord-bg-panel: #242933;
+      --nord-bg-hover: #3b4252;
+      --nord-fg: #d8dee9;
+      --nord-blue: #88c0d0;
+      --nord-green: #a3be8c;
+      --nord-yellow: #ebcb8b;
+      --nord-border: #4c566a;
+    }
+    
+    body {
+      background-color: var(--nord-bg-dark);
+      color: var(--nord-fg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      margin: 0;
+      padding: 40px 20px;
+    }
+    
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    
+    header {
+      background-color: var(--nord-bg-panel);
+      border: 1px solid var(--nord-border);
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 30px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+    }
+    
+    h1 {
+      margin: 0 0 10px 0;
+      font-size: 24px;
+      color: var(--nord-blue);
+      letter-spacing: 0.5px;
+    }
+    
+    .metadata {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+      margin-top: 15px;
+      font-size: 13px;
+      color: #81a1c1;
+    }
+    
+    .meta-item strong {
+      color: var(--nord-fg);
+    }
+    
+    .messages-list {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    
+    .message {
+      background-color: var(--nord-bg);
+      border: 1px solid var(--nord-border);
+      border-radius: 12px;
+      padding: 16px 20px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+    }
+    
+    .message.user {
+      border-left: 4px solid var(--nord-blue);
+      background-color: var(--nord-bg-hover);
+    }
+    
+    .message.assistant {
+      border-left: 4px solid var(--nord-green);
+    }
+    
+    .message.system {
+      border-left: 4px solid var(--nord-yellow);
+      background-color: var(--nord-bg-panel);
+      font-style: italic;
+    }
+    
+    .message-header {
+      font-size: 11px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+      color: #88c0d0;
+    }
+    
+    .message.user .message-header {
+      color: var(--nord-blue);
+    }
+    
+    .message.assistant .message-header {
+      color: var(--nord-green);
+    }
+    
+    .message.system .message-header {
+      color: var(--nord-yellow);
+    }
+    
+    .message-body {
+      font-size: 14px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    
+    pre {
+      background-color: var(--nord-bg-panel);
+      border: 1px solid var(--nord-border);
+      border-radius: 6px;
+      padding: 12px;
+      overflow-x: auto;
+      font-family: SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 13px;
+    }
+    
+    code {
+      font-family: SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+      background-color: rgba(255,255,255,0.05);
+      padding: 2px 4px;
+      border-radius: 4px;
+      font-size: 90%;
+    }
+    
+    pre code {
+      background-color: transparent;
+      padding: 0;
+      font-size: inherit;
+    }
+    
+    @media print {
+      body {
+        background-color: #ffffff;
+        color: #000000;
+        padding: 0;
+      }
+      
+      .message {
+        page-break-inside: avoid;
+        box-shadow: none;
+        border: 1px solid #cccccc;
+        background-color: #ffffff !important;
+      }
+      
+      header {
+        box-shadow: none;
+        border: 1px solid #cccccc;
+        background-color: #f9f9f9 !important;
+      }
+      
+      pre {
+        border: 1px solid #cccccc;
+        background-color: #f5f5f5 !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Chat Session Export</h1>
+      <div class="metadata">
+        <div class="meta-item"><strong>Model:</strong> \\\${escapeHTML(model)}</div>
+        <div class="meta-item"><strong>Date:</strong> \\\${new Date().toLocaleString()}</div>
+        <div class="meta-item"><strong>Temp:</strong> \\\${temp}</div>
+        <div class="meta-item"><strong>Ctx Limit:</strong> \\\${ctx} tokens</div>
+        <div class="meta-item"><strong>Top P:</strong> \\\${topP}</div>
+        <div class="meta-item"><strong>Top K:</strong> \\\${topK}</div>
+      </div>
+    </header>
+    
+    <div class="messages-list">
+      \\\${messageHtml}
+    </div>
+  </div>
+</body>
+</html>\`;
+}
+
+// --- 3. MODEL CARD FETCHING & PARSING ---
+async function fetchModelCard(modelName, container) {
+  try {
+    const resp = await fetch(`/api/models/card?name=\${encodeURIComponent(modelName)}`);
+    if (!resp.ok) {
+      throw new Error(\`Failed to fetch card: status \${resp.status}\`);
+    }
+    const body = await resp.text();
+
+    const isHF = modelName.includes('hf.co/') || modelName.includes('/');
+    if (isHF) {
+      if (window.marked) {
+        container.innerHTML = marked.parse(body);
+        container.classList.remove('font-mono');
+        container.classList.add('prose', 'prose-invert', 'max-w-none', 'p-2');
+      } else {
+        container.textContent = body;
+      }
+    } else {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(body, 'text/html');
+      const displayDiv = doc.getElementById('display') || doc.getElementById('readme') || doc.querySelector('.prose');
+      if (displayDiv) {
+        displayDiv.querySelectorAll('a').forEach(a => {
+          a.setAttribute('target', '_blank');
+          a.classList.add('text-[#88c0d0]', 'hover:underline');
+        });
+        container.innerHTML = displayDiv.innerHTML;
+        container.classList.remove('font-mono');
+        container.classList.add('prose', 'prose-invert', 'max-w-none', 'p-2');
+      } else {
+        container.innerHTML = doc.body.innerHTML;
+        container.classList.remove('font-mono');
+        container.classList.add('prose', 'prose-invert', 'max-w-none', 'p-2');
+      }
+    }
+  } catch (err) {
+    container.textContent = \`Error loading model card: \${err.message}\\n\\nYou can view the library page online at:\\n- Ollama: https://ollama.com/library/\${modelName.split(':')[0]}\\n- HuggingFace: https://huggingface.co/\${modelName}\`;
+  }
+}
+
+// --- 4. SINGLE-COMPLETION WORKSPACE ---
+let isGeneratingCompletion = false;
+let completionAbortController = null;
+
+const completionConfigIds = [
+  'completion-model-select',
+  'completion-system-prompt',
+  'completion-temp',
+  'completion-ctx-limit',
+  'completion-top-k',
+  'completion-top-p',
+  'completion-repeat-penalty',
+  'completion-num-predict',
+  'completion-num-gpu',
+  'completion-num-thread',
+  'completion-prompt-text',
+  'completion-document-text'
+];
+
+function saveCompletionSettings() {
+  completionConfigIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      localStorage.setItem(id, el.value);
+    }
+  });
+}
+
+function loadCompletionSettings() {
+  completionConfigIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      const saved = localStorage.getItem(id);
+      if (saved !== null) {
+        el.value = saved;
+        const valueEl = document.getElementById(id + '-value');
+        if (valueEl) {
+          valueEl.textContent = saved;
+        }
+      }
+    }
+  });
+}
+
+function clearCompletionPrompt() {
+  const textarea = document.getElementById('completion-prompt-text');
+  if (textarea) {
+    textarea.value = '';
+    saveCompletionSettings();
+  }
+}
+
+function clearCompletionDocument() {
+  const textarea = document.getElementById('completion-document-text');
+  if (textarea) {
+    textarea.value = '';
+    document.getElementById('completion-token-count').textContent = '0';
+    saveCompletionSettings();
+  }
+}
+
+function copyCompletionDocument() {
+  const textarea = document.getElementById('completion-document-text');
+  if (!textarea || !textarea.value) return;
+
+  navigator.clipboard.writeText(textarea.value).then(() => {
+    showToast('Document content copied to clipboard', 'success');
+  }).catch(err => {
+    showToast('Failed to copy document content', 'error');
+  });
+}
+
+function abortCompletion() {
+  if (completionAbortController) {
+    completionAbortController.abort();
+    showToast('Completion generation aborted', 'warning');
+  }
+}
+
+async function generateCompletion() {
+  if (isGeneratingCompletion) return;
+
+  const model = document.getElementById('completion-model-select').value;
+  if (!model) {
+    showToast('Please select a model for completion', 'warning');
+    return;
+  }
+
+  const prompt = document.getElementById('completion-prompt-text').value.trim();
+  if (!prompt) {
+    showToast('Please enter a completion prompt', 'warning');
+    return;
+  }
+
+  const sysPrompt = document.getElementById('completion-system-prompt').value;
+  const temp = parseFloat(document.getElementById('completion-temp').value);
+  const ctx = parseInt(document.getElementById('completion-ctx-limit').value);
+  const topK = parseInt(document.getElementById('completion-top-k').value);
+  const topP = parseFloat(document.getElementById('completion-top-p').value);
+  const repeatPenalty = parseFloat(document.getElementById('completion-repeat-penalty').value);
+
+  const numPredictInputVal = document.getElementById('completion-num-predict').value;
+  const numPredict = (numPredictInputVal === '' || isNaN(parseInt(numPredictInputVal))) ? null : parseInt(numPredictInputVal);
+  const numGpuInputVal = document.getElementById('completion-num-gpu').value;
+  const numGpu = (numGpuInputVal === '' || isNaN(parseInt(numGpuInputVal))) ? null : parseInt(numGpuInputVal);
+  const numThreadInputVal = document.getElementById('completion-num-thread').value;
+  const numThread = (numThreadInputVal === '' || isNaN(parseInt(numThreadInputVal))) ? null : parseInt(numThreadInputVal);
+
+  isGeneratingCompletion = true;
+  document.getElementById('completion-generate-btn').disabled = true;
+  document.getElementById('completion-stop-btn').disabled = false;
+  
+  const statusText = document.getElementById('completion-status-text');
+  statusText.textContent = "GENERATING COMPLETION...";
+  statusText.parentElement.firstElementChild.classList.remove('bg-[#a3be8c]');
+  statusText.parentElement.firstElementChild.classList.add('bg-[#ebcb8b]');
+
+  const tokenCountEl = document.getElementById('completion-token-count');
+  let tokenCount = 0;
+  tokenCountEl.textContent = tokenCount.toString();
+
+  const docTextarea = document.getElementById('completion-document-text');
+  
+  if (docTextarea.value.trim() !== '') {
+    docTextarea.value += '\\n\\n';
+  }
+
+  completionAbortController = new AbortController();
+
+  const requestBody = {
+    model: model,
+    prompt: prompt,
+    system_prompt: sysPrompt,
+    temperature: temp,
+    num_ctx: ctx,
+    top_k: topK,
+    top_p: topP,
+    repeat_penalty: repeatPenalty,
+  };
+
+  if (numPredict !== null) requestBody.num_predict = numPredict;
+  if (numGpu !== null) requestBody.num_gpu = numGpu;
+  if (numThread !== null) requestBody.num_thread = numThread;
+
+  try {
+    const response = await fetch('/api/generate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestBody),
+      signal: completionAbortController.signal
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(\`Server returned \${response.status}: \${errText}\`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (line.trim() === '') continue;
+
+        if (line.startsWith('data: ')) {
+          const rawJson = line.slice(6).trim();
+          if (rawJson === 'stream finished' || rawJson === 'done') continue;
+          
+          try {
+            const data = JSON.parse(rawJson);
+            if (data.response) {
+              docTextarea.value += data.response;
+              docTextarea.scrollTop = docTextarea.scrollHeight;
+              
+              tokenCount++;
+              tokenCountEl.textContent = tokenCount.toString();
+            }
+          } catch (e) {
+            console.error('Error parsing SSE JSON:', e, rawJson);
+          }
+        }
+      }
+    }
+
+    statusText.textContent = "COMPLETION FINISHED";
+    showToast('Completion generation complete', 'success');
+
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      statusText.textContent = "COMPLETION ABORTED";
+    } else {
+      statusText.textContent = "ERROR: " + err.message;
+      showToast(\`Generation error: \${err.message}\`, 'error');
+    }
+  } finally {
+    isGeneratingCompletion = false;
+    document.getElementById('completion-generate-btn').disabled = false;
+    document.getElementById('completion-stop-btn').disabled = true;
+
+    statusText.parentElement.firstElementChild.classList.remove('bg-[#ebcb8b]');
+    statusText.parentElement.firstElementChild.classList.add('bg-[#a3be8c]');
+    
+    completionAbortController = null;
+    saveCompletionSettings();
+  }
+}
 
   return '';
 }
