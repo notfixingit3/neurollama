@@ -20,7 +20,7 @@
   - Visualize active context window consumption token-by-token or message-by-message, indicating current system prompt space and highlighting content about to be pruned.
 - [ ] **Automated Context Compression & Auto-Summarizer**
   - Prompt a background summary of older conversation threads when context limits are reached to maintain chat coherence over very long discussions.
-- [ ] **Multimodal Panel (Image & Vision Input & Base64 Processing)**
+- [x] **Multimodal Panel (Image & Vision Input & Base64 Processing)**
   - Support vision-capable models (e.g. LLaVA, BakLLaVA) by providing an image upload/preview area in the playground chat console and encoding images to base64 strings in `/api/chat` payloads.
 - [x] **Hugging Face & Ollama Library Model Cards**
   - Fetch and display the full Markdown model description cards from Hugging Face or Ollama registry inside the model details panel.

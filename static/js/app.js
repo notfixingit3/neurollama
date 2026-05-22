@@ -16,6 +16,7 @@ let isBuildingModel = false;
 let chatSessions = [];
 let activeChatId = null;
 let presets = [];
+let selectedImages = [];
 
 // Initialization
 document.addEventListener('DOMContentLoaded', () => {
@@ -98,6 +99,25 @@ async function init() {
       el.addEventListener('change', saveCompletionSettings);
     }
   });
+
+  // Bind paste event for images on chat input
+  const chatInputText = document.getElementById('chat-input-text');
+  if (chatInputText) {
+    chatInputText.addEventListener('paste', function(e) {
+      const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+      let hasImage = false;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+          const file = items[i].getAsFile();
+          handleChatImageFiles([file]);
+          hasImage = true;
+        }
+      }
+      if (hasImage) {
+        e.preventDefault();
+      }
+    });
+  }
 
   // Restore active workspace
   const savedWorkspace = localStorage.getItem('active-workspace') || 'inventory';
@@ -1019,10 +1039,19 @@ function renderChatHistory() {
   let html = '';
   chatMessages.forEach(msg => {
     if (msg.role === 'user') {
+      let imgHTML = '';
+      if (msg.images && msg.images.length > 0) {
+        imgHTML = '<div class="flex flex-wrap gap-2 mt-2">';
+        msg.images.forEach(img => {
+          const src = img.startsWith('data:') ? img : `data:image/jpeg;base64,${img}`;
+          imgHTML += `<img src="${src}" class="w-24 h-24 object-cover rounded border border-[#4c566a] hover:scale-105 transition-transform duration-200 cursor-pointer" onclick="viewFullImage('${src}')" />`;
+        });
+        imgHTML += '</div>';
+      }
       html += `
         <div class="chat chat-end animate-fade-in">
           <div class="chat-header text-[10px] text-[#4c566a] mb-1">USER // DEV</div>
-          <div class="chat-bubble bg-[#3b4252] border border-[#4c566a]/50 text-[#e5e9f0] leading-relaxed max-w-[85%] whitespace-pre-wrap">${escapeHTML(msg.content)}</div>
+          <div class="chat-bubble bg-[#3b4252] border border-[#4c566a]/50 text-[#e5e9f0] leading-relaxed max-w-[85%] whitespace-pre-wrap">${escapeHTML(msg.content)}${imgHTML}</div>
         </div>
       `;
     } else {
@@ -1096,7 +1125,15 @@ async function sendChatMessage() {
   const telemetry = document.getElementById('chat-telemetry');
 
   // Push User message
-  chatMessages.push({ role: 'user', content: promptText });
+  const userMsg = { role: 'user', content: promptText };
+  if (selectedImages && selectedImages.length > 0) {
+    userMsg.images = [...selectedImages];
+  }
+  chatMessages.push(userMsg);
+
+  // Clear selected images and update preview bar UI
+  selectedImages = [];
+  renderImagePreviews();
   
   // Create assistant response message slot
   const assistantMsgIndex = chatMessages.length;
@@ -1775,7 +1812,8 @@ async function switchChatSession(id) {
     const messages = await response.json();
     chatMessages = messages.map(msg => ({
       role: msg.role,
-      content: msg.content
+      content: msg.content,
+      images: msg.images || []
     }));
 
     const chat = chatSessions.find(c => c.id === id);
@@ -3242,5 +3280,83 @@ async function generateCompletion() {
   }
 }
 
-  return '';
+// --- MULTIMODAL / IMAGE HANDLERS ---
+
+function triggerChatImageUpload() {
+  const input = document.getElementById('chat-image-input');
+  if (input) {
+    input.value = '';
+    input.click();
+  }
+}
+
+function handleChatImageFiles(files) {
+  if (!files || files.length === 0) return;
+  
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    if (!file.type.startsWith('image/')) {
+      showToast('Only image files are supported', 'warning');
+      continue;
+    }
+    
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      const fullBase64 = e.target.result;
+      const commaIdx = fullBase64.indexOf(',');
+      let pureBase64 = fullBase64;
+      if (commaIdx !== -1) {
+        pureBase64 = fullBase64.substring(commaIdx + 1);
+      }
+      
+      selectedImages.push(pureBase64);
+      renderImagePreviews();
+    };
+    reader.readAsDataURL(file);
+  }
+}
+
+function removeSelectedImage(index) {
+  selectedImages.splice(index, 1);
+  renderImagePreviews();
+}
+
+function renderImagePreviews() {
+  const previewBar = document.getElementById('chat-image-preview-bar');
+  if (!previewBar) return;
+  
+  if (selectedImages.length === 0) {
+    previewBar.innerHTML = '';
+    return;
+  }
+  
+  let html = '';
+  selectedImages.forEach((img, idx) => {
+    const src = img.startsWith('data:') ? img : `data:image/jpeg;base64,${img}`;
+    html += `
+      <div class="relative w-16 h-16 group border border-[#4c566a] rounded overflow-hidden">
+        <img src="${src}" class="w-full h-full object-cover" />
+        <button onclick="removeSelectedImage(${idx})" class="absolute top-0 right-0 bg-[#bf616a] text-white rounded-bl w-5 h-5 flex items-center justify-center text-xs opacity-80 hover:opacity-100 transition-opacity" title="Remove">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+    `;
+  });
+  previewBar.innerHTML = html;
+}
+
+function viewFullImage(src) {
+  const modal = document.getElementById('image-lightbox-modal');
+  const img = document.getElementById('lightbox-image-el');
+  if (modal && img) {
+    img.src = src;
+    modal.showModal();
+  }
+}
+
+function closeImageLightbox() {
+  const modal = document.getElementById('image-lightbox-modal');
+  if (modal) {
+    modal.close();
+  }
 }

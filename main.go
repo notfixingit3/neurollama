@@ -534,7 +534,7 @@ func chatStreamHandler(c *gin.Context) {
 	// Write user message to DB if chat session is active
 	if req.ChatID != nil && *req.ChatID > 0 && len(req.Messages) > 0 {
 		lastMsg := req.Messages[len(req.Messages)-1]
-		if err := SaveChatMessage(*req.ChatID, lastMsg.Role, lastMsg.Content); err != nil {
+		if err := SaveChatMessage(*req.ChatID, lastMsg.Role, lastMsg.Content, lastMsg.Images); err != nil {
 			log.Printf("Error saving user prompt to db: %v", err)
 		}
 	}
@@ -571,7 +571,7 @@ func chatStreamHandler(c *gin.Context) {
 		} else {
 			// Save the assistant's complete accumulated response to SQLite
 			if req.ChatID != nil && *req.ChatID > 0 && len(accumulatedContent) > 0 {
-				if err := SaveChatMessage(*req.ChatID, "assistant", accumulatedContent); err != nil {
+				if err := SaveChatMessage(*req.ChatID, "assistant", accumulatedContent, nil); err != nil {
 					log.Printf("Error saving assistant response to db: %v", err)
 				}
 			}

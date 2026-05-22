@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -118,6 +119,7 @@ func migrate() error {
 			chat_id INTEGER NOT NULL,
 			role TEXT NOT NULL,
 			content TEXT NOT NULL,
+			images TEXT,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY(chat_id) REFERENCES chats(id) ON DELETE CASCADE
 		);`,
@@ -137,24 +139,26 @@ func migrate() error {
 
 	// Dynamic migrations for existing databases
 	alterQueries := []struct {
+		table  string
 		column string
 		query  string
 	}{
-		{"top_k", "ALTER TABLE chats ADD COLUMN top_k INTEGER NOT NULL DEFAULT 40"},
-		{"top_p", "ALTER TABLE chats ADD COLUMN top_p REAL NOT NULL DEFAULT 0.9"},
-		{"repeat_penalty", "ALTER TABLE chats ADD COLUMN repeat_penalty REAL NOT NULL DEFAULT 1.1"},
-		{"seed", "ALTER TABLE chats ADD COLUMN seed INTEGER"},
-		{"min_p", "ALTER TABLE chats ADD COLUMN min_p REAL NOT NULL DEFAULT 0.0"},
-		{"presence_penalty", "ALTER TABLE chats ADD COLUMN presence_penalty REAL NOT NULL DEFAULT 0.0"},
-		{"frequency_penalty", "ALTER TABLE chats ADD COLUMN frequency_penalty REAL NOT NULL DEFAULT 0.0"},
-		{"num_predict", "ALTER TABLE chats ADD COLUMN num_predict INTEGER NOT NULL DEFAULT -1"},
-		{"num_gpu", "ALTER TABLE chats ADD COLUMN num_gpu INTEGER NOT NULL DEFAULT -1"},
-		{"num_thread", "ALTER TABLE chats ADD COLUMN num_thread INTEGER NOT NULL DEFAULT -1"},
+		{"chats", "top_k", "ALTER TABLE chats ADD COLUMN top_k INTEGER NOT NULL DEFAULT 40"},
+		{"chats", "top_p", "ALTER TABLE chats ADD COLUMN top_p REAL NOT NULL DEFAULT 0.9"},
+		{"chats", "repeat_penalty", "ALTER TABLE chats ADD COLUMN repeat_penalty REAL NOT NULL DEFAULT 1.1"},
+		{"chats", "seed", "ALTER TABLE chats ADD COLUMN seed INTEGER"},
+		{"chats", "min_p", "ALTER TABLE chats ADD COLUMN min_p REAL NOT NULL DEFAULT 0.0"},
+		{"chats", "presence_penalty", "ALTER TABLE chats ADD COLUMN presence_penalty REAL NOT NULL DEFAULT 0.0"},
+		{"chats", "frequency_penalty", "ALTER TABLE chats ADD COLUMN frequency_penalty REAL NOT NULL DEFAULT 0.0"},
+		{"chats", "num_predict", "ALTER TABLE chats ADD COLUMN num_predict INTEGER NOT NULL DEFAULT -1"},
+		{"chats", "num_gpu", "ALTER TABLE chats ADD COLUMN num_gpu INTEGER NOT NULL DEFAULT -1"},
+		{"chats", "num_thread", "ALTER TABLE chats ADD COLUMN num_thread INTEGER NOT NULL DEFAULT -1"},
+		{"messages", "images", "ALTER TABLE messages ADD COLUMN images TEXT"},
 	}
 
 	for _, alter := range alterQueries {
-		if !columnExists("chats", alter.column) {
-			log.Printf("Adding column %s to chats table", alter.column)
+		if !columnExists(alter.table, alter.column) {
+			log.Printf("Adding column %s to %s table", alter.column, alter.table)
 			if _, err := DB.Exec(alter.query); err != nil {
 				return fmt.Errorf("failed to add column %s: %w", alter.column, err)
 			}
@@ -293,7 +297,7 @@ func DeleteChat(id int64) error {
 // Messages DB Helpers
 
 func GetChatMessages(chatId int64) ([]ChatMessage, error) {
-	rows, err := DB.Query("SELECT role, content FROM messages WHERE chat_id = ? ORDER BY id ASC", chatId)
+	rows, err := DB.Query("SELECT role, content, images FROM messages WHERE chat_id = ? ORDER BY id ASC", chatId)
 	if err != nil {
 		return nil, err
 	}
@@ -302,16 +306,30 @@ func GetChatMessages(chatId int64) ([]ChatMessage, error) {
 	var messages []ChatMessage
 	for rows.Next() {
 		var m ChatMessage
-		if err := rows.Scan(&m.Role, &m.Content); err != nil {
+		var imagesStr sql.NullString
+		if err := rows.Scan(&m.Role, &m.Content, &imagesStr); err != nil {
 			return nil, err
+		}
+		if imagesStr.Valid && imagesStr.String != "" {
+			var imgs []string
+			if err := json.Unmarshal([]byte(imagesStr.String), &imgs); err == nil {
+				m.Images = imgs
+			}
 		}
 		messages = append(messages, m)
 	}
 	return messages, nil
 }
 
-func SaveChatMessage(chatId int64, role, content string) error {
-	_, err := DB.Exec("INSERT INTO messages (chat_id, role, content) VALUES (?, ?, ?)", chatId, role, content)
+func SaveChatMessage(chatId int64, role, content string, images []string) error {
+	var imagesVal interface{}
+	if len(images) > 0 {
+		bytes, err := json.Marshal(images)
+		if err == nil {
+			imagesVal = string(bytes)
+		}
+	}
+	_, err := DB.Exec("INSERT INTO messages (chat_id, role, content, images) VALUES (?, ?, ?, ?)", chatId, role, content, imagesVal)
 	return err
 }
 

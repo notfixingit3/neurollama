@@ -528,12 +528,23 @@
               </div>
 
               <!-- Chat prompt input block -->
-              <div class="p-3 border-t border-[#4c566a]/50 bg-[#161820] flex gap-2 items-end">
-                <textarea id="chat-input-text" rows="2" placeholder="Type prompt query... (Cmd+Enter to send)" onkeydown="checkChatShortcut(event)"
-                          class="textarea textarea-sm textarea-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none flex-1 resize-none h-12 py-1.5"></textarea>
-                <button id="chat-send-btn" onclick="sendChatMessage()" class="btn btn-sm btn-info h-12 w-12 font-tech px-0 flex items-center justify-center">
-                  <i class="fa-solid fa-paper-plane text-sm"></i>
-                </button>
+              <div class="p-3 border-t border-[#4c566a]/50 bg-[#161820] flex flex-col gap-2">
+                <!-- Preview bar for uploaded images -->
+                <div id="chat-image-preview-bar" class="flex flex-wrap gap-2 empty:hidden"></div>
+
+                <div class="flex gap-2 items-end w-full">
+                  <!-- File input helper button -->
+                  <button onclick="triggerChatImageUpload()" class="btn btn-sm btn-outline border-[#4c566a] hover:bg-[#2e3440] hover:border-[#88c0d0] text-[#88c0d0] h-12 w-12 px-0 flex items-center justify-center" title="Upload Image">
+                    <i class="fa-solid fa-image text-lg"></i>
+                  </button>
+                  <input type="file" id="chat-image-input" class="hidden" accept="image/*" multiple onchange="handleChatImageFiles(this.files)" />
+
+                  <textarea id="chat-input-text" rows="2" placeholder="Type prompt query or paste image... (Cmd+Enter to send)" onkeydown="checkChatShortcut(event)"
+                            class="textarea textarea-sm textarea-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none flex-1 resize-none h-12 py-1.5"></textarea>
+                  <button id="chat-send-btn" onclick="sendChatMessage()" class="btn btn-sm btn-info h-12 w-12 font-tech px-0 flex items-center justify-center">
+                    <i class="fa-solid fa-paper-plane text-sm"></i>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -964,12 +975,20 @@
     </div>
   </dialog>
 
+  <!-- Image Lightbox Modal -->
+  <dialog id="image-lightbox-modal" class="modal bg-[#2e3440]/80">
+    <div class="modal-box bg-[#1e222a] border border-[#4c566a] p-4 max-w-3xl flex flex-col items-center gap-4 relative">
+      <button onclick="closeImageLightbox()" class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2 text-[#d8dee9] hover:bg-[#3b4252]">&times;</button>
+      <img id="lightbox-image-el" class="max-w-full max-h-[80vh] object-contain rounded border border-[#4c566a]" src="" alt="Full size preview" />
+    </div>
+  </dialog>
+
   <!-- Toast Notification System -->
   <div id="toast-container" class="toast toast-end toast-bottom z-50 p-6 space-y-2">
     <!-- Toast notifications dynamically injected here -->
   </div>
 
   <!-- App Script -->
-  <script src="/static/js/app.js?v=0.0.9"></script>
+  <script src="/static/js/app.js?v=0.1.0"></script>
 </body>
 </html>
