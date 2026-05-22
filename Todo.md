@@ -4,11 +4,11 @@
   - Plot live VRAM/RAM utilization, CPU/GPU temperatures, and generation speed (Tokens Per Second, Time to First Token) on the Memory tab.
 - [ ] **Local Document RAG (Retrieval-Augmented Generation) Panel**
   - Integrate a drag-and-drop document upload (PDF, TXT, MD) system that builds a client-side vector index to inject relevant context snippets into your chat.
-- [ ] **Interactive Modelfile Recipe Builder & Model Merger**
+- [x] **Interactive Modelfile Recipe Builder & Model Merger**
   - Build a visual editor to generate custom model configurations (system prompt, adapters, template structures, model weights merge recipe) and run compilation streams.
 - [x] **Chat Session Export & Share Center**
   - Add export utilities to save chat history along with performance telemetry as Markdown, HTML, JSON, or PDF documents.
-- [ ] **Active Chat Parameter Optimizer (Benchmarking Tool)**
+- [x] **Active Chat Parameter Optimizer (Benchmarking Tool)**
   - Run a benchmarking test suite across different hyperparameter values (Temperature, Top P, Top K) to output a readability and speed optimization report.
 - [x] **Structured Prompt Engineering Studio (Templates)**
   - Provide interactive templates for prompting frameworks (Chain-of-Thought, ReAct, Few-Shot, code generation) with variable placeholders.
