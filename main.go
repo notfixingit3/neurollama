@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -42,7 +43,18 @@ func main() {
 	}
 
 	// Initialize SQLite Database
-	if err := InitDB("data/ollama-manager.db"); err != nil {
+	dbPath := "data/neurollama.db"
+	oldDbPath := "data/ollama-manager.db"
+	if _, err := os.Stat(oldDbPath); err == nil {
+		if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+			log.Println("Migrating database file from ollama-manager.db to neurollama.db...")
+			if err := os.Rename(oldDbPath, dbPath); err != nil {
+				log.Printf("Warning: failed to rename database file: %v. Falling back to old path.", err)
+				dbPath = oldDbPath
+			}
+		}
+	}
+	if err := InitDB(dbPath); err != nil {
 		log.Fatalf("Error initializing database: %v", err)
 	}
 
@@ -57,7 +69,7 @@ func main() {
 	// HTML routes
 	r.GET("/", func(c *gin.Context) {
 		c.HTML(http.StatusOK, "index.html", gin.H{
-			"title": "Ollama Manager 2026",
+			"title": "NEUROLLAMA 2026",
 		})
 	})
 
@@ -97,7 +109,7 @@ func main() {
 		api.DELETE("/presets/:id", deletePresetHandler)
 	}
 
-	log.Println("Ollama Manager is starting on http://localhost:8080")
+	log.Println("NEUROLLAMA is starting on http://localhost:8080")
 	if err := r.Run(":8080"); err != nil {
 		log.Fatalf("Server failed to run: %v", err)
 	}

@@ -37,4 +37,6 @@ node_modules/
 data/
 ollama-manager
 ollama-manager-bin
+neurollama
+neurollama-bin
 

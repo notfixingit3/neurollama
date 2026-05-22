@@ -1,7 +1,7 @@
 {
-  "name": "ollama-manager-tailwind",
+  "name": "neurollama-tailwind",
   "version": "1.0.0",
-  "description": "Tailwind configuration for Ollama Manager",
+  "description": "Tailwind configuration for NEUROLLAMA",
   "main": "index.js",
   "scripts": {
     "build": "npx tailwindcss -i input.css -o ../static/css/output.css",

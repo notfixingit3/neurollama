@@ -1,4 +1,4 @@
-# Ollama Manager Roadmap & Feature Todo List
+# NEUROLLAMA Roadmap & Feature Todo List
 
 - [ ] **Real-time Telemetry & Performance Graphs**
   - Plot live VRAM/RAM utilization, CPU/GPU temperatures, and generation speed (Tokens Per Second, Time to First Token) on the Memory tab.

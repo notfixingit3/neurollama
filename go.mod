@@ -1,4 +1,4 @@
-module ollama-manager
+module neurollama
 
 go 1.26.3
 

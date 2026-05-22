@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="static/img/logo.png" alt="Ollama Manager Logo" width="220" height="220" style="border-radius: 16px; box-shadow: 0 8px 30px rgba(0,0,0,0.35);" />
+  <img src="static/img/logo.png" alt="NEUROLLAMA Logo" width="220" height="220" style="border-radius: 16px; box-shadow: 0 8px 30px rgba(0,0,0,0.35);" />
 </p>
 
-<h1 align="center">OLLAMA MANAGER</h1>
+<h1 align="center">NEUROLLAMA</h1>
 
 <p align="center">
   <strong>A premium, cybertech-inspired web control center for managing local & remote Ollama nodes.</strong>
@@ -20,16 +20,16 @@
 
 ## 🌌 Overview
 
-**Ollama Manager** is a lightweight, self-hosted web control panel that provides a beautiful, techy interface to connect, monitor, and query your Ollama instances. Styled using the **Nord Palette** and built with **Go (Gin)** and **Tailwind CSS/daisyUI**, it is designed to look like a futuristic command console from 2026.
+**NEUROLLAMA** is a lightweight, self-hosted web control panel that provides a beautiful, techy interface to connect, monitor, and query your Ollama instances. Styled using the **Nord Palette** and built with **Go (Gin)** and **Tailwind CSS/daisyUI**, it is designed to look like a futuristic command console from 2026.
 
-With Ollama Manager, you can connect to multiple local or remote servers, monitor active VRAM usage, inspect model parameters/configs, build new models using custom Modelfiles, and chat with models inside a premium Terminal Emulator Playground.
+With NEUROLLAMA, you can connect to multiple local or remote servers, monitor active VRAM usage, inspect model parameters/configs, build new models using custom Modelfiles, and chat with models inside a premium Terminal Emulator Playground.
 
 ---
 
 ## 📸 Screenshots
 
 <p align="center">
-  <img src="static/img/screenshot.png" alt="Ollama Manager Dashboard Interface" width="100%" style="border-radius: 12px; border: 1px solid #4c566a; box-shadow: 0 10px 25px rgba(0,0,0,0.3);" />
+  <img src="static/img/screenshot.png" alt="NEUROLLAMA Dashboard Interface" width="100%" style="border-radius: 12px; border: 1px solid #4c566a; box-shadow: 0 10px 25px rgba(0,0,0,0.3);" />
 </p>
 
 ---
@@ -93,12 +93,12 @@ With Ollama Manager, you can connect to multiple local or remote servers, monito
 
 3. **Compile the Go binary**:
    ```bash
-   go build -o ollama-manager .
+   go build -o neurollama .
    ```
 
 4. **Run the server**:
    ```bash
-   ./ollama-manager
+   ./neurollama
    ```
    The application will start on: **`http://localhost:8080`**
 
@@ -110,7 +110,7 @@ With Ollama Manager, you can connect to multiple local or remote servers, monito
 - **Environment Variables**:
   - `PORT`: Set a custom port for the server (defaults to `8080`).
     ```bash
-    PORT=9000 ./ollama-manager
+    PORT=9000 ./neurollama
     ```
 
 ---
