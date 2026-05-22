@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="nord">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{.title}}</title>
+  
+  <!-- Font Awesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Tailwind Output -->
+  <link rel="stylesheet" href="/static/css/output.css?v=0.0.8">
+</head>
+<body class="bg-[#2e3440] text-[#e5e9f0] h-screen overflow-hidden cyber-grid flex flex-col font-sans">
+
+  <!-- Header Banner -->
+  <header class="border-b border-[#4c566a] bg-[#242933]/90 backdrop-blur-md px-6 py-4 flex flex-wrap justify-between items-center z-20 sticky top-0 shadow-lg">
+    <div class="flex items-center gap-3">
+      <button onclick="toggleNodeRegistry()" class="btn btn-ghost border border-[#4c566a]/60 text-[#88c0d0] hover:bg-[#3b4252] h-9 w-9 flex items-center justify-center rounded-lg p-0" title="Toggle Node Registry">
+        <i id="toggle-registry-icon" class="fa-solid fa-chevron-left text-xs"></i>
+      </button>
+      <div class="h-9 w-9 bg-gradient-to-tr from-[#88c0d0] to-[#81a1c1] rounded-lg flex items-center justify-center shadow-md animate-pulse">
+        <i class="fa-solid fa-brain text-[#2e3440] text-lg"></i>
+      </div>
+      <div>
+        <h1 class="text-xl font-bold font-tech tracking-wider text-[#88c0d0] glow-text-blue flex items-center gap-2">
+          OLLAMA_MANAGER <span class="text-xs px-2 py-0.5 bg-[#4c566a] text-[#d8dee9] rounded font-mono">v0.0.8</span>
+        </h1>
+        <p class="text-[10px] uppercase font-mono tracking-widest text-[#4c566a] mt-0.5">Control Interface // Epoch 2026</p>
+      </div>
+    </div>
+    
+    <!-- Active Server Global Status -->
+    <div class="flex items-center gap-6 mt-3 sm:mt-0 bg-[#2e3440]/80 border border-[#4c566a]/60 px-4 py-2 rounded-lg font-tech text-xs">
+      <div class="flex items-center gap-2">
+        <span class="text-[#88c0d0]">ACTIVE_SRV:</span>
+        <span id="global-active-server-name" class="text-[#e5e9f0] font-semibold">---</span>
+      </div>
+      <div class="h-4 w-[1px] bg-[#4c566a]"></div>
+      <div class="flex items-center gap-2">
+        <span class="text-[#88c0d0]">LATENCY:</span>
+        <span id="global-active-server-latency" class="text-[#a3be8c]">-- ms</span>
+      </div>
+      <div class="h-4 w-[1px] bg-[#4c566a]"></div>
+      <div class="flex items-center gap-2">
+        <span class="text-[#88c0d0]">STATUS:</span>
+        <span class="flex items-center gap-1.5">
+          <span id="global-active-server-status-indicator" class="h-2.5 w-2.5 rounded-full bg-[#bf616a] inline-block"></span>
+          <span id="global-active-server-status-text" class="text-xs uppercase text-[#bf616a]">OFFLINE</span>
+        </span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Workspace Grid -->
+  <main class="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 overflow-hidden">
+    
+    <!-- Left Sidebar: Server connection list (3 cols) -->
+    <section id="node-registry-sidebar" class="lg:col-span-3 flex flex-col h-full overflow-hidden transition-all duration-300">
+      <div class="tech-panel tech-header-accent rounded-xl flex-1 flex flex-col p-4 overflow-hidden">
+        <div class="flex justify-between items-center mb-4 pb-2 border-b border-[#4c566a]/40">
+          <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
+            <i class="fa-solid fa-server mr-2"></i>Node Registry
+          </h2>
+          <button onclick="openAddServerModal()" class="btn btn-xs btn-outline btn-info font-tech tracking-wider gap-1 hover:tech-glow-blue">
+            <i class="fa-solid fa-plus text-[10px]"></i> ADD_NODE
+          </button>
+        </div>
+
+        <!-- Servers list container -->
+        <div id="server-list" class="flex-1 overflow-y-auto space-y-3 pr-1">
+          <!-- Loading skeleton -->
+          <div class="animate-pulse space-y-3">
+            <div class="h-16 bg-[#3b4252] rounded-lg"></div>
+            <div class="h-16 bg-[#3b4252] rounded-lg"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right Workspace Section: Tabs & Contents (9 cols) -->
+    <section id="main-workspace-section" class="lg:col-span-9 flex flex-col h-full overflow-hidden gap-4 transition-all duration-300">
+      
+      <!-- Top Workspace Tabs Bar -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-2 bg-[#242933]/60 p-1.5 border border-[#4c566a]/40 rounded-xl font-tech font-bold text-[10px] md:text-xs">
+        <button id="ws-tab-inventory" onclick="switchWorkspace('inventory')" class="ws-tab tab-active flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
+          <i class="fa-solid fa-tags text-[10px]"></i> INVENTORY & TELEMETRY
+        </button>
+        <button id="ws-tab-playground" onclick="switchWorkspace('playground')" class="ws-tab flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
+          <i class="fa-solid fa-terminal text-[10px]"></i> PLAYGROUND (CHAT)
+        </button>
+        <button id="ws-tab-builder" onclick="switchWorkspace('builder')" class="ws-tab flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
+          <i class="fa-solid fa-wrench text-[10px]"></i> MODEL BUILDER
+        </button>
+        <button id="ws-tab-memory" onclick="switchWorkspace('memory')" class="ws-tab flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
+          <i class="fa-solid fa-memory text-[10px]"></i> MEMORY STATUS
+        </button>
+      </div>
+
+      <!-- Workspace Panels Wrapper -->
+      <div class="flex-1 relative overflow-hidden">
+
+        <!-- PANEL 1: INVENTORY & TELEMETRY -->
+        <div id="ws-panel-inventory" class="ws-panel absolute inset-0 grid grid-cols-1 lg:grid-cols-12 gap-6 h-full overflow-hidden">
+          
+          <!-- Middle Panel: Model Registry & Pull Form (7 cols) -->
+          <div class="lg:col-span-7 flex flex-col h-full overflow-hidden gap-6">
+            <!-- Pull Model panel -->
+            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col">
+              <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] mb-3">
+                <i class="fa-solid fa-cloud-arrow-down mr-2"></i>Interrogate & Pull Model
+              </h2>
+              <form id="pull-model-form" onsubmit="handlePullModel(event)" class="flex gap-2">
+                <div class="relative flex-1">
+                  <input type="text" id="pull-model-name" placeholder="e.g. llama3:8b, mistral, qwen2.5:1.5b" required
+                         class="input input-sm input-bordered w-full bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none" />
+                </div>
+                <button type="submit" id="pull-btn" class="btn btn-sm btn-info font-tech tracking-wider gap-1 text-xs">
+                  <i class="fa-solid fa-download"></i> PULL
+                </button>
+              </form>
+
+              <!-- Pulling Progress Dashboard -->
+              <div id="pull-progress-container" class="hidden mt-4 p-3 bg-[#242933]/80 border border-[#4c566a]/60 rounded-lg font-mono text-xs space-y-2">
+                <div class="flex justify-between items-center text-[11px]">
+                  <span class="text-[#88c0d0] font-semibold flex items-center gap-1.5">
+                    <i class="fa-solid fa-circle-notch animate-spin text-[#88c0d0]"></i>
+                    <span id="pull-status-label">PULLING MANIFEST</span>
+                  </span>
+                  <span id="pull-percent" class="text-[#88c0d0] font-bold">0%</span>
+                </div>
+                <div class="progress-cyber w-full h-2 rounded-full overflow-hidden">
+                  <div id="pull-progress-bar" class="progress-cyber-bar h-full w-[0%]"></div>
+                </div>
+                <div class="flex justify-between text-[10px] text-[#4c566a]">
+                  <span id="pull-speed">-- MB/s</span>
+                  <span id="pull-bytes">-- MB / -- MB</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Models Registry List panel -->
+            <div class="tech-panel tech-header-accent rounded-xl flex-1 min-h-[180px] flex flex-col p-4 overflow-hidden">
+              <div class="flex justify-between items-center mb-3 pb-2 border-b border-[#4c566a]/40">
+                <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
+                  <i class="fa-solid fa-tags mr-2"></i>Model Inventory
+                </h2>
+                <!-- Batch Actions -->
+                <div id="batch-actions-container" class="hidden">
+                  <button id="batch-delete-btn" onclick="handleBatchDelete()" class="btn btn-xs btn-error gap-1 font-tech">
+                    <i class="fa-solid fa-trash text-[10px]"></i> DELETE_SELECTED (<span id="selected-count">0</span>)
+                  </button>
+                </div>
+              </div>
+
+              <!-- Models List Container -->
+              <div class="flex-1 overflow-auto">
+                <table class="table table-xs w-full text-left font-mono">
+                  <thead>
+                    <tr class="border-b border-[#4c566a]/50 text-[#88c0d0] uppercase tracking-wider text-[10px]">
+                      <th class="w-8">
+                        <input type="checkbox" id="select-all-checkbox" onchange="toggleSelectAllModels(this)" class="checkbox checkbox-xs checkbox-primary border-[#4c566a]" />
+                      </th>
+                      <th>Model Name</th>
+                      <th class="hidden sm:table-cell">Size</th>
+                      <th class="hidden md:table-cell">Parameters</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="models-list-body">
+                    <tr>
+                      <td colspan="5" class="text-center py-8 text-[#4c566a] italic">No active server connection</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Model Registry Explorer -->
+            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col h-[220px] overflow-hidden">
+              <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] mb-3 flex justify-between items-center">
+                <span><i class="fa-solid fa-compass mr-2"></i>Model Registry Explorer</span>
+                <span class="text-[10px] text-[#4c566a] uppercase font-mono">Ollama Library + Hugging Face</span>
+              </h2>
+
+              <!-- Hugging Face pull inline form -->
+              <div class="mb-3">
+                <form id="hf-pull-form" onsubmit="handleHfPull(event)" class="flex gap-2">
+                  <div class="relative flex-1">
+                    <span class="absolute inset-y-0 left-0 flex items-center pl-2.5 text-[#81a1c1] font-mono text-[9px]">HF_TAG:</span>
+                    <input type="text" id="hf-pull-name" placeholder="hf.co/bartowski/Llama-3-8B-Instruct-GGUF:Q4_K_M" required
+                           class="input input-xs input-bordered w-full pl-16 bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none" />
+                  </div>
+                  <button type="submit" id="hf-pull-btn" class="btn btn-xs btn-info font-tech tracking-wider text-[10px]">
+                    <i class="fa-solid fa-download"></i> HF_PULL
+                  </button>
+                </form>
+              </div>
+
+              <!-- Popular Models Catalog Header & Filter -->
+              <div class="flex justify-between items-center mb-2 pb-1 border-b border-[#4c566a]/20">
+                <span class="text-[10px] font-tech uppercase text-[#88c0d0]">Popular Models</span>
+                <input type="text" id="catalog-filter" placeholder="Filter catalog..." oninput="filterCatalog()"
+                       class="input input-xs input-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-[9px] w-36 focus:border-[#88c0d0] focus:outline-none" />
+              </div>
+
+              <!-- Popular Models List Grid (scrollable) -->
+              <div id="catalog-grid" class="flex-1 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-2 pr-1 text-xs">
+                <!-- Injected via JS -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Panel: Metadata & Inspecting (5 cols) -->
+          <div class="lg:col-span-5 flex flex-col h-full overflow-hidden">
+            <div class="tech-panel tech-header-accent rounded-xl flex-1 flex flex-col p-4 overflow-hidden">
+              <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] mb-4 pb-2 border-b border-[#4c566a]/40">
+                <i class="fa-solid fa-microchip mr-2"></i>Telemetry & Inspection
+              </h2>
+
+              <!-- Telemetry Details Panel -->
+              <div id="model-detail-panel" class="flex-1 flex flex-col overflow-hidden text-xs">
+                
+                <!-- Default Empty State -->
+                <div id="detail-empty-state" class="flex-1 flex flex-col items-center justify-center text-center p-6 text-[#4c566a] space-y-3">
+                  <div class="h-16 w-16 rounded-full border border-dashed border-[#4c566a] flex items-center justify-center text-2xl mb-2 animate-pulse">
+                    <i class="fa-solid fa-compass"></i>
+                  </div>
+                  <p class="font-tech uppercase tracking-widest text-[11px]">System Ready</p>
+                  <p class="text-[10px] max-w-[200px] leading-relaxed">Select a model card or click Inspect to view telemetry, prompts, and parameters.</p>
+                </div>
+
+                <!-- Active Details Content (Initially Hidden) -->
+                <div id="detail-content" class="hidden flex-1 flex flex-col overflow-hidden">
+                  <!-- Model Name and stats -->
+                  <div class="mb-4">
+                    <h3 id="detail-model-name" class="text-md font-bold font-tech text-[#e5e9f0] glow-text-blue truncate">llama3:8b</h3>
+                    <div class="flex flex-wrap gap-1.5 mt-2">
+                      <span id="badge-format" class="badge badge-outline border-[#4c566a] text-[#81a1c1] text-[10px] font-semibold">gguf</span>
+                      <span id="badge-family" class="badge badge-outline border-[#4c566a] text-[#88c0d0] text-[10px] font-semibold">llama</span>
+                      <span id="badge-quant" class="badge badge-outline border-[#4c566a] text-[#a3be8c] text-[10px] font-semibold">Q4_K_M</span>
+                      <span id="badge-params" class="badge badge-outline border-[#4c566a] text-[#ebcb8b] text-[10px] font-semibold">8B</span>
+                    </div>
+                  </div>
+
+                  <!-- Tab Selectors -->
+                  <div class="tabs tabs-boxed bg-[#242933]/60 p-1 border border-[#4c566a]/40 mb-3 grid grid-cols-4 text-center">
+                    <button id="ws-tab-modelfile" onclick="switchDetailTab('modelfile')" class="tab tab-xs tab-active text-[10px] font-tech font-bold transition-all">FILE</button>
+                    <button id="ws-tab-parameters" onclick="switchDetailTab('parameters')" class="tab tab-xs text-[10px] font-tech font-bold transition-all">PARAMS</button>
+                    <button id="ws-tab-template" onclick="switchDetailTab('template')" class="tab tab-xs text-[10px] font-tech font-bold transition-all">TEMPLATE</button>
+                    <button id="ws-tab-system" onclick="switchDetailTab('system')" class="tab tab-xs text-[10px] font-tech font-bold transition-all">SYSTEM</button>
+                  </div>
+
+                  <!-- Tab Contents -->
+                  <div class="flex-1 overflow-auto bg-[#1e222a] border border-[#4c566a]/60 rounded-lg p-3 text-[11px] font-mono text-[#d8dee9] relative">
+                    <button onclick="copyTabContent()" class="btn btn-xs btn-neutral absolute top-2 right-2 border-[#4c566a] hover:bg-[#4c566a]" title="Copy to clipboard">
+                      <i class="fa-regular fa-copy"></i>
+                    </button>
+                    <pre id="tab-content-text" class="whitespace-pre-wrap break-all pr-8 leading-relaxed font-tech">Loading metadata...</pre>
+                  </div>
+                  
+                  <div class="mt-3 text-[10px] text-[#4c566a] flex justify-between items-center">
+                    <span>Digest: <span id="detail-digest" class="font-mono text-[#81a1c1]">sha256:...</span></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PANEL 2: PLAYGROUND (CHAT) -->
+        <div id="ws-panel-playground" class="ws-panel hidden absolute inset-0 grid grid-cols-1 lg:grid-cols-12 gap-6 h-full overflow-hidden">
+          
+          <!-- Recent Chats Sidebar (3 cols) -->
+          <div id="playground-chats-sidebar" class="lg:col-span-3 flex flex-col h-full overflow-hidden transition-all duration-300">
+            <div class="tech-panel tech-header-accent rounded-xl flex-1 flex flex-col p-4 overflow-hidden">
+              <div class="flex justify-between items-center mb-3 pb-2 border-b border-[#4c566a]/40">
+                <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
+                  <i class="fa-solid fa-comments mr-2"></i>Recent Chats
+                </h2>
+                <button onclick="startNewChatSession()" class="btn btn-xs btn-outline btn-info font-tech tracking-wider gap-1 hover:tech-glow-blue" title="New Chat Session">
+                  <i class="fa-solid fa-plus text-[10px]"></i> NEW
+                </button>
+              </div>
+
+              <!-- Chats list container -->
+              <div id="chat-sessions-list" class="flex-1 overflow-y-auto space-y-2 pr-1 font-mono text-xs">
+                <div class="animate-pulse space-y-3">
+                  <div class="h-12 bg-[#3b4252]/40 rounded-lg"></div>
+                  <div class="h-12 bg-[#3b4252]/40 rounded-lg"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Settings Column (3 cols) -->
+          <div id="playground-config-sidebar" class="lg:col-span-3 flex flex-col h-full overflow-hidden transition-all duration-300">
+            <div class="tech-panel tech-header-accent rounded-xl flex-1 min-h-0 p-4 flex flex-col overflow-y-auto gap-4">
+              <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] border-b border-[#4c566a]/40 pb-2">
+                <i class="fa-solid fa-sliders mr-2"></i>Playground Config
+              </h2>
+
+              <!-- Model select -->
+              <div class="form-control">
+                <label class="label pt-0"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Model Selection</span></label>
+                <select id="chat-model-select" class="select select-sm select-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                  <option value="">-- No models available --</option>
+                </select>
+              </div>
+
+              <!-- System prompt Preset selector dropdown & Save -->
+              <div class="form-control">
+                <div class="flex justify-between items-center mb-1">
+                  <label class="label p-0"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">System Presets</span></label>
+                  <div class="flex gap-1.5">
+                    <button onclick="savePresetPrompt()" class="btn btn-neutral btn-xs border-[#4c566a] font-tech text-[9px] px-1 py-0" title="Save current override as preset">SAVE</button>
+                    <button id="delete-preset-btn" onclick="deleteActivePreset()" class="btn btn-neutral btn-xs border-[#4c566a] font-tech text-[9px] px-1 py-0 text-[#bf616a] hidden" title="Delete selected preset">DELETE</button>
+                  </div>
+                </div>
+                <select id="chat-preset-select" onchange="applyPresetPrompt()" class="select select-sm select-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                  <option value="">-- Custom Prompt --</option>
+                </select>
+              </div>
+
+              <!-- System prompt configuration -->
+              <div class="form-control">
+                <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">System Override</span></label>
+                <textarea id="chat-system-prompt" rows="3" placeholder="Define custom behavior..."
+                          class="textarea textarea-sm textarea-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full resize-none"></textarea>
+              </div>
+
+              <!-- Advanced options section -->
+              <div class="border border-[#4c566a]/30 bg-[#2e3440]/30 rounded-lg p-4 space-y-3">
+                <div class="font-tech text-[10px] uppercase text-[#88c0d0] border-b border-[#4c566a]/30 pb-1.5 mb-2 font-bold">
+                  Advanced Options
+                </div>
+                <!-- Temperature slider -->
+                <div class="form-control">
+                  <div class="flex justify-between items-center mb-1">
+                    <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Temperature</span>
+                    <span id="chat-temp-value" class="text-xs font-mono text-[#88c0d0]">0.7</span>
+                  </div>
+                  <input type="range" id="chat-temp" min="0" max="1.5" step="0.1" value="0.7" oninput="document.getElementById('chat-temp-value').textContent = this.value"
+                         class="range range-xs range-info bg-[#4c566a]" />
+                </div>
+
+                <!-- Context limit input -->
+                <div class="form-control">
+                  <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Context Limit</span></label>
+                  <select id="chat-ctx-limit" class="select select-xs select-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                    <option value="2048" selected>2048 tokens</option>
+                    <option value="4096">4096 tokens</option>
+                    <option value="8192">8192 tokens</option>
+                    <option value="16384">16384 tokens</option>
+                  </select>
+                </div>
+
+                <!-- Top K -->
+                <div class="form-control">
+                  <div class="flex justify-between items-center mb-1">
+                    <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Top K</span>
+                    <span id="chat-top-k-value" class="text-xs font-mono text-[#88c0d0]">40</span>
+                  </div>
+                  <input type="range" id="chat-top-k" min="1" max="100" step="1" value="40" oninput="document.getElementById('chat-top-k-value').textContent = this.value"
+                         class="range range-xs range-info bg-[#4c566a]" />
+                </div>
+
+                <!-- Top P -->
+                <div class="form-control">
+                  <div class="flex justify-between items-center mb-1">
+                    <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Top P</span>
+                    <span id="chat-top-p-value" class="text-xs font-mono text-[#88c0d0]">0.90</span>
+                  </div>
+                  <input type="range" id="chat-top-p" min="0" max="1" step="0.05" value="0.9" oninput="document.getElementById('chat-top-p-value').textContent = parseFloat(this.value).toFixed(2)"
+                         class="range range-xs range-info bg-[#4c566a]" />
+                </div>
+
+                <!-- Repeat Penalty -->
+                <div class="form-control">
+                  <div class="flex justify-between items-center mb-1">
+                    <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Repeat Penalty</span>
+                    <span id="chat-repeat-penalty-value" class="text-xs font-mono text-[#88c0d0]">1.10</span>
+                  </div>
+                  <input type="range" id="chat-repeat-penalty" min="0.5" max="2" step="0.05" value="1.1" oninput="document.getElementById('chat-repeat-penalty-value').textContent = parseFloat(this.value).toFixed(2)"
+                         class="range range-xs range-info bg-[#4c566a]" />
+                </div>
+
+                <!-- Seed -->
+                <div class="form-control">
+                  <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Seed (Random/Fixed)</span></label>
+                  <input type="number" id="chat-seed" placeholder="e.g. 42 (empty for random)"
+                         class="input input-xs input-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                </div>
+
+                <!-- Min P -->
+                <div class="form-control">
+                  <div class="flex justify-between items-center mb-1">
+                    <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Min P</span>
+                    <span id="chat-min-p-value" class="text-xs font-mono text-[#88c0d0]">0.00</span>
+                  </div>
+                  <input type="range" id="chat-min-p" min="0" max="1" step="0.05" value="0.0" oninput="document.getElementById('chat-min-p-value').textContent = parseFloat(this.value).toFixed(2)"
+                         class="range range-xs range-info bg-[#4c566a]" />
+                </div>
+
+                <!-- Presence Penalty -->
+                <div class="form-control">
+                  <div class="flex justify-between items-center mb-1">
+                    <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Presence Penalty</span>
+                    <span id="chat-presence-penalty-value" class="text-xs font-mono text-[#88c0d0]">0.00</span>
+                  </div>
+                  <input type="range" id="chat-presence-penalty" min="-2" max="2" step="0.1" value="0.0" oninput="document.getElementById('chat-presence-penalty-value').textContent = parseFloat(this.value).toFixed(2)"
+                         class="range range-xs range-info bg-[#4c566a]" />
+                </div>
+
+                <!-- Frequency Penalty -->
+                <div class="form-control">
+                  <div class="flex justify-between items-center mb-1">
+                    <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Frequency Penalty</span>
+                    <span id="chat-frequency-penalty-value" class="text-xs font-mono text-[#88c0d0]">0.00</span>
+                  </div>
+                  <input type="range" id="chat-frequency-penalty" min="-2" max="2" step="0.1" value="0.0" oninput="document.getElementById('chat-frequency-penalty-value').textContent = parseFloat(this.value).toFixed(2)"
+                         class="range range-xs range-info bg-[#4c566a]" />
+                </div>
+
+                <!-- Max Tokens (num_predict) -->
+                <div class="form-control">
+                  <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Max Tokens (num_predict)</span></label>
+                  <input type="number" id="chat-num-predict" placeholder="-1 (default)"
+                         class="input input-xs input-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                </div>
+
+                <!-- GPU Layers (num_gpu) -->
+                <div class="form-control">
+                  <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">GPU Layers (num_gpu)</span></label>
+                  <input type="number" id="chat-num-gpu" placeholder="-1 (default)"
+                         class="input input-xs input-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                </div>
+
+                <!-- CPU Threads (num_thread) -->
+                <div class="form-control">
+                  <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">CPU Threads (num_thread)</span></label>
+                  <input type="number" id="chat-num-thread" placeholder="-1 (default)"
+                         class="input input-xs input-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                </div>
+
+                <!-- API Snippets trigger -->
+                <div class="pt-2 border-t border-[#4c566a]/30 mt-2">
+                  <button type="button" onclick="openApiSnippetsModal()" class="btn btn-xs btn-outline btn-info font-tech text-[10px] tracking-wider w-full gap-1">
+                    <i class="fa-solid fa-code"></i> API Snippets Generator
+                  </button>
+                </div>
+              </div>
+
+              <!-- Toggle Thinking Output -->
+              <div class="form-control">
+                <label class="label cursor-pointer flex justify-between items-center bg-[#2e3440]/30 px-3 py-2 rounded-lg border border-[#4c566a]/30 hover:border-[#4c566a]/60 transition-colors">
+                  <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0] flex items-center gap-1.5">
+                    <i class="fa-solid fa-microchip text-[11px]"></i> Render Thinking
+                  </span>
+                  <input type="checkbox" id="chat-toggle-thinking" checked onchange="renderChatHistory()" class="toggle toggle-xs toggle-info bg-[#4c566a]" />
+                </label>
+              </div>
+
+              <!-- Session reset -->
+              <button onclick="resetChatSession()" class="btn btn-sm btn-outline btn-error mt-auto font-tech tracking-wider gap-2">
+                <i class="fa-solid fa-trash-arrow-up"></i> RESET_SESSION
+              </button>
+            </div>
+          </div>
+
+          <!-- Chat Console Column (6 cols) -->
+          <div id="playground-console-column" class="lg:col-span-6 flex flex-col h-full overflow-hidden transition-all duration-300">
+            <div class="tech-panel tech-header-accent rounded-xl flex-1 flex flex-col overflow-hidden bg-[#1a1c23] scanline-effect border-[#4c566a]/70">
+              
+              <!-- Console Top Status Info -->
+              <div class="flex justify-between items-center px-3 py-1.5 border-b border-[#4c566a]/50 text-[10px] font-mono text-[#4c566a] bg-[#161820] min-h-[36px]">
+                <div class="flex items-center gap-2">
+                  <button onclick="togglePlaygroundSidebar('chats')" class="btn btn-ghost btn-xs px-1.5 py-0.5 text-[#88c0d0] hover:bg-[#2e3440] border border-[#4c566a]/30 h-6 min-h-0" title="Toggle Recent Chats">
+                    <i id="toggle-chats-icon" class="fa-solid fa-chevron-left"></i>
+                  </button>
+                  <span>TTY0 // <span id="chat-session-active-title">AWAITING_SESSION</span></span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span id="chat-telemetry" class="text-[#a3be8c]">Awaiting prompt...</span>
+                  <button onclick="togglePlaygroundSidebar('config')" class="btn btn-ghost btn-xs px-1.5 py-0.5 text-[#88c0d0] hover:bg-[#2e3440] border border-[#4c566a]/30 h-6 min-h-0" title="Toggle Configuration">
+                    <i id="toggle-config-icon" class="fa-solid fa-chevron-left"></i>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Chat messages scroll box -->
+              <div id="chat-message-history" class="flex-1 overflow-y-auto p-4 space-y-4 font-mono text-xs scroll-smooth">
+                <!-- Welcome prompt -->
+                <div class="chat chat-start">
+                  <div class="chat-image avatar">
+                    <div class="w-8 h-8 rounded-full border border-[#88c0d0] flex items-center justify-center bg-[#2e3440]">
+                      <i class="fa-solid fa-terminal text-[#88c0d0] text-xs"></i>
+                    </div>
+                  </div>
+                  <div class="chat-header text-[10px] text-[#4c566a] mb-1">SYSTEM // ROOT</div>
+                  <div class="chat-bubble bg-[#242933] border border-[#4c566a]/50 text-[#e5e9f0] leading-relaxed max-w-[85%]">
+                    Chat Console initialized. Select a model on the left panel, configure prompt arguments, and enter prompt query below to interface.
+                  </div>
+                </div>
+              </div>
+
+              <!-- Chat prompt input block -->
+              <div class="p-3 border-t border-[#4c566a]/50 bg-[#161820] flex gap-2 items-end">
+                <textarea id="chat-input-text" rows="2" placeholder="Type prompt query... (Cmd+Enter to send)" onkeydown="checkChatShortcut(event)"
+                          class="textarea textarea-sm textarea-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none flex-1 resize-none h-12 py-1.5"></textarea>
+                <button id="chat-send-btn" onclick="sendChatMessage()" class="btn btn-sm btn-info h-12 w-12 font-tech px-0 flex items-center justify-center">
+                  <i class="fa-solid fa-paper-plane text-sm"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PANEL 3: MODEL BUILDER -->
+        <div id="ws-panel-builder" class="ws-panel hidden absolute inset-0 grid grid-cols-1 lg:grid-cols-12 gap-6 h-full overflow-hidden">
+          
+          <!-- Builder Inputs (5 cols) -->
+          <div class="lg:col-span-5 flex flex-col h-full overflow-hidden">
+            <div class="tech-panel tech-header-accent rounded-xl flex-1 min-h-0 p-4 flex flex-col overflow-y-auto gap-4">
+              <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] border-b border-[#4c566a]/40 pb-2">
+                <i class="fa-solid fa-compass-drafting mr-2"></i>Model Recipe
+              </h2>
+
+              <!-- Base model select -->
+              <div class="form-control">
+                <label class="label pt-0"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Base Model (FROM)</span></label>
+                <select id="builder-base-select" onchange="generateModelfilePreview()" class="select select-sm select-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                  <option value="">-- No models available --</option>
+                </select>
+              </div>
+
+              <!-- New model name input -->
+              <div class="form-control">
+                <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">New Model Name</span></label>
+                <input type="text" id="builder-name-input" placeholder="e.g. customized-llama3" oninput="generateModelfilePreview()" required
+                       class="input input-sm input-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+              </div>
+
+              <!-- Temperature slider -->
+              <div class="form-control">
+                <div class="flex justify-between items-center mb-1">
+                  <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Temperature Parameter</span>
+                  <span id="builder-temp-value" class="text-xs font-mono text-[#88c0d0]">0.7</span>
+                </div>
+                <input type="range" id="builder-temp" min="0" max="1.5" step="0.1" value="0.7" oninput="document.getElementById('builder-temp-value').textContent = this.value; generateModelfilePreview()"
+                       class="range range-xs range-info bg-[#4c566a]" />
+              </div>
+
+              <!-- Context window limit -->
+              <div class="form-control">
+                <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Context Window Size</span></label>
+                <select id="builder-ctx-select" onchange="generateModelfilePreview()" class="select select-sm select-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                  <option value="2048" selected>2048 tokens</option>
+                  <option value="4096">4096 tokens</option>
+                  <option value="8192">8192 tokens</option>
+                </select>
+              </div>
+
+              <!-- Stop token inputs -->
+              <div class="form-control">
+                <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Custom Stop Sequence</span></label>
+                <input type="text" id="builder-stop-input" placeholder='e.g. "<|im_end|>"' oninput="generateModelfilePreview()"
+                       class="input input-sm input-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+              </div>
+
+              <!-- System instruction -->
+              <div class="form-control">
+                <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">System Directive</span></label>
+                <textarea id="builder-system-input" rows="4" placeholder="Instruction prompt defining custom model behavior..." oninput="generateModelfilePreview()"
+                          class="textarea textarea-sm textarea-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full resize-none"></textarea>
+              </div>
+            </div>
+          </div>
+
+          <!-- Compiler Preview & Output (7 cols) -->
+          <div class="lg:col-span-7 flex flex-col h-full overflow-hidden gap-4">
+            
+            <!-- Modelfile Preview -->
+            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col overflow-hidden h-[45%]">
+              <h2 class="text-xs font-tech font-bold uppercase tracking-wider text-[#88c0d0] mb-2 flex justify-between items-center">
+                <span>Modelfile Generation Preview</span>
+                <span class="text-[9px] text-[#4c566a] uppercase">Auto-Generated</span>
+              </h2>
+              <div class="flex-1 overflow-auto bg-[#1e222a] border border-[#4c566a]/60 rounded-lg p-3 text-[11px] font-mono text-[#d8dee9] relative">
+                <pre id="builder-modelfile-preview" class="whitespace-pre-wrap font-tech leading-relaxed">FROM ...</pre>
+              </div>
+              <button id="builder-compile-btn" onclick="buildCustomModel()" class="btn btn-sm btn-info font-tech tracking-wider mt-3 w-full">
+                <i class="fa-solid fa-cube mr-1"></i> COMPILE_MODEL // BUILD
+              </button>
+            </div>
+
+            <!-- Build Progress Console -->
+            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col overflow-hidden h-[55%] bg-[#1a1c23] scanline-effect border-[#4c566a]/70">
+              <h2 class="text-xs font-tech font-bold uppercase tracking-wider text-[#88c0d0] mb-2 border-b border-[#4c566a]/40 pb-1 flex justify-between items-center">
+                <span>Compiler Status Output</span>
+                <span id="compiler-indicator" class="h-2 w-2 rounded-full bg-[#4c566a]"></span>
+              </h2>
+              <div id="compiler-log-box" class="flex-1 overflow-y-auto bg-[#161820] border border-[#4c566a]/40 rounded-lg p-3 text-[11px] font-mono text-[#a3be8c] space-y-1">
+                <div class="text-[#4c566a] italic">Compiler idling... Set recipe options and press COMPILE_MODEL.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PANEL 4: MEMORY STATUS -->
+        <div id="ws-panel-memory" class="ws-panel hidden absolute inset-0 flex flex-col h-full overflow-hidden">
+          <div class="tech-panel tech-header-accent rounded-xl flex-1 flex flex-col p-4 overflow-hidden">
+            <div class="flex justify-between items-center mb-4 pb-2 border-b border-[#4c566a]/40">
+              <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
+                <i class="fa-solid fa-chart-pie mr-2"></i>Memory Allocation Telemetry
+              </h2>
+              <button onclick="fetchActiveModels()" class="btn btn-xs btn-outline btn-info font-tech gap-1">
+                <i class="fa-solid fa-rotate-right text-[10px]"></i> REFRESH_STATS
+              </button>
+            </div>
+
+            <!-- Telemetry active models grid -->
+            <div class="flex-1 overflow-y-auto pr-1">
+              <div id="memory-loading-spinner" class="hidden text-center py-12 text-[#4c566a]">
+                <i class="fa-solid fa-circle-notch animate-spin mr-2"></i> Interrogating RAM/VRAM allocations...
+              </div>
+
+              <div id="memory-models-container" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <!-- Loaded model cards injected here -->
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+  </main>
+
+  <!-- Tech Status Bar Footer -->
+  <footer class="h-10 border-t border-[#4c566a]/50 bg-[#242933]/90 backdrop-blur-md px-6 py-2.5 flex flex-wrap justify-between items-center z-20 text-[10px] font-mono text-[#d8dee9]/60 shrink-0">
+    <div class="flex items-center gap-4">
+      <span>© 2026 OLLAMA_MANAGER // MIT License</span>
+      <span class="hidden md:inline text-[#4c566a]">//</span>
+      <span class="hidden md:inline flex items-center gap-1.5">
+        SYSTEM: <span class="h-2 w-2 rounded-full bg-[#a3be8c]"></span> <span class="text-[#a3be8c] font-semibold">STABLE</span>
+      </span>
+    </div>
+    <div class="flex items-center gap-4">
+      <a href="https://github.com/notfixingit/ollama-manager" target="_blank" rel="noopener noreferrer" class="hover:text-[#88c0d0] transition-colors flex items-center gap-1.5">
+        <i class="fa-brands fa-github text-xs"></i> GitHub
+      </a>
+      <span class="text-[#4c566a]">//</span>
+      <a href="https://buymeacoffee.com/notfixingit" target="_blank" rel="noopener noreferrer" class="hover:text-[#ebcb8b] text-[#ebcb8b]/90 transition-colors flex items-center gap-1.5">
+        <i class="fa-solid fa-mug-hot text-xs"></i> Buy Me a Coffee
+      </a>
+    </div>
+  </footer>
+
+  <!-- Modals -->
+
+  <!-- Add Server Modal -->
+  <dialog id="add-server-modal" class="modal">
+    <div class="modal-box bg-[#2e3440] border border-[#4c566a] shadow-2xl p-6 max-w-sm rounded-xl">
+      <h3 class="font-tech font-bold text-sm text-[#88c0d0] uppercase tracking-wider mb-4 border-b border-[#4c566a]/40 pb-2">
+        <i class="fa-solid fa-server mr-2"></i>Add Ollama Node
+      </h3>
+      <form id="add-server-form" onsubmit="handleAddServer(event)" class="space-y-4">
+        <div class="form-control">
+          <label class="label pt-0"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Node Name</span></label>
+          <input type="text" id="add-server-name" placeholder="e.g. Local Machine, Remote Cloud" required 
+                 class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none" />
+        </div>
+        <div class="form-control">
+          <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Base URL</span></label>
+          <input type="url" id="add-server-url" placeholder="http://localhost:11434" required 
+                 class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none" />
+        </div>
+        <div class="modal-action mt-6 gap-2">
+          <button type="button" onclick="closeAddServerModal()" class="btn btn-sm btn-ghost font-tech text-xs">CANCEL</button>
+          <button type="submit" class="btn btn-sm btn-info font-tech text-xs">SAVE_NODE</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- Edit Server Modal -->
+  <dialog id="edit-server-modal" class="modal">
+    <div class="modal-box bg-[#2e3440] border border-[#4c566a] shadow-2xl p-6 max-w-sm rounded-xl">
+      <h3 class="font-tech font-bold text-sm text-[#88c0d0] uppercase tracking-wider mb-4 border-b border-[#4c566a]/40 pb-2">
+        <i class="fa-solid fa-pen mr-2"></i>Edit Ollama Node
+      </h3>
+      <form id="edit-server-form" onsubmit="handleEditServer(event)" class="space-y-4">
+        <input type="hidden" id="edit-server-id" />
+        <div class="form-control">
+          <label class="label pt-0"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Node Name</span></label>
+          <input type="text" id="edit-server-name" placeholder="e.g. Local Machine, Remote Cloud" required 
+                 class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none" />
+        </div>
+        <div class="form-control">
+          <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Base URL</span></label>
+          <input type="url" id="edit-server-url" placeholder="http://localhost:11434" required 
+                 class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none" />
+        </div>
+        <div class="modal-action mt-6 gap-2">
+          <button type="button" onclick="closeEditServerModal()" class="btn btn-sm btn-ghost font-tech text-xs">CANCEL</button>
+          <button type="submit" class="btn btn-sm btn-info font-tech text-xs">UPDATE_NODE</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- API Snippets Modal -->
+  <dialog id="api-snippets-modal" class="modal">
+    <div class="modal-box bg-[#2e3440] border border-[#4c566a] shadow-2xl p-6 max-w-2xl rounded-xl text-xs font-mono">
+      <div class="flex justify-between items-center border-b border-[#4c566a]/40 pb-3 mb-4">
+        <h3 class="text-sm font-tech font-bold text-[#88c0d0] uppercase tracking-wider">
+          <i class="fa-solid fa-code mr-2"></i> API Code Snippets
+        </h3>
+        <button onclick="closeApiSnippetsModal()" class="btn btn-sm btn-circle btn-ghost text-[#d8dee9] hover:bg-[#bf616a]/15 hover:text-[#bf616a] h-7 w-7 min-h-0">&times;</button>
+      </div>
+      
+      <!-- Snippet Tabs -->
+      <div class="flex gap-2 border-b border-[#4c566a]/30 pb-2 mb-4 overflow-x-auto">
+        <button onclick="switchSnippetTab('curl')" id="tab-snippet-curl" class="btn btn-xs btn-neutral border-[#4c566a] font-tech text-[10px] px-2.5 py-1">CURL</button>
+        <button onclick="switchSnippetTab('python')" id="tab-snippet-python" class="btn btn-xs btn-neutral border-[#4c566a] font-tech text-[10px] px-2.5 py-1">PYTHON</button>
+        <button onclick="switchSnippetTab('nodejs')" id="tab-snippet-nodejs" class="btn btn-xs btn-neutral border-[#4c566a] font-tech text-[10px] px-2.5 py-1">NODE.JS</button>
+        <button onclick="switchSnippetTab('go')" id="tab-snippet-go" class="btn btn-xs btn-neutral border-[#4c566a] font-tech text-[10px] px-2.5 py-1">GO</button>
+      </div>
+      
+      <div class="relative">
+        <pre id="snippet-code-block" class="bg-[#242933]/90 p-4 rounded-lg overflow-x-auto text-[#e5e9f0] border border-[#4c566a]/40 max-h-96 select-all font-mono leading-relaxed"></pre>
+        <button onclick="copySnippetToClipboard()" class="btn btn-xs btn-info absolute top-2 right-2 font-tech text-[9px] gap-1">
+          <i class="fa-solid fa-copy"></i> COPY
+        </button>
+      </div>
+      <div class="modal-action mt-4">
+        <button onclick="closeApiSnippetsModal()" class="btn btn-xs btn-neutral border-[#4c566a] font-tech text-[10px]">CLOSE</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Toast Notification System -->
+  <div id="toast-container" class="toast toast-end toast-bottom z-50 p-6 space-y-2">
+    <!-- Toast notifications dynamically injected here -->
+  </div>
+
+  <!-- App Script -->
+  <script src="/static/js/app.js?v=0.0.8"></script>
+</body>
+</html>

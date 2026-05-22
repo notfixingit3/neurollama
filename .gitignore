@@ -32,3 +32,9 @@ Thumbs.db
 # Sisyphus
 .sisyphus/
 node_modules/
+
+# Local database and compiled binary
+data/
+ollama-manager
+ollama-manager-bin
+

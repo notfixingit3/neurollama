@@ -1,0 +1,38 @@
+# Ollama Manager Roadmap & Feature Todo List
+
+- [ ] **Real-time Telemetry & Performance Graphs**
+  - Plot live VRAM/RAM utilization, CPU/GPU temperatures, and generation speed (Tokens Per Second, Time to First Token) on the Memory tab.
+- [ ] **Local Document RAG (Retrieval-Augmented Generation) Panel**
+  - Integrate a drag-and-drop document upload (PDF, TXT, MD) system that builds a client-side vector index to inject relevant context snippets into your chat.
+- [ ] **Interactive Modelfile Recipe Builder & Model Merger**
+  - Build a visual editor to generate custom model configurations (system prompt, adapters, template structures, model weights merge recipe) and run compilation streams.
+- [ ] **Chat Session Export & Share Center**
+  - Add export utilities to save chat history along with performance telemetry as Markdown, HTML, JSON, or PDF documents.
+- [ ] **Active Chat Parameter Optimizer (Benchmarking Tool)**
+  - Run a benchmarking test suite across different hyperparameter values (Temperature, Top P, Top K) to output a readability and speed optimization report.
+- [ ] **Structured Prompt Engineering Studio (Templates)**
+  - Provide interactive templates for prompting frameworks (Chain-of-Thought, ReAct, Few-Shot, code generation) with variable placeholders.
+- [x] **Code Snippet & API Code Generator**
+  - Add a copy-paste panel displaying ready-to-run API snippets (`curl`, Python, Node.js, Go) matching the active chat parameters.
+- [ ] **Automated Model Updates & Scheduler**
+  - Implement a background task planner to check the Ollama registry for newer tag builds and download updates during off-peak hours.
+- [ ] **Context Window Visualizer & Heatmap**
+  - Visualize active context window consumption token-by-token or message-by-message, indicating current system prompt space and highlighting content about to be pruned.
+- [ ] **Automated Context Compression & Auto-Summarizer**
+  - Prompt a background summary of older conversation threads when context limits are reached to maintain chat coherence over very long discussions.
+- [ ] **Multimodal Panel (Image & Vision Input & Base64 Processing)**
+  - Support vision-capable models (e.g. LLaVA, BakLLaVA) by providing an image upload/preview area in the playground chat console and encoding images to base64 strings in `/api/chat` payloads.
+- [ ] **Hugging Face & Ollama Library Model Cards**
+  - Fetch and display the full Markdown model description cards from Hugging Face or Ollama registry inside the model details panel.
+- [ ] **Pause/Resume Model Downloader with Network Speed Graphs**
+  - Show download speed timelines (MB/s) and remaining time estimates for active pulls, with support for pausing and resuming downloads.
+- [ ] **Local Model Benchmark Suite**
+  - Run standardized speed and reasoning accuracy tests across installed models, maintaining a local leaderboard ranking hardware performance.
+- [x] **Model Clone / Copy Tool (POST /api/copy)**
+  - Add a clone action button in Model Inventory to instantly duplicate a model locally under a new name without needing to redownload it.
+- [ ] **Single-Completion Workspace (POST /api/generate)**
+  - Support a separate completion-focused panel (e.g. for code completion, auto-fill, inline editing) that interacts with single-generation endpoints.
+- [x] **Additional Options parameters (min_p, presence_penalty, num_predict)**
+  - Expose additional Ollama sampler configuration sliders (like `min_p`, `presence_penalty`, `frequency_penalty`, and generation token limits like `num_predict`).
+- [x] **Hardware Thread & Layer Allocation Profile (num_gpu, num_thread)**
+  - Expose request-level hardware tuning controls (such as GPU layers offload `num_gpu` and CPU threads `num_thread`) inside the playground sidebar settings.

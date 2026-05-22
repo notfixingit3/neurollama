@@ -1,0 +1,387 @@
+package main
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"time"
+)
+
+// OllamaModel represents a model listed by the /api/tags endpoint
+type OllamaModel struct {
+	Name       string       `json:"name"`
+	ModifiedAt time.Time    `json:"modified_at"`
+	Size       int64        `json:"size"`
+	Digest     string       `json:"digest"`
+	Details    ModelDetails `json:"details"`
+}
+
+type ModelDetails struct {
+	Format            string   `json:"format"`
+	Family            string   `json:"family"`
+	Families          []string `json:"families"`
+	ParameterSize     string   `json:"parameter_size"`
+	QuantizationLevel string   `json:"quantization_level"`
+}
+
+type TagsResponse struct {
+	Models []OllamaModel `json:"models"`
+}
+
+type VersionResponse struct {
+	Version string `json:"version"`
+}
+
+type ShowResponse struct {
+	License    string                 `json:"license"`
+	Modelfile  string                 `json:"modelfile"`
+	Parameters string                 `json:"parameters"`
+	Template   string                 `json:"template"`
+	System     string                 `json:"system"`
+	Details    ModelDetails           `json:"details"`
+	ModelInfo  map[string]interface{} `json:"model_info"`
+}
+
+type PullProgress struct {
+	Status    string `json:"status"`
+	Digest    string `json:"digest,omitempty"`
+	Total     int64  `json:"total,omitempty"`
+	Completed int64  `json:"completed,omitempty"`
+}
+
+// OllamaClient interfaces with an Ollama Server
+type OllamaClient struct {
+	BaseURL    string
+	HTTPClient *http.Client
+}
+
+func NewOllamaClient(baseURL string) *OllamaClient {
+	return &OllamaClient{
+		BaseURL: baseURL,
+		HTTPClient: &http.Client{
+			Timeout: 10 * time.Second,
+		},
+	}
+}
+
+// CheckStatus verifies connection to Ollama and returns version and latency
+func (c *OllamaClient) CheckStatus() (string, time.Duration, error) {
+	start := time.Now()
+	resp, err := c.HTTPClient.Get(fmt.Sprintf("%s/api/version", c.BaseURL))
+	latency := time.Since(start)
+	if err != nil {
+		return "", 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", latency, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	var verResp VersionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&verResp); err != nil {
+		return "", latency, fmt.Errorf("failed to parse version: %w", err)
+	}
+
+	return verResp.Version, latency, nil
+}
+
+// ListModels fetches available models via /api/tags
+func (c *OllamaClient) ListModels() ([]OllamaModel, error) {
+	resp, err := c.HTTPClient.Get(fmt.Sprintf("%s/api/tags", c.BaseURL))
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to Ollama: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	var tagsResp TagsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tagsResp); err != nil {
+		return nil, fmt.Errorf("failed to parse tags response: %w", err)
+	}
+
+	return tagsResp.Models, nil
+}
+
+// GetModelDetails fetches info about a specific model via /api/show
+func (c *OllamaClient) GetModelDetails(name string) (*ShowResponse, error) {
+	reqBody, err := json.Marshal(map[string]string{"name": name})
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.HTTPClient.Post(
+		fmt.Sprintf("%s/api/show", c.BaseURL),
+		"application/json",
+		bytes.NewBuffer(reqBody),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to Ollama: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		// Read error response if any
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var showResp ShowResponse
+	if err := json.NewDecoder(resp.Body).Decode(&showResp); err != nil {
+		return nil, fmt.Errorf("failed to parse show response: %w", err)
+	}
+
+	return &showResp, nil
+}
+
+// DeleteModel removes a model via /api/delete
+func (c *OllamaClient) DeleteModel(name string) error {
+	reqBody, err := json.Marshal(map[string]string{"name": name})
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest(
+		http.MethodDelete,
+		fmt.Sprintf("%s/api/delete", c.BaseURL),
+		bytes.NewBuffer(reqBody),
+	)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to connect to Ollama: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to delete model, status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	return nil
+}
+
+// CopyModel duplicates a model via /api/copy
+func (c *OllamaClient) CopyModel(source, destination string) error {
+	reqBody, err := json.Marshal(map[string]string{
+		"source":      source,
+		"destination": destination,
+	})
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.HTTPClient.Post(
+		fmt.Sprintf("%s/api/copy", c.BaseURL),
+		"application/json",
+		bytes.NewBuffer(reqBody),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to connect to Ollama: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to copy model, status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	return nil
+}
+
+
+// StreamPullModel issues a pull request and writes the raw bytes stream to an output channel
+func (c *OllamaClient) StreamPullModel(name string) (io.ReadCloser, error) {
+	reqBody, err := json.Marshal(map[string]interface{}{
+		"name":   name,
+		"stream": true,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Use a client without short timeout for long pulling process
+	longClient := &http.Client{}
+	resp, err := longClient.Post(
+		fmt.Sprintf("%s/api/pull", c.BaseURL),
+		"application/json",
+		bytes.NewBuffer(reqBody),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start pull request: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to pull model, status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	return resp.Body, nil
+}
+
+// ParsePullProgress reads lines from the stream reader and parses them
+func ParsePullProgress(reader io.Reader, handler func(PullProgress) bool) error {
+	scanner := bufio.NewScanner(reader)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		var progress PullProgress
+		if err := json.Unmarshal(line, &progress); err != nil {
+			// If it's not valid JSON, we just skip or log
+			continue
+		}
+
+		if !handler(progress) {
+			break
+		}
+	}
+	return scanner.Err()
+}
+
+// ProcessModel represents an active model running in memory
+type ProcessModel struct {
+	Name      string       `json:"name"`
+	Model     string       `json:"model"`
+	Size      int64        `json:"size"`
+	Digest    string       `json:"digest"`
+	Details   ModelDetails `json:"details"`
+	ExpiresAt time.Time    `json:"expires_at"`
+	SizeVRAM  int64        `json:"size_vram"`
+}
+
+type ProcessResponse struct {
+	Models []ProcessModel `json:"models"`
+}
+
+type ChatMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type ChatRequest struct {
+	Model    string                 `json:"model"`
+	Messages []ChatMessage          `json:"messages"`
+	Stream   bool                   `json:"stream"`
+	Options  map[string]interface{} `json:"options,omitempty"`
+}
+
+type CreateRequest struct {
+	Name      string `json:"name"`
+	Modelfile string `json:"modelfile"`
+	Stream    bool   `json:"stream"`
+}
+
+// ListActiveModels fetches running models via /api/ps
+func (c *OllamaClient) ListActiveModels() ([]ProcessModel, error) {
+	resp, err := c.HTTPClient.Get(fmt.Sprintf("%s/api/ps", c.BaseURL))
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to Ollama: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	var psResp ProcessResponse
+	if err := json.NewDecoder(resp.Body).Decode(&psResp); err != nil {
+		return nil, fmt.Errorf("failed to parse ps response: %w", err)
+	}
+
+	return psResp.Models, nil
+}
+
+// UnloadModel forces Ollama to unload a model from memory (VRAM)
+func (c *OllamaClient) UnloadModel(name string) error {
+	reqBody, err := json.Marshal(map[string]interface{}{
+		"model":      name,
+		"messages":   []ChatMessage{},
+		"keep_alive": 0,
+	})
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.HTTPClient.Post(
+		fmt.Sprintf("%s/api/chat", c.BaseURL),
+		"application/json",
+		bytes.NewBuffer(reqBody),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to contact Ollama for unload: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to unload model, status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	return nil
+}
+
+// StreamChat issues a chat generation stream request
+func (c *OllamaClient) StreamChat(chatReq ChatRequest) (io.ReadCloser, error) {
+	reqBody, err := json.Marshal(chatReq)
+	if err != nil {
+		return nil, err
+	}
+
+	longClient := &http.Client{}
+	resp, err := longClient.Post(
+		fmt.Sprintf("%s/api/chat", c.BaseURL),
+		"application/json",
+		bytes.NewBuffer(reqBody),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start chat stream: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("chat stream failed, status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	return resp.Body, nil
+}
+
+// StreamCreate issues a model creation request
+func (c *OllamaClient) StreamCreate(createReq CreateRequest) (io.ReadCloser, error) {
+	reqBody, err := json.Marshal(createReq)
+	if err != nil {
+		return nil, err
+	}
+
+	longClient := &http.Client{}
+	resp, err := longClient.Post(
+		fmt.Sprintf("%s/api/create", c.BaseURL),
+		"application/json",
+		bytes.NewBuffer(reqBody),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start model build: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("model build failed, status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	return resp.Body, nil
+}
