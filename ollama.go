@@ -240,7 +240,6 @@ func (c *OllamaClient) CopyModel(source, destination string) error {
 	return nil
 }
 
-
 // StreamPullModel issues a pull request and writes the raw bytes stream to an output channel
 func (c *OllamaClient) StreamPullModel(ctx context.Context, name string) (io.ReadCloser, error) {
 	reqBody, err := json.Marshal(map[string]interface{}{
@@ -278,6 +277,7 @@ func (c *OllamaClient) StreamPullModel(ctx context.Context, name string) (io.Rea
 // ParsePullProgress reads lines from the stream reader and parses them
 func ParsePullProgress(reader io.Reader, handler func(PullProgress) bool) error {
 	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
@@ -390,7 +390,7 @@ func (c *OllamaClient) UnloadModel(name string) error {
 }
 
 // StreamChat issues a chat generation stream request
-func (c *OllamaClient) StreamChat(chatReq ChatRequest) (io.ReadCloser, error) {
+func (c *OllamaClient) StreamChat(ctx context.Context, chatReq ChatRequest) (io.ReadCloser, error) {
 	reqBody, err := json.Marshal(chatReq)
 	if err != nil {
 		return nil, err
@@ -399,11 +399,12 @@ func (c *OllamaClient) StreamChat(chatReq ChatRequest) (io.ReadCloser, error) {
 	longClient := &http.Client{
 		Transport: c.HTTPClient.Transport,
 	}
-	resp, err := longClient.Post(
-		fmt.Sprintf("%s/api/chat", c.BaseURL),
-		"application/json",
-		bytes.NewBuffer(reqBody),
-	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/api/chat", c.BaseURL), bytes.NewBuffer(reqBody))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := longClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start chat stream: %w", err)
 	}
@@ -418,7 +419,7 @@ func (c *OllamaClient) StreamChat(chatReq ChatRequest) (io.ReadCloser, error) {
 }
 
 // StreamGenerate issues a raw text completion generation stream request
-func (c *OllamaClient) StreamGenerate(genReq GenerateRequest) (io.ReadCloser, error) {
+func (c *OllamaClient) StreamGenerate(ctx context.Context, genReq GenerateRequest) (io.ReadCloser, error) {
 	reqBody, err := json.Marshal(genReq)
 	if err != nil {
 		return nil, err
@@ -427,11 +428,12 @@ func (c *OllamaClient) StreamGenerate(genReq GenerateRequest) (io.ReadCloser, er
 	longClient := &http.Client{
 		Transport: c.HTTPClient.Transport,
 	}
-	resp, err := longClient.Post(
-		fmt.Sprintf("%s/api/generate", c.BaseURL),
-		"application/json",
-		bytes.NewBuffer(reqBody),
-	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/api/generate", c.BaseURL), bytes.NewBuffer(reqBody))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := longClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start generate stream: %w", err)
 	}
@@ -445,9 +447,8 @@ func (c *OllamaClient) StreamGenerate(genReq GenerateRequest) (io.ReadCloser, er
 	return resp.Body, nil
 }
 
-
 // StreamCreate issues a model creation request
-func (c *OllamaClient) StreamCreate(createReq CreateRequest) (io.ReadCloser, error) {
+func (c *OllamaClient) StreamCreate(ctx context.Context, createReq CreateRequest) (io.ReadCloser, error) {
 	reqBody, err := json.Marshal(createReq)
 	if err != nil {
 		return nil, err
@@ -456,11 +457,12 @@ func (c *OllamaClient) StreamCreate(createReq CreateRequest) (io.ReadCloser, err
 	longClient := &http.Client{
 		Transport: c.HTTPClient.Transport,
 	}
-	resp, err := longClient.Post(
-		fmt.Sprintf("%s/api/create", c.BaseURL),
-		"application/json",
-		bytes.NewBuffer(reqBody),
-	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/api/create", c.BaseURL), bytes.NewBuffer(reqBody))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := longClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start model build: %w", err)
 	}

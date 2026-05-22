@@ -157,6 +157,55 @@ func GetActiveServer() (Server, error) {
 	return Server{}, fmt.Errorf("no servers configured")
 }
 
+func RedactServerSecrets(s Server) Server {
+	s.AuthToken = ""
+	s.AuthPassword = ""
+	s.AuthHeaderVal = ""
+	return s
+}
+
+func MergeAuthFields(existing Server, authType, authToken, authUsername, authPassword, authHeaderName, authHeaderVal string) (string, string, string, string, string, string) {
+	switch authType {
+	case "bearer":
+		if authToken == "" && existing.AuthType == authType {
+			authToken = existing.AuthToken
+		}
+		authUsername = ""
+		authPassword = ""
+		authHeaderName = ""
+		authHeaderVal = ""
+	case "basic":
+		if authUsername == "" && existing.AuthType == authType {
+			authUsername = existing.AuthUsername
+		}
+		if authPassword == "" && existing.AuthType == authType {
+			authPassword = existing.AuthPassword
+		}
+		authToken = ""
+		authHeaderName = ""
+		authHeaderVal = ""
+	case "custom":
+		if authHeaderName == "" && existing.AuthType == authType {
+			authHeaderName = existing.AuthHeaderName
+		}
+		if authHeaderVal == "" && existing.AuthType == authType {
+			authHeaderVal = existing.AuthHeaderVal
+		}
+		authToken = ""
+		authUsername = ""
+		authPassword = ""
+	default:
+		authType = "none"
+		authToken = ""
+		authUsername = ""
+		authPassword = ""
+		authHeaderName = ""
+		authHeaderVal = ""
+	}
+
+	return authType, authToken, authUsername, authPassword, authHeaderName, authHeaderVal
+}
+
 // AddServer adds a new server and returns it
 func AddServer(name, url, authType, authToken, authUsername, authPassword, authHeaderName, authHeaderVal string) (Server, error) {
 	mu.Lock()
@@ -200,6 +249,8 @@ func EditServer(id, name, url, authType, authToken, authUsername, authPassword, 
 
 	for i, s := range servers {
 		if s.ID == id {
+			authType, authToken, authUsername, authPassword, authHeaderName, authHeaderVal = MergeAuthFields(s, authType, authToken, authUsername, authPassword, authHeaderName, authHeaderVal)
+
 			servers[i].Name = name
 			servers[i].URL = url
 			servers[i].AuthType = authType

@@ -54,6 +54,24 @@ type BatchDeleteRequest struct {
 	Names []string `json:"names" binding:"required"`
 }
 
+type DiagnosticsResponse struct {
+	GeneratedAt string            `json:"generated_at"`
+	Checks      []DiagnosticCheck `json:"checks"`
+}
+
+type DiagnosticCheck struct {
+	Name    string `json:"name"`
+	Status  string `json:"status"`
+	Message string `json:"message"`
+	Details string `json:"details,omitempty"`
+}
+
+func newStreamScanner(reader io.Reader) *bufio.Scanner {
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	return scanner
+}
+
 func main() {
 	// Load config data
 	if err := LoadConfig(); err != nil {
@@ -101,6 +119,8 @@ func main() {
 		// Server endpoints
 		api.GET("/servers", getServersHandler)
 		api.POST("/servers", addServerHandler)
+		api.POST("/servers/test", testServerHandler)
+		api.POST("/servers/:id/test", testExistingServerHandler)
 		api.PUT("/servers/:id", editServerHandler)
 		api.DELETE("/servers/:id", deleteServerHandler)
 		api.POST("/servers/:id/select", selectServerHandler)
@@ -109,9 +129,9 @@ func main() {
 		api.GET("/models", getModelsHandler)
 		api.GET("/models/detail", getModelDetailHandler) // GET /api/models/detail?name=llama3
 		api.POST("/models/delete", deleteModelsHandler)  // POST batch delete
-		api.POST("/models/copy", copyModelHandler)      // POST clone model
-		api.GET("/models/pull", pullModelSSEHandler)    // GET /api/models/pull?name=llama3 (SSE)
-		api.GET("/models/card", getModelCardHandler)    // GET /api/models/card?name=llama3
+		api.POST("/models/copy", copyModelHandler)       // POST clone model
+		api.GET("/models/pull", pullModelSSEHandler)     // GET /api/models/pull?name=llama3 (SSE)
+		api.GET("/models/card", getModelCardHandler)     // GET /api/models/card?name=llama3
 
 		// Handlers for v0.0.2
 		api.GET("/models/active", getActiveModelsHandler)
@@ -156,10 +176,18 @@ func main() {
 		api.POST("/rag/documents", uploadRAGDocumentHandler)
 		api.DELETE("/rag/documents/:id", deleteRAGDocumentHandler)
 		api.POST("/rag/query", queryRAGSimilarityHandler)
+
+		// Diagnostics
+		api.GET("/diagnostics", diagnosticsHandler)
 	}
 
-	log.Println("NEUROLLAMA is starting on http://localhost:8080")
-	if err := r.Run(":8080"); err != nil {
+	port := strings.TrimSpace(os.Getenv("PORT"))
+	if port == "" {
+		port = "8080"
+	}
+
+	log.Printf("NEUROLLAMA is starting on http://localhost:%s", port)
+	if err := r.Run(":" + port); err != nil {
 		log.Fatalf("Server failed to run: %v", err)
 	}
 }
@@ -186,7 +214,7 @@ func getServersHandler(c *gin.Context) {
 			}
 
 			responses[idx] = ServerStatusResponse{
-				Server:  s,
+				Server:  RedactServerSecrets(s),
 				Status:  status,
 				Version: version,
 				Latency: latency.Milliseconds(),
@@ -228,10 +256,109 @@ func addServerHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, ServerStatusResponse{
-		Server:  newSrv,
+		Server:  RedactServerSecrets(newSrv),
 		Status:  status,
 		Version: version,
 		Latency: latency.Milliseconds(),
+	})
+}
+
+func testServerHandler(c *gin.Context) {
+	var req AddServerRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	srv := Server{
+		ID:             "test",
+		Name:           req.Name,
+		URL:            strings.TrimRight(req.URL, "/"),
+		AuthType:       req.AuthType,
+		AuthToken:      req.AuthToken,
+		AuthUsername:   req.AuthUsername,
+		AuthPassword:   req.AuthPassword,
+		AuthHeaderName: req.AuthHeaderName,
+		AuthHeaderVal:  req.AuthHeaderVal,
+	}
+	if srv.AuthType == "" {
+		srv.AuthType = "none"
+	}
+
+	client := NewOllamaClient(srv)
+	version, latency, err := client.CheckStatus()
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{
+			"status":  "offline",
+			"message": err.Error(),
+			"latency": 0,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "online",
+		"version": version,
+		"latency": latency.Milliseconds(),
+	})
+}
+
+func testExistingServerHandler(c *gin.Context) {
+	id := c.Param("id")
+	var req EditServerRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var existing Server
+	found := false
+	for _, srv := range GetServers() {
+		if srv.ID == id {
+			existing = srv
+			found = true
+			break
+		}
+	}
+	if !found {
+		c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
+		return
+	}
+
+	authType, authToken, authUsername, authPassword, authHeaderName, authHeaderVal := MergeAuthFields(
+		existing,
+		req.AuthType, req.AuthToken,
+		req.AuthUsername, req.AuthPassword,
+		req.AuthHeaderName, req.AuthHeaderVal,
+	)
+
+	srv := Server{
+		ID:             id,
+		Name:           req.Name,
+		URL:            strings.TrimRight(req.URL, "/"),
+		AuthType:       authType,
+		AuthToken:      authToken,
+		AuthUsername:   authUsername,
+		AuthPassword:   authPassword,
+		AuthHeaderName: authHeaderName,
+		AuthHeaderVal:  authHeaderVal,
+	}
+
+	client := NewOllamaClient(srv)
+	version, latency, err := client.CheckStatus()
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{
+			"status":  "offline",
+			"message": err.Error(),
+			"latency": 0,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "online",
+		"version": version,
+		"latency": latency.Milliseconds(),
 	})
 }
 
@@ -265,7 +392,7 @@ func editServerHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, ServerStatusResponse{
-		Server:  updatedSrv,
+		Server:  RedactServerSecrets(updatedSrv),
 		Status:  status,
 		Version: version,
 		Latency: latency.Milliseconds(),
@@ -301,7 +428,7 @@ func selectServerHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, ServerStatusResponse{
-		Server:  srv,
+		Server:  RedactServerSecrets(srv),
 		Status:  status,
 		Version: version,
 		Latency: latency.Milliseconds(),
@@ -523,24 +650,24 @@ func unloadModelHandler(c *gin.Context) {
 }
 
 type ChatStreamRequest struct {
-	Model            string        `json:"model" binding:"required"`
-	Messages         []ChatMessage `json:"messages" binding:"required"`
-	Temperature      *float64      `json:"temperature"`
-	NumCtx           int           `json:"num_ctx"`
-	ChatID           *int64        `json:"chat_id"`
-	TopK             *int          `json:"top_k"`
-	TopP             *float64      `json:"top_p"`
-	RepeatPenalty    *float64      `json:"repeat_penalty"`
-	Seed             *int          `json:"seed"`
-	MinP             *float64      `json:"min_p"`
-	PresencePenalty  *float64      `json:"presence_penalty"`
-	FrequencyPenalty *float64      `json:"frequency_penalty"`
-	NumPredict       *int          `json:"num_predict"`
-	NumGPU           *int          `json:"num_gpu"`
-	NumThread        *int          `json:"num_thread"`
-	RagEnabled       *bool         `json:"rag_enabled"`
-	RagEmbeddingModel string       `json:"rag_embedding_model"`
-	RagTopK          *int          `json:"rag_top_k"`
+	Model             string        `json:"model" binding:"required"`
+	Messages          []ChatMessage `json:"messages" binding:"required"`
+	Temperature       *float64      `json:"temperature"`
+	NumCtx            int           `json:"num_ctx"`
+	ChatID            *int64        `json:"chat_id"`
+	TopK              *int          `json:"top_k"`
+	TopP              *float64      `json:"top_p"`
+	RepeatPenalty     *float64      `json:"repeat_penalty"`
+	Seed              *int          `json:"seed"`
+	MinP              *float64      `json:"min_p"`
+	PresencePenalty   *float64      `json:"presence_penalty"`
+	FrequencyPenalty  *float64      `json:"frequency_penalty"`
+	NumPredict        *int          `json:"num_predict"`
+	NumGPU            *int          `json:"num_gpu"`
+	NumThread         *int          `json:"num_thread"`
+	RagEnabled        *bool         `json:"rag_enabled"`
+	RagEmbeddingModel string        `json:"rag_embedding_model"`
+	RagTopK           *int          `json:"rag_top_k"`
 }
 
 func chatStreamHandler(c *gin.Context) {
@@ -722,7 +849,7 @@ func chatStreamHandler(c *gin.Context) {
 		}
 	}
 
-	stream, err := client.StreamChat(chatReq)
+	stream, err := client.StreamChat(c.Request.Context(), chatReq)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
@@ -745,7 +872,7 @@ func chatStreamHandler(c *gin.Context) {
 			c.SSEvent("compressed", compressionSummary)
 		}
 
-		scanner := bufio.NewScanner(stream)
+		scanner := newStreamScanner(stream)
 		for scanner.Scan() {
 			line := scanner.Bytes()
 			if len(line) == 0 {
@@ -778,7 +905,6 @@ func chatStreamHandler(c *gin.Context) {
 		return false
 	})
 }
-
 
 // --- CHAT HISTORY HANDLERS (v0.0.3) ---
 
@@ -971,7 +1097,7 @@ func createModelStreamHandler(c *gin.Context) {
 		Stream:    true,
 	}
 
-	stream, err := client.StreamCreate(createReq)
+	stream, err := client.StreamCreate(c.Request.Context(), createReq)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
@@ -984,7 +1110,7 @@ func createModelStreamHandler(c *gin.Context) {
 	c.Header("Transfer-Encoding", "chunked")
 
 	c.Stream(func(w io.Writer) bool {
-		scanner := bufio.NewScanner(stream)
+		scanner := newStreamScanner(stream)
 		for scanner.Scan() {
 			line := scanner.Bytes()
 			if len(line) == 0 {
@@ -1084,7 +1210,7 @@ func generateStreamHandler(c *gin.Context) {
 		genReq.Options = options
 	}
 
-	stream, err := client.StreamGenerate(genReq)
+	stream, err := client.StreamGenerate(c.Request.Context(), genReq)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
@@ -1097,7 +1223,7 @@ func generateStreamHandler(c *gin.Context) {
 	c.Header("Transfer-Encoding", "chunked")
 
 	c.Stream(func(w io.Writer) bool {
-		scanner := bufio.NewScanner(stream)
+		scanner := newStreamScanner(stream)
 		for scanner.Scan() {
 			line := scanner.Bytes()
 			if len(line) == 0 {
@@ -1419,12 +1545,12 @@ func startTelemetryPoller() {
 		defer ticker.Stop()
 		for range ticker.C {
 			stats := getHostStats()
-			
+
 			activeSrv, err := GetActiveServer()
 			var activeModels []ProcessModel
 			nodeURL := ""
 			isRemote := false
-			
+
 			if err == nil {
 				nodeURL = activeSrv.URL
 				isRemote = isRemoteURL(activeSrv.URL)
@@ -1434,7 +1560,7 @@ func startTelemetryPoller() {
 					activeModels = models
 				}
 			}
-			
+
 			telemetryMutex.Lock()
 			currentTelemetry = TelemetryPayload{
 				AppHost: stats,
@@ -1509,6 +1635,91 @@ func updateSettingHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Setting updated successfully"})
 }
 
+func diagnosticsHandler(c *gin.Context) {
+	checks := []DiagnosticCheck{}
+	addCheck := func(name, status, message, details string) {
+		checks = append(checks, DiagnosticCheck{
+			Name:    name,
+			Status:  status,
+			Message: message,
+			Details: details,
+		})
+	}
+
+	if DB == nil {
+		addCheck("SQLite Database", "fail", "Database handle is not initialized.", "")
+	} else if err := DB.Ping(); err != nil {
+		addCheck("SQLite Database", "fail", "Database ping failed.", err.Error())
+	} else {
+		addCheck("SQLite Database", "pass", "Database connection is live.", "data/neurollama.db")
+	}
+
+	if err := os.MkdirAll("data", 0755); err != nil {
+		addCheck("Data Directory", "fail", "Data directory cannot be created.", err.Error())
+	} else if f, err := os.CreateTemp("data", ".neurollama-health-*"); err != nil {
+		addCheck("Data Directory", "fail", "Data directory is not writable.", err.Error())
+	} else {
+		name := f.Name()
+		_ = f.Close()
+		_ = os.Remove(name)
+		addCheck("Data Directory", "pass", "Data directory is writable.", "data/")
+	}
+
+	if info, err := os.Stat("static/css/output.css"); err != nil {
+		addCheck("Static Assets", "fail", "Compiled CSS is missing.", err.Error())
+	} else if info.Size() == 0 {
+		addCheck("Static Assets", "fail", "Compiled CSS exists but is empty.", "static/css/output.css")
+	} else {
+		addCheck("Static Assets", "pass", "Compiled CSS is present.", fmt.Sprintf("%d bytes", info.Size()))
+	}
+
+	if info, err := os.Stat("templates/index.html"); err != nil {
+		addCheck("HTML Template", "fail", "Main HTML template is missing.", err.Error())
+	} else if info.Size() == 0 {
+		addCheck("HTML Template", "fail", "Main HTML template exists but is empty.", "templates/index.html")
+	} else {
+		addCheck("HTML Template", "pass", "Main HTML template is present.", fmt.Sprintf("%d bytes", info.Size()))
+	}
+
+	if _, err := GetSettings(); err != nil {
+		addCheck("Settings Store", "fail", "Settings table could not be read.", err.Error())
+	} else {
+		addCheck("Settings Store", "pass", "Settings table is readable.", "")
+	}
+
+	activeSrv, err := GetActiveServer()
+	if err != nil {
+		addCheck("Active Ollama Node", "warn", "No active Ollama node is configured.", err.Error())
+	} else {
+		client := NewOllamaClient(activeSrv)
+		version, latency, err := client.CheckStatus()
+		if err != nil {
+			addCheck("Active Ollama Node", "fail", "Active Ollama node is unreachable.", err.Error())
+		} else {
+			addCheck("Active Ollama Node", "pass", "Active Ollama node responded to /api/version.", fmt.Sprintf("%s in %dms", version, latency.Milliseconds()))
+			if models, err := client.ListModels(); err != nil {
+				addCheck("Model Inventory", "warn", "Active node responded, but models could not be listed.", err.Error())
+			} else if len(models) == 0 {
+				addCheck("Model Inventory", "warn", "Active node is reachable but has no installed models.", activeSrv.URL)
+			} else {
+				addCheck("Model Inventory", "pass", "Model inventory is readable.", fmt.Sprintf("%d models", len(models)))
+			}
+		}
+	}
+
+	port := strings.TrimSpace(os.Getenv("PORT"))
+	if port == "" {
+		port = "8080"
+	}
+	addCheck("HTTP Listener", "pass", "Runtime port configuration is resolved.", ":"+port)
+	addCheck("Streaming Routes", "pass", "Streaming endpoints are registered and use request cancellation.", "/api/chat, /api/generate, /api/models/create, /api/benchmarks/run, /api/optimizer/run")
+
+	c.JSON(http.StatusOK, DiagnosticsResponse{
+		GeneratedAt: time.Now().Format(time.RFC3339),
+		Checks:      checks,
+	})
+}
+
 func getSchedulerLogsHandler(c *gin.Context) {
 	logs, err := GetSchedulerLogs()
 	if err != nil {
@@ -1543,7 +1754,7 @@ func runModelUpdatesCheck() {
 	for _, m := range models {
 		log.Printf("Scheduler: updating model %s...", m.Name)
 		_ = LogScheduleAction(m.Name, "pending", "Checking/pulling updates...")
-		
+
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		stream, err := client.StreamPullModel(ctx, m.Name)
 		if err != nil {
@@ -1738,7 +1949,7 @@ func getBenchmarksHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, benchmarks)
 }
 
-func runBenchmarkForPrompt(client *OllamaClient, model string, prompt string, logFunc func(string)) (float64, float64, float64, error) {
+func runBenchmarkForPrompt(ctx context.Context, client *OllamaClient, model string, prompt string, logFunc func(string)) (float64, float64, float64, error) {
 	req := GenerateRequest{
 		Model:  model,
 		Prompt: prompt,
@@ -1749,7 +1960,7 @@ func runBenchmarkForPrompt(client *OllamaClient, model string, prompt string, lo
 	}
 
 	start := time.Now()
-	stream, err := client.StreamGenerate(req)
+	stream, err := client.StreamGenerate(ctx, req)
 	if err != nil {
 		return 0, 0, 0, err
 	}
@@ -1758,8 +1969,8 @@ func runBenchmarkForPrompt(client *OllamaClient, model string, prompt string, lo
 	var firstTokenTime time.Duration
 	var firstTokenReceived bool
 	var tokenCount int
-	
-	scanner := bufio.NewScanner(stream)
+
+	scanner := newStreamScanner(stream)
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
@@ -1817,6 +2028,7 @@ func runBenchmarkSSEHandler(c *gin.Context) {
 	c.Header("Transfer-Encoding", "chunked")
 
 	client := NewOllamaClient(activeSrv)
+	ctx := c.Request.Context()
 
 	prompts := []string{
 		"Explain the difference between TCP and UDP in one simple sentence.",
@@ -1826,14 +2038,14 @@ func runBenchmarkSSEHandler(c *gin.Context) {
 
 	c.Stream(func(w io.Writer) bool {
 		c.SSEvent("status", fmt.Sprintf("Initializing benchmark for %s...", model))
-		
+
 		var totalTtft, totalTps, totalLatency float64
 		var successfulRuns int
 
 		for i, prompt := range prompts {
 			c.SSEvent("status", fmt.Sprintf("Running Prompt %d/3: \"%s\"", i+1, prompt))
-			
-			ttft, tps, latency, err := runBenchmarkForPrompt(client, model, prompt, func(logMsg string) {
+
+			ttft, tps, latency, err := runBenchmarkForPrompt(ctx, client, model, prompt, func(logMsg string) {
 				c.SSEvent("status", logMsg)
 			})
 
@@ -1865,7 +2077,7 @@ func runBenchmarkSSEHandler(c *gin.Context) {
 		}
 
 		c.SSEvent("status", "Benchmark suite completed successfully.")
-		
+
 		resultPayload := map[string]interface{}{
 			"id":             id,
 			"model_name":     model,
@@ -1873,7 +2085,7 @@ func runBenchmarkSSEHandler(c *gin.Context) {
 			"tps":            avgTps,
 			"avg_latency_ms": avgLatency,
 		}
-		
+
 		resBytes, _ := json.Marshal(resultPayload)
 		c.SSEvent("done", string(resBytes))
 		return false
@@ -1927,7 +2139,7 @@ func deleteBenchmarkHandler(c *gin.Context) {
 
 // Hyperparameter Optimizer Handlers
 
-func runOptimizerForConfig(client *OllamaClient, model string, prompt string, temp, topP float64, topK int) (float64, float64, float64, string, error) {
+func runOptimizerForConfig(ctx context.Context, client *OllamaClient, model string, prompt string, temp, topP float64, topK int) (float64, float64, float64, string, error) {
 	req := GenerateRequest{
 		Model:  model,
 		Prompt: prompt,
@@ -1940,7 +2152,7 @@ func runOptimizerForConfig(client *OllamaClient, model string, prompt string, te
 	}
 
 	start := time.Now()
-	stream, err := client.StreamGenerate(req)
+	stream, err := client.StreamGenerate(ctx, req)
 	if err != nil {
 		return 0, 0, 0, "", err
 	}
@@ -1951,7 +2163,7 @@ func runOptimizerForConfig(client *OllamaClient, model string, prompt string, te
 	var tokenCount int
 	var sb strings.Builder
 
-	scanner := bufio.NewScanner(stream)
+	scanner := newStreamScanner(stream)
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
@@ -2015,6 +2227,7 @@ func runOptimizerSSEHandler(c *gin.Context) {
 	c.Header("Transfer-Encoding", "chunked")
 
 	client := NewOllamaClient(activeSrv)
+	ctx := c.Request.Context()
 
 	type ConfigSet struct {
 		Name string
@@ -2036,7 +2249,7 @@ func runOptimizerSSEHandler(c *gin.Context) {
 		for i, cfg := range configs {
 			c.SSEvent("status", fmt.Sprintf("Running Configuration Set %d/3: %s (Temp: %.1f, TopP: %.2f, TopK: %d)", i+1, cfg.Name, cfg.Temp, cfg.TopP, cfg.TopK))
 
-			ttft, tps, latency, text, err := runOptimizerForConfig(client, model, prompt, cfg.Temp, cfg.TopP, cfg.TopK)
+			ttft, tps, latency, text, err := runOptimizerForConfig(ctx, client, model, prompt, cfg.Temp, cfg.TopP, cfg.TopK)
 			if err != nil {
 				c.SSEvent("error", fmt.Sprintf("Configuration %d failed: %v", i+1, err))
 				continue
@@ -2053,18 +2266,18 @@ func runOptimizerSSEHandler(c *gin.Context) {
 			}
 
 			resultPayload := map[string]interface{}{
-				"id":           id,
-				"server_name":  activeSrv.Name,
-				"server_url":   activeSrv.URL,
-				"model_name":   model,
-				"config_name":  cfg.Name,
-				"temperature":  cfg.Temp,
-				"top_p":        cfg.TopP,
-				"top_k":        cfg.TopK,
-				"ttft_ms":      ttft,
-				"tps":          tps,
-				"avg_latency":  latency,
-				"preview":      preview,
+				"id":          id,
+				"server_name": activeSrv.Name,
+				"server_url":  activeSrv.URL,
+				"model_name":  model,
+				"config_name": cfg.Name,
+				"temperature": cfg.Temp,
+				"top_p":       cfg.TopP,
+				"top_k":       cfg.TopK,
+				"ttft_ms":     ttft,
+				"tps":         tps,
+				"avg_latency": latency,
+				"preview":     preview,
 			}
 
 			resBytes, _ := json.Marshal(resultPayload)
@@ -2288,7 +2501,3 @@ func cosineSimilarity(a, b []float64) float64 {
 	}
 	return dotProduct / (math.Sqrt(normA) * math.Sqrt(normB))
 }
-
-
-
-

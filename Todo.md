@@ -36,3 +36,16 @@
   - Expose additional Ollama sampler configuration sliders (like `min_p`, `presence_penalty`, `frequency_penalty`, and generation token limits like `num_predict`).
 - [x] **Hardware Thread & Layer Allocation Profile (num_gpu, num_thread)**
   - Expose request-level hardware tuning controls (such as GPU layers offload `num_gpu` and CPU threads `num_thread`) inside the playground sidebar settings.
+
+## New Ideas From Code Review
+
+- [ ] **Preflight Diagnostics & Repair Console**
+  - Add a diagnostics panel that validates Ollama connectivity, auth headers, writable data directories, SQLite migrations, Tailwind asset freshness, Docker image compatibility, and streaming endpoint health before users start a session.
+- [ ] **Secure Model Card Renderer**
+  - Render Hugging Face and Ollama model cards through a sanitized or sandboxed viewer with external-link warnings, blocked inline scripts/events, and a raw Markdown fallback for untrusted content.
+- [ ] **Secret-Safe Node Registry**
+  - Redact stored bearer tokens, passwords, and custom header values from normal server-list responses while keeping an explicit edit flow for replacing credentials.
+- [ ] **RAG Collection Manager**
+  - Add per-document re-indexing, source metadata, embedding dimension checks, duplicate detection, and collection-level filters so chat retrieval can target specific document sets.
+- [ ] **Streaming Resilience Toolkit**
+  - Add cancel/retry controls, timeout visibility, larger-safe stream parsing, and saved failure diagnostics for chat, generate, pull, benchmark, optimizer, and model-build streams.

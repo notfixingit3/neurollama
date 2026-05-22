@@ -98,12 +98,15 @@
         <button id="ws-tab-builder" onclick="switchWorkspace('builder')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
           <i class="fa-solid fa-wrench text-[10px]"></i> BUILDER
         </button>
-        <button id="ws-tab-memory" onclick="switchWorkspace('memory')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
-          <i class="fa-solid fa-memory text-[10px]"></i> MEMORY
-        </button>
-        <button id="ws-tab-benchmark" onclick="switchWorkspace('benchmark')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
-          <i class="fa-solid fa-gauge-high text-[10px]"></i> BENCHMARKS
-        </button>
+	        <button id="ws-tab-memory" onclick="switchWorkspace('memory')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
+	          <i class="fa-solid fa-memory text-[10px]"></i> MEMORY
+	        </button>
+	        <button id="ws-tab-diagnostics" onclick="switchWorkspace('diagnostics')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
+	          <i class="fa-solid fa-stethoscope text-[10px]"></i> DIAGNOSTICS
+	        </button>
+	        <button id="ws-tab-benchmark" onclick="switchWorkspace('benchmark')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
+	          <i class="fa-solid fa-gauge-high text-[10px]"></i> BENCHMARKS
+	        </button>
         <button id="ws-tab-rag" onclick="switchWorkspace('rag')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
           <i class="fa-solid fa-file-shield text-[10px]"></i> RAG
         </button>
@@ -282,7 +285,7 @@
                     <button onclick="copyTabContent()" class="btn btn-xs btn-neutral absolute top-2 right-2 border-[#4c566a] hover:bg-[#4c566a]" title="Copy to clipboard">
                       <i class="fa-regular fa-copy"></i>
                     </button>
-                    <pre id="tab-content-text" class="whitespace-pre-wrap break-all pr-8 leading-relaxed font-tech">Loading metadata...</pre>
+	                    <div id="tab-content-text" class="whitespace-pre-wrap break-all pr-8 leading-relaxed font-tech">Loading metadata...</div>
                   </div>
                   
                   <div class="mt-3 text-[10px] text-[#4c566a] flex justify-between items-center">
@@ -610,10 +613,16 @@
 
                   <textarea id="chat-input-text" rows="2" placeholder="Type prompt query or paste image... (Cmd+Enter to send)" onkeydown="checkChatShortcut(event)"
                             class="textarea textarea-sm textarea-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none flex-1 resize-none h-12 py-1.5"></textarea>
-                  <button id="chat-send-btn" onclick="sendChatMessage()" class="btn btn-sm btn-info h-12 w-12 font-tech px-0 flex items-center justify-center">
-                    <i class="fa-solid fa-paper-plane text-sm"></i>
-                  </button>
-                </div>
+	                  <button id="chat-send-btn" onclick="sendChatMessage()" class="btn btn-sm btn-info h-12 w-12 font-tech px-0 flex items-center justify-center">
+	                    <i class="fa-solid fa-paper-plane text-sm"></i>
+	                  </button>
+	                  <button id="chat-stop-btn" onclick="abortChatGeneration()" class="btn btn-sm btn-outline btn-error h-12 w-12 font-tech px-0 hidden items-center justify-center" title="Stop generation">
+	                    <i class="fa-solid fa-stop text-sm"></i>
+	                  </button>
+	                  <button id="chat-retry-btn" onclick="retryLastChatPrompt()" class="btn btn-sm btn-outline btn-info h-12 w-12 font-tech px-0 hidden items-center justify-center" title="Restore last failed prompt">
+	                    <i class="fa-solid fa-rotate-right text-sm"></i>
+	                  </button>
+	                </div>
               </div>
             </div>
           </div>
@@ -904,9 +913,14 @@
               <div class="flex-1 overflow-auto bg-[#1e222a] border border-[#4c566a]/60 rounded-lg p-3 text-[11px] font-mono text-[#d8dee9] relative">
                 <pre id="builder-modelfile-preview" class="whitespace-pre-wrap font-tech leading-relaxed">FROM ...</pre>
               </div>
-              <button id="builder-compile-btn" onclick="buildCustomModel()" class="btn btn-sm btn-info font-tech tracking-wider mt-3 w-full">
-                <i class="fa-solid fa-cube mr-1"></i> COMPILE_MODEL // BUILD
-              </button>
+	              <div class="flex gap-2 mt-3">
+	                <button id="builder-compile-btn" onclick="buildCustomModel()" class="btn btn-sm btn-info font-tech tracking-wider flex-1">
+	                  <i class="fa-solid fa-cube mr-1"></i> COMPILE_MODEL // BUILD
+	                </button>
+	                <button id="builder-cancel-btn" onclick="cancelBuildModel()" class="btn btn-sm btn-outline btn-error font-tech tracking-wider hidden">
+	                  <i class="fa-solid fa-stop mr-1"></i> STOP
+	                </button>
+	              </div>
             </div>
 
             <!-- Build Progress Console -->
@@ -1027,10 +1041,63 @@
               </div>
             </div>
           </div>
-        </div>
+	        </div>
 
-        <!-- PANEL 5: BENCHMARK SUITE -->
-        <div id="ws-panel-benchmark" class="ws-panel hidden absolute inset-0 flex flex-col h-full overflow-hidden gap-4">
+	        <!-- PANEL 5: DIAGNOSTICS -->
+	        <div id="ws-panel-diagnostics" class="ws-panel hidden absolute inset-0 grid grid-cols-1 lg:grid-cols-12 gap-6 h-full overflow-hidden">
+	          <div class="lg:col-span-4 flex flex-col h-full overflow-hidden gap-4">
+	            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col gap-4">
+	              <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] border-b border-[#4c566a]/40 pb-2">
+	                <i class="fa-solid fa-stethoscope mr-2"></i>Preflight Console
+	              </h2>
+	              <div class="grid grid-cols-3 gap-2 text-center font-mono">
+	                <div class="bg-[#2e3440]/50 border border-[#4c566a]/30 rounded-lg p-3">
+	                  <div id="diag-pass-count" class="text-xl font-bold text-[#a3be8c]">0</div>
+	                  <div class="text-[9px] text-[#4c566a] uppercase">Pass</div>
+	                </div>
+	                <div class="bg-[#2e3440]/50 border border-[#4c566a]/30 rounded-lg p-3">
+	                  <div id="diag-warn-count" class="text-xl font-bold text-[#ebcb8b]">0</div>
+	                  <div class="text-[9px] text-[#4c566a] uppercase">Warn</div>
+	                </div>
+	                <div class="bg-[#2e3440]/50 border border-[#4c566a]/30 rounded-lg p-3">
+	                  <div id="diag-fail-count" class="text-xl font-bold text-[#bf616a]">0</div>
+	                  <div class="text-[9px] text-[#4c566a] uppercase">Fail</div>
+	                </div>
+	              </div>
+	              <button id="diagnostics-run-btn" onclick="runDiagnostics()" class="btn btn-sm btn-info font-tech uppercase tracking-wide w-full">
+	                <i class="fa-solid fa-rotate-right mr-1.5"></i> Run Preflight
+	              </button>
+	              <div class="text-[10px] font-mono text-[#4c566a] leading-relaxed">
+	                Checks local persistence, static assets, active Ollama reachability, model inventory, settings, and stream-route readiness.
+	              </div>
+	            </div>
+	            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col flex-1 overflow-hidden">
+	              <h2 class="text-xs font-tech font-bold uppercase tracking-wider text-[#88c0d0] border-b border-[#4c566a]/40 pb-2 mb-3">
+	                <i class="fa-solid fa-triangle-exclamation mr-2"></i>Recent Stream Failures
+	              </h2>
+	              <div id="stream-failure-log" class="flex-1 overflow-y-auto space-y-2 text-[10px] font-mono">
+	                <div class="text-[#4c566a] italic">No stream failures recorded in this browser.</div>
+	              </div>
+	              <button onclick="clearStreamFailureLog()" class="btn btn-xs btn-neutral border-[#4c566a] font-tech text-[9px] mt-3">CLEAR LOG</button>
+	            </div>
+	          </div>
+	          <div class="lg:col-span-8 flex flex-col h-full overflow-hidden">
+	            <div class="tech-panel tech-header-accent rounded-xl flex-1 flex flex-col p-4 overflow-hidden">
+	              <div class="flex items-center justify-between mb-3 pb-2 border-b border-[#4c566a]/40">
+	                <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
+	                  <i class="fa-solid fa-list-check mr-2"></i>System Health Checks
+	                </h2>
+	                <span id="diagnostics-generated-at" class="text-[10px] text-[#4c566a] font-mono">Not run yet</span>
+	              </div>
+	              <div id="diagnostics-results" class="flex-1 overflow-y-auto space-y-3 pr-1">
+	                <div class="text-center py-16 text-[#4c566a] italic text-xs">Run preflight to inspect NEUROLLAMA readiness.</div>
+	              </div>
+	            </div>
+	          </div>
+	        </div>
+
+	        <!-- PANEL 5: BENCHMARK SUITE -->
+	        <div id="ws-panel-benchmark" class="ws-panel hidden absolute inset-0 flex flex-col h-full overflow-hidden gap-4">
           <!-- Sub-tabs navigation bar -->
           <div class="tabs tabs-boxed bg-[#242933]/60 p-1 border border-[#4c566a]/40 flex w-fit shrink-0 gap-1">
             <button id="benchmark-subtab-standard" onclick="switchBenchmarkSubtab('standard')" class="tab tab-sm tab-active text-[11px] font-tech font-bold transition-all px-4 text-[#d8dee9]">
@@ -1058,10 +1125,13 @@
                       <select id="benchmark-model-select" class="select select-sm select-bordered flex-1 bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none text-[#d8dee9]">
                         <!-- Populated dynamically -->
                       </select>
-                      <button id="run-benchmark-btn" onclick="startBenchmark()" class="btn btn-sm btn-info font-tech uppercase tracking-wide px-4">
-                        Run Tests
-                      </button>
-                    </div>
+	                      <button id="run-benchmark-btn" onclick="startBenchmark()" class="btn btn-sm btn-info font-tech uppercase tracking-wide px-4">
+	                        Run Tests
+	                      </button>
+	                      <button id="cancel-benchmark-btn" onclick="cancelBenchmark()" class="btn btn-sm btn-outline btn-error font-tech uppercase tracking-wide px-3 hidden">
+	                        Stop
+	                      </button>
+	                    </div>
                   </div>
 
                   <!-- Test progress logs -->
@@ -1125,9 +1195,14 @@
                     <textarea id="optimizer-prompt-input" rows="3" class="textarea textarea-sm textarea-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none text-[#d8dee9] w-full resize-none" placeholder="Enter evaluation prompt..."></textarea>
                   </div>
                   
-                  <button id="run-optimizer-btn" onclick="startOptimizerBenchmark()" class="btn btn-sm btn-info font-tech uppercase tracking-wide px-4 w-full">
-                    <i class="fa-solid fa-play mr-1"></i> Run Optimization Suite
-                  </button>
+	                  <div class="flex gap-2">
+	                    <button id="run-optimizer-btn" onclick="startOptimizerBenchmark()" class="btn btn-sm btn-info font-tech uppercase tracking-wide px-4 flex-1">
+	                      <i class="fa-solid fa-play mr-1"></i> Run Optimization Suite
+	                    </button>
+	                    <button id="cancel-optimizer-btn" onclick="cancelOptimizerBenchmark()" class="btn btn-sm btn-outline btn-error font-tech uppercase tracking-wide px-3 hidden">
+	                      Stop
+	                    </button>
+	                  </div>
 
                   <!-- Live progress logs -->
                   <div class="flex-1 flex flex-col overflow-hidden">
@@ -1367,11 +1442,11 @@
         </div>
 
         <!-- Auth fields (conditionally visible) -->
-        <div id="add-auth-fields-bearer" class="hidden space-y-2">
-          <div class="form-control">
-            <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Token</span></label>
-            <input type="password" id="add-server-auth-token" placeholder="Bearer token value"
-                   class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+	        <div id="add-auth-fields-bearer" class="hidden space-y-2">
+	          <div class="form-control">
+	            <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Token</span></label>
+	            <input type="password" id="add-server-auth-token" placeholder="Bearer token value"
+	                   class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
           </div>
         </div>
 
@@ -1401,10 +1476,11 @@
           </div>
         </div>
 
-        <div class="modal-action mt-6 gap-2">
-          <button type="button" onclick="closeAddServerModal()" class="btn btn-sm btn-ghost font-tech text-xs">CANCEL</button>
-          <button type="submit" class="btn btn-sm btn-info font-tech text-xs">SAVE_NODE</button>
-        </div>
+	        <div class="modal-action mt-6 gap-2">
+	          <button type="button" onclick="testNodeConnection('add')" class="btn btn-sm btn-outline btn-info font-tech text-xs">TEST_AUTH</button>
+	          <button type="button" onclick="closeAddServerModal()" class="btn btn-sm btn-ghost font-tech text-xs">CANCEL</button>
+	          <button type="submit" class="btn btn-sm btn-info font-tech text-xs">SAVE_NODE</button>
+	        </div>
       </form>
     </div>
   </dialog>
@@ -1441,13 +1517,13 @@
         </div>
 
         <!-- Auth fields (conditionally visible) -->
-        <div id="edit-auth-fields-bearer" class="hidden space-y-2">
-          <div class="form-control">
-            <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Token</span></label>
-            <input type="password" id="edit-server-auth-token" placeholder="Bearer token value"
-                   class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
-          </div>
-        </div>
+	        <div id="edit-auth-fields-bearer" class="hidden space-y-2">
+	          <div class="form-control">
+	            <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Token</span></label>
+	            <input type="password" id="edit-server-auth-token" placeholder="Leave blank to keep saved token"
+	                   class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+	          </div>
+	        </div>
 
         <div id="edit-auth-fields-basic" class="hidden grid grid-cols-2 gap-2">
           <div class="form-control">
@@ -1455,12 +1531,12 @@
             <input type="text" id="edit-server-auth-username" placeholder="Username"
                    class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
           </div>
-          <div class="form-control">
-            <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Password</span></label>
-            <input type="password" id="edit-server-auth-password" placeholder="Password"
-                   class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
-          </div>
-        </div>
+	          <div class="form-control">
+	            <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Password</span></label>
+	            <input type="password" id="edit-server-auth-password" placeholder="Leave blank to keep saved password"
+	                   class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+	          </div>
+	        </div>
 
         <div id="edit-auth-fields-custom" class="hidden grid grid-cols-2 gap-2">
           <div class="form-control">
@@ -1468,17 +1544,18 @@
             <input type="text" id="edit-server-auth-header-name" placeholder="X-API-Key"
                    class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
           </div>
-          <div class="form-control">
-            <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Header Value</span></label>
-            <input type="text" id="edit-server-auth-header-val" placeholder="token-secret"
-                   class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
-          </div>
-        </div>
+	          <div class="form-control">
+	            <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Header Value</span></label>
+	            <input type="password" id="edit-server-auth-header-val" placeholder="Leave blank to keep saved value"
+	                   class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+	          </div>
+	        </div>
 
-        <div class="modal-action mt-6 gap-2">
-          <button type="button" onclick="closeEditServerModal()" class="btn btn-sm btn-ghost font-tech text-xs">CANCEL</button>
-          <button type="submit" class="btn btn-sm btn-info font-tech text-xs">UPDATE_NODE</button>
-        </div>
+	        <div class="modal-action mt-6 gap-2">
+	          <button type="button" onclick="testNodeConnection('edit')" class="btn btn-sm btn-outline btn-info font-tech text-xs">TEST_AUTH</button>
+	          <button type="button" onclick="closeEditServerModal()" class="btn btn-sm btn-ghost font-tech text-xs">CANCEL</button>
+	          <button type="submit" class="btn btn-sm btn-info font-tech text-xs">UPDATE_NODE</button>
+	        </div>
       </form>
     </div>
   </dialog>

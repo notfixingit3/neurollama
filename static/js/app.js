@@ -5,12 +5,17 @@ let selectedModels = new Set();
 let inspectedModel = null;
 let activeDetailTab = 'modelfile';
 let currentEventSource = null;
+let modelCardCache = null;
+let modelCardViewMode = 'safe';
 
 // New State for v0.0.2
 let activeWorkspace = 'inventory';
 let chatMessages = [];
 let isGeneratingChat = false;
 let isBuildingModel = false;
+let chatAbortController = null;
+let buildAbortController = null;
+let lastChatRetryDraft = null;
 
 // New State for v0.0.3 SQLite Persistence & Presets
 let chatSessions = [];
@@ -260,7 +265,7 @@ function switchWorkspace(workspace) {
   }
 
   // Toggle buttons
-  const tabs = ['inventory', 'playground', 'completion', 'builder', 'memory', 'benchmark', 'rag'];
+  const tabs = ['inventory', 'playground', 'completion', 'builder', 'memory', 'diagnostics', 'benchmark', 'rag'];
   tabs.forEach(t => {
     const btn = document.getElementById(`ws-tab-${t}`);
     const panel = document.getElementById(`ws-panel-${t}`);
@@ -284,6 +289,9 @@ function switchWorkspace(workspace) {
     fetchActiveModels();
     fetchSchedulerSettings();
     fetchSchedulerLogs();
+  } else if (workspace === 'diagnostics') {
+    runDiagnostics();
+    renderStreamFailureLog();
   } else if (workspace === 'benchmark') {
     populateModelDropdowns();
     fetchBenchmarks();
@@ -402,6 +410,110 @@ function showToast(message, type = 'info') {
       toast.remove();
     }, 300);
   }, 4000);
+}
+
+function recordStreamFailure(area, message) {
+  const failures = JSON.parse(localStorage.getItem('neurollama-stream-failures') || '[]');
+  failures.unshift({
+    area,
+    message: String(message || 'Unknown stream failure'),
+    created_at: new Date().toISOString()
+  });
+  localStorage.setItem('neurollama-stream-failures', JSON.stringify(failures.slice(0, 20)));
+  renderStreamFailureLog();
+}
+
+function renderStreamFailureLog() {
+  const container = document.getElementById('stream-failure-log');
+  if (!container) return;
+  const failures = JSON.parse(localStorage.getItem('neurollama-stream-failures') || '[]');
+  if (failures.length === 0) {
+    container.innerHTML = '<div class="text-[#4c566a] italic">No stream failures recorded in this browser.</div>';
+    return;
+  }
+  container.innerHTML = failures.map(item => `
+    <div class="border border-[#4c566a]/30 bg-[#2e3440]/40 rounded-lg p-2">
+      <div class="flex items-center justify-between gap-2 mb-1">
+        <span class="text-[#bf616a] font-bold uppercase">${escapeHTML(item.area)}</span>
+        <span class="text-[#4c566a]">${new Date(item.created_at).toLocaleTimeString()}</span>
+      </div>
+      <div class="text-[#d8dee9]/80 break-words">${escapeHTML(item.message)}</div>
+    </div>
+  `).join('');
+}
+
+function clearStreamFailureLog() {
+  localStorage.removeItem('neurollama-stream-failures');
+  renderStreamFailureLog();
+  showToast('Stream failure log cleared', 'info');
+}
+
+async function runDiagnostics() {
+  const btn = document.getElementById('diagnostics-run-btn');
+  const container = document.getElementById('diagnostics-results');
+  const generatedAt = document.getElementById('diagnostics-generated-at');
+  if (btn) btn.disabled = true;
+  if (container) {
+    container.innerHTML = `
+      <div class="flex items-center justify-center gap-2 py-16 text-xs text-[#88c0d0]">
+        <i class="fa-solid fa-circle-notch animate-spin"></i>
+        <span>Running preflight checks...</span>
+      </div>
+    `;
+  }
+
+  try {
+    const response = await fetch('/api/diagnostics');
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error || 'Diagnostics failed');
+    }
+    const data = await response.json();
+    const checks = data.checks || [];
+    const counts = checks.reduce((acc, check) => {
+      acc[check.status] = (acc[check.status] || 0) + 1;
+      return acc;
+    }, {});
+
+    const passEl = document.getElementById('diag-pass-count');
+    const warnEl = document.getElementById('diag-warn-count');
+    const failEl = document.getElementById('diag-fail-count');
+    if (passEl) passEl.textContent = counts.pass || 0;
+    if (warnEl) warnEl.textContent = counts.warn || 0;
+    if (failEl) failEl.textContent = counts.fail || 0;
+    if (generatedAt) generatedAt.textContent = data.generated_at ? `Generated ${new Date(data.generated_at).toLocaleString()}` : 'Generated now';
+
+    const styleForStatus = (status) => {
+      if (status === 'pass') return { icon: 'fa-circle-check', color: 'text-[#a3be8c]', border: 'border-[#a3be8c]/35', bg: 'bg-[#a3be8c]/5' };
+      if (status === 'warn') return { icon: 'fa-triangle-exclamation', color: 'text-[#ebcb8b]', border: 'border-[#ebcb8b]/35', bg: 'bg-[#ebcb8b]/5' };
+      return { icon: 'fa-circle-xmark', color: 'text-[#bf616a]', border: 'border-[#bf616a]/35', bg: 'bg-[#bf616a]/5' };
+    };
+
+    if (container) {
+      container.innerHTML = checks.map(check => {
+        const style = styleForStatus(check.status);
+        return `
+          <div class="border ${style.border} ${style.bg} rounded-lg p-3 font-mono text-xs">
+            <div class="flex items-center justify-between gap-3 mb-1">
+              <span class="${style.color} font-bold flex items-center gap-1.5 uppercase">
+                <i class="fa-solid ${style.icon}"></i> ${escapeHTML(check.name)}
+              </span>
+              <span class="${style.color} text-[9px] uppercase font-bold">${escapeHTML(check.status)}</span>
+            </div>
+            <div class="text-[#d8dee9]">${escapeHTML(check.message)}</div>
+            ${check.details ? `<div class="text-[#4c566a] text-[10px] mt-1 break-words">${escapeHTML(check.details)}</div>` : ''}
+          </div>
+        `;
+      }).join('');
+    }
+  } catch (error) {
+    if (container) {
+      container.innerHTML = `<div class="text-center py-16 text-[#bf616a] italic text-xs">Diagnostics failed: ${escapeHTML(error.message)}</div>`;
+    }
+    showToast(error.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 // --- SERVER MANAGEMENT ---
@@ -541,29 +653,14 @@ async function selectServer(id) {
 
 async function handleAddServer(event) {
   event.preventDefault();
-  const name = document.getElementById('add-server-name').value;
-  const url = document.getElementById('add-server-url').value;
-  const authType = document.getElementById('add-server-auth-type').value;
-  const authToken = document.getElementById('add-server-auth-token').value;
-  const authUsername = document.getElementById('add-server-auth-username').value;
-  const authPassword = document.getElementById('add-server-auth-password').value;
-  const authHeaderName = document.getElementById('add-server-auth-header-name').value;
-  const authHeaderVal = document.getElementById('add-server-auth-header-val').value;
+  const payload = getServerFormPayload('add');
+  const name = payload.name;
 
   try {
     const response = await fetch('/api/servers', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name,
-        url,
-        authType,
-        authToken,
-        authUsername,
-        authPassword,
-        authHeaderName,
-        authHeaderVal
-      })
+      body: JSON.stringify(payload)
     });
 
     if (!response.ok) {
@@ -590,29 +687,14 @@ async function handleAddServer(event) {
 async function handleEditServer(event) {
   event.preventDefault();
   const id = document.getElementById('edit-server-id').value;
-  const name = document.getElementById('edit-server-name').value;
-  const url = document.getElementById('edit-server-url').value;
-  const authType = document.getElementById('edit-server-auth-type').value;
-  const authToken = document.getElementById('edit-server-auth-token').value;
-  const authUsername = document.getElementById('edit-server-auth-username').value;
-  const authPassword = document.getElementById('edit-server-auth-password').value;
-  const authHeaderName = document.getElementById('edit-server-auth-header-name').value;
-  const authHeaderVal = document.getElementById('edit-server-auth-header-val').value;
+  const payload = getServerFormPayload('edit');
+  const name = payload.name;
 
   try {
     const response = await fetch(`/api/servers/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name,
-        url,
-        authType,
-        authToken,
-        authUsername,
-        authPassword,
-        authHeaderName,
-        authHeaderVal
-      })
+      body: JSON.stringify(payload)
     });
 
     if (!response.ok) {
@@ -672,6 +754,47 @@ async function deleteServer(id) {
 }
 
 // Modals control
+function getServerFormPayload(prefix) {
+  return {
+    name: document.getElementById(`${prefix}-server-name`).value.trim(),
+    url: document.getElementById(`${prefix}-server-url`).value.trim(),
+    authType: document.getElementById(`${prefix}-server-auth-type`).value,
+    authToken: document.getElementById(`${prefix}-server-auth-token`).value,
+    authUsername: document.getElementById(`${prefix}-server-auth-username`).value,
+    authPassword: document.getElementById(`${prefix}-server-auth-password`).value,
+    authHeaderName: document.getElementById(`${prefix}-server-auth-header-name`).value,
+    authHeaderVal: document.getElementById(`${prefix}-server-auth-header-val`).value
+  };
+}
+
+async function testNodeConnection(prefix) {
+  const payload = getServerFormPayload(prefix);
+  if (!payload.name || !payload.url) {
+    showToast('Enter node name and URL before testing', 'warning');
+    return;
+  }
+
+  const id = prefix === 'edit' ? document.getElementById('edit-server-id').value : '';
+  const endpoint = prefix === 'edit' && id ? `/api/servers/${id}/test` : '/api/servers/test';
+
+  try {
+    showToast('Testing node authentication and reachability...', 'info');
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.message || data.error || 'Node test failed');
+    }
+    const version = data.version ? ` // ${data.version}` : '';
+    showToast(`Node online in ${data.latency || 0}ms${version}`, 'success');
+  } catch (error) {
+    showToast(`Node test failed: ${error.message}`, 'error');
+  }
+}
+
 function toggleAuthFields(prefix) {
   const selectEl = document.getElementById(`${prefix}-server-auth-type`);
   if (!selectEl) return;
@@ -707,19 +830,19 @@ function openEditServerModal(id) {
   if (typeEl) typeEl.value = srv.authType || 'none';
   
   const tokenEl = document.getElementById('edit-server-auth-token');
-  if (tokenEl) tokenEl.value = srv.authToken || '';
+  if (tokenEl) tokenEl.value = '';
   
   const usernameEl = document.getElementById('edit-server-auth-username');
   if (usernameEl) usernameEl.value = srv.authUsername || '';
   
   const passwordEl = document.getElementById('edit-server-auth-password');
-  if (passwordEl) passwordEl.value = srv.authPassword || '';
+  if (passwordEl) passwordEl.value = '';
   
   const headerNameEl = document.getElementById('edit-server-auth-header-name');
   if (headerNameEl) headerNameEl.value = srv.authHeaderName || '';
   
   const headerValEl = document.getElementById('edit-server-auth-header-val');
-  if (headerValEl) headerValEl.value = srv.authHeaderVal || '';
+  if (headerValEl) headerValEl.value = '';
   
   toggleAuthFields('edit');
   document.getElementById('edit-server-modal').showModal();
@@ -1066,6 +1189,7 @@ function handlePullModel(event) {
   currentEventSource.addEventListener('error', (e) => {
     showToast(`Failed to pull model '${modelName}'`, 'error');
     console.error('SSE Error:', e);
+    recordStreamFailure('model pull', `Failed to pull ${modelName}`);
     resetPullUI();
   });
 
@@ -1229,6 +1353,7 @@ async function inspectModel(name) {
 
 function clearInspectedModel() {
   inspectedModel = null;
+  modelCardCache = null;
   document.getElementById('detail-empty-state').classList.remove('hidden');
   document.getElementById('detail-content').classList.add('hidden');
 }
@@ -1274,6 +1399,7 @@ function renderTabContent() {
       break;
     case 'card':
       tabContent.textContent = 'Loading model card...';
+      modelCardViewMode = 'safe';
       fetchModelCard(inspectedModel.name, tabContent);
       break;
   }
@@ -1527,6 +1653,30 @@ function checkChatShortcut(e) {
   }
 }
 
+function abortChatGeneration() {
+  if (chatAbortController) {
+    chatAbortController.abort();
+    showToast('Chat generation stopped', 'warning');
+  }
+}
+
+function retryLastChatPrompt() {
+  if (!lastChatRetryDraft) return;
+  const input = document.getElementById('chat-input-text');
+  if (input) {
+    input.value = lastChatRetryDraft.promptText;
+    input.focus();
+  }
+  selectedImages = [...(lastChatRetryDraft.images || [])];
+  renderImagePreviews();
+  const retryBtn = document.getElementById('chat-retry-btn');
+  if (retryBtn) {
+    retryBtn.classList.add('hidden');
+    retryBtn.classList.remove('flex');
+  }
+  showToast('Last failed prompt restored', 'info');
+}
+
 async function sendChatMessage() {
   if (isGeneratingChat) return;
 
@@ -1549,6 +1699,10 @@ async function sendChatMessage() {
 
   // Clear input
   document.getElementById('chat-input-text').value = '';
+  lastChatRetryDraft = {
+    promptText,
+    images: [...selectedImages]
+  };
 
   const telemetry = document.getElementById('chat-telemetry');
 
@@ -1575,6 +1729,8 @@ async function sendChatMessage() {
   
   // Disable controls during inference
   const sendBtn = document.getElementById('chat-send-btn');
+  const stopBtn = document.getElementById('chat-stop-btn');
+  const retryBtn = document.getElementById('chat-retry-btn');
   const tempInput = document.getElementById('chat-temp');
   const ctxInput = document.getElementById('chat-ctx-limit');
   const modelSelect = document.getElementById('chat-model-select');
@@ -1598,6 +1754,15 @@ async function sendChatMessage() {
   const numThreadInput = document.getElementById('chat-num-thread');
 
   if (sendBtn) sendBtn.disabled = true;
+  if (retryBtn) {
+    retryBtn.classList.add('hidden');
+    retryBtn.classList.remove('flex');
+  }
+  if (stopBtn) {
+    stopBtn.classList.remove('hidden');
+    stopBtn.classList.add('flex');
+    stopBtn.disabled = false;
+  }
   if (tempInput) tempInput.disabled = true;
   if (ctxInput) ctxInput.disabled = true;
   if (modelSelect) modelSelect.disabled = true;
@@ -1645,6 +1810,9 @@ async function sendChatMessage() {
   const numPredictInputVal = document.getElementById('chat-num-predict').value;
   const numPredict = (numPredictInputVal === '' || isNaN(parseInt(numPredictInputVal))) ? -1 : parseInt(numPredictInputVal);
   const numGpuInputVal = document.getElementById('chat-num-gpu').value;
+  const numGpu = (numGpuInputVal === '' || isNaN(parseInt(numGpuInputVal))) ? -1 : parseInt(numGpuInputVal);
+  const numThreadInputVal = document.getElementById('chat-num-thread').value;
+  const numThread = (numThreadInputVal === '' || isNaN(parseInt(numThreadInputVal))) ? -1 : parseInt(numThreadInputVal);
   const ragEnabled = document.getElementById('chat-rag-enabled')?.checked || false;
   const ragModel = document.getElementById('chat-rag-model-select')?.value || '';
   const ragTopK = parseInt(document.getElementById('chat-rag-top-k')?.value || '3');
@@ -1712,12 +1880,14 @@ async function sendChatMessage() {
   const startTime = performance.now();
   let firstTokenTime = null;
   let tokenCount = 0;
+  chatAbortController = new AbortController();
 
   try {
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: chatAbortController.signal
     });
 
     if (!response.ok) {
@@ -1811,6 +1981,7 @@ async function sendChatMessage() {
                 telemetry.textContent = 'COMPLETED';
               }
               telemetry.className = 'text-[#a3be8c]';
+              lastChatRetryDraft = null;
             }
           } catch (e) {
             console.error('Error parsing SSE line:', e, dataStr);
@@ -1821,16 +1992,30 @@ async function sendChatMessage() {
 
   } catch (error) {
     console.error('Chat error:', error);
-    showToast(error.message, 'error');
-    telemetry.textContent = 'CONNECTION FAILED';
-    telemetry.className = 'text-[#bf616a]';
+    const wasAbort = error.name === 'AbortError';
+    showToast(wasAbort ? 'Chat generation stopped' : error.message, wasAbort ? 'warning' : 'error');
+    telemetry.textContent = wasAbort ? 'ABORTED' : 'CONNECTION FAILED';
+    telemetry.className = wasAbort ? 'text-[#ebcb8b]' : 'text-[#bf616a]';
+    if (!wasAbort) {
+      recordStreamFailure('chat', error.message);
+      if (retryBtn) {
+        retryBtn.classList.remove('hidden');
+        retryBtn.classList.add('flex');
+      }
+    }
     if (chatMessages[assistantMsgIndex].content === '') {
       chatMessages.pop();
       renderChatHistory();
     }
   } finally {
+    chatAbortController = null;
     isGeneratingChat = false;
     if (sendBtn) sendBtn.disabled = false;
+    if (stopBtn) {
+      stopBtn.disabled = true;
+      stopBtn.classList.add('hidden');
+      stopBtn.classList.remove('flex');
+    }
     if (tempInput) tempInput.disabled = false;
     if (ctxInput) ctxInput.disabled = false;
     if (modelSelect) modelSelect.disabled = false;
@@ -2076,11 +2261,17 @@ async function buildCustomModel() {
   const logBox = document.getElementById('compiler-log-box');
   const indicator = document.getElementById('compiler-indicator');
   const buildBtn = document.getElementById('builder-compile-btn');
+  const cancelBtn = document.getElementById('builder-cancel-btn');
 
   // Lock UI
   isBuildingModel = true;
+  buildAbortController = new AbortController();
   buildBtn.disabled = true;
   buildBtn.innerHTML = `<i class="fa-solid fa-circle-notch animate-spin mr-1"></i> COMPILING...`;
+  if (cancelBtn) {
+    cancelBtn.classList.remove('hidden');
+    cancelBtn.disabled = false;
+  }
   indicator.className = 'h-2 w-2 rounded-full bg-[#ebcb8b] animate-pulse'; // Amber warning pulse
   
   logBox.innerHTML = `<div class="text-[#88c0d0]">CONNECTING TO COMPILER PIPELINE...</div>`;
@@ -2089,7 +2280,8 @@ async function buildCustomModel() {
     const response = await fetch('/api/models/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, modelfile })
+      body: JSON.stringify({ name, modelfile }),
+      signal: buildAbortController.signal
     });
 
     if (!response.ok) {
@@ -2149,13 +2341,29 @@ async function buildCustomModel() {
     await fetchModels();
     populateModelDropdowns();
   } catch (error) {
-    showToast(error.message, 'error');
-    logBox.insertAdjacentHTML('beforeend', `<div class="text-[#bf616a] font-bold mt-2">>> PIPELINE ERROR: ${error.message.toUpperCase()}</div>`);
-    indicator.className = 'h-2 w-2 rounded-full bg-[#bf616a]'; // Red static
+    const wasAbort = error.name === 'AbortError';
+    showToast(wasAbort ? 'Model build stopped' : error.message, wasAbort ? 'warning' : 'error');
+    const statusText = wasAbort ? 'BUILD ABORTED BY USER' : `PIPELINE ERROR: ${error.message.toUpperCase()}`;
+    logBox.insertAdjacentHTML('beforeend', `<div class="${wasAbort ? 'text-[#ebcb8b]' : 'text-[#bf616a]'} font-bold mt-2">>> ${escapeHTML(statusText)}</div>`);
+    indicator.className = `h-2 w-2 rounded-full ${wasAbort ? 'bg-[#ebcb8b]' : 'bg-[#bf616a]'}`;
+    if (!wasAbort) {
+      recordStreamFailure('model build', error.message);
+    }
   } finally {
+    buildAbortController = null;
     isBuildingModel = false;
     buildBtn.disabled = false;
     buildBtn.innerHTML = `<i class="fa-solid fa-cube mr-1"></i> COMPILE_MODEL // BUILD`;
+    if (cancelBtn) {
+      cancelBtn.disabled = true;
+      cancelBtn.classList.add('hidden');
+    }
+  }
+}
+
+function cancelBuildModel() {
+  if (buildAbortController) {
+    buildAbortController.abort();
   }
 }
 
@@ -2304,6 +2512,48 @@ function escapeHTML(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+function sanitizeExternalHTML(html) {
+  const template = document.createElement('template');
+  template.innerHTML = html || '';
+
+  template.content.querySelectorAll('script, iframe, object, embed, form, input, button, textarea, select, option, meta, base, link').forEach(el => el.remove());
+
+  const isSafeUrl = (rawValue) => {
+    const value = (rawValue || '').trim();
+    if (!value || value.startsWith('#') || value.startsWith('/') || value.startsWith('./') || value.startsWith('../')) {
+      return true;
+    }
+    try {
+      const parsed = new URL(value, window.location.origin);
+      return ['http:', 'https:', 'mailto:'].includes(parsed.protocol);
+    } catch (_) {
+      return false;
+    }
+  };
+
+  const elements = template.content.querySelectorAll('*');
+  elements.forEach(el => {
+    Array.from(el.attributes).forEach(attr => {
+      const name = attr.name.toLowerCase();
+      const value = attr.value;
+      if (name.startsWith('on') || name === 'srcdoc' || name === 'style') {
+        el.removeAttribute(attr.name);
+        return;
+      }
+      if (['href', 'src', 'xlink:href', 'poster', 'action', 'formaction'].includes(name) && !isSafeUrl(value)) {
+        el.removeAttribute(attr.name);
+      }
+    });
+
+    if (el.tagName.toLowerCase() === 'a') {
+      el.setAttribute('target', '_blank');
+      el.setAttribute('rel', 'noopener noreferrer');
+    }
+  });
+
+  return template.innerHTML;
 }
 
 // --- RECENT CHATS CONTROLLERS (v0.0.3) ---
@@ -3633,6 +3883,57 @@ function generateHtmlExportString(model, sysPrompt, temp, ctx, topK, topP, messa
 }
 
 // --- 3. MODEL CARD FETCHING & PARSING ---
+function getModelCardSourceUrl(modelName) {
+  if (!modelName) return '#';
+  if (modelName.includes('hf.co/') || modelName.includes('/')) {
+    let cleaned = modelName.startsWith('hf.co/') ? modelName.slice(6) : modelName;
+    cleaned = cleaned.split(':')[0];
+    return `https://huggingface.co/${cleaned}`;
+  }
+  return `https://ollama.com/library/${modelName.split(':')[0]}`;
+}
+
+function renderModelCard(container) {
+  if (!modelCardCache) return;
+
+  const sourceUrl = getModelCardSourceUrl(modelCardCache.modelName);
+  const activeSafe = modelCardViewMode === 'safe';
+  const activeRaw = modelCardViewMode === 'raw';
+  const btnBase = 'btn btn-xs border-[#4c566a] font-tech text-[9px] px-2 h-6 min-h-0';
+  const toolbar = `
+    <div class="not-prose mb-3 p-2 bg-[#242933] border border-[#4c566a]/50 rounded-lg flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono whitespace-normal">
+      <span class="text-[#88c0d0] font-bold flex items-center gap-1.5">
+        <i class="fa-solid fa-shield-halved"></i> External model card
+      </span>
+      <div class="flex items-center gap-1.5">
+        <button onclick="setModelCardViewMode('safe')" class="${btnBase} ${activeSafe ? 'btn-info' : 'btn-neutral'}">SAFE</button>
+        <button onclick="setModelCardViewMode('raw')" class="${btnBase} ${activeRaw ? 'btn-info' : 'btn-neutral'}">RAW</button>
+        <a href="${escapeHTML(sourceUrl)}" target="_blank" rel="noopener noreferrer" class="${btnBase} btn-outline btn-info inline-flex items-center gap-1">
+          <i class="fa-solid fa-arrow-up-right-from-square"></i> SOURCE
+        </a>
+      </div>
+    </div>
+  `;
+
+  if (activeRaw) {
+    container.className = "whitespace-pre-wrap break-all pr-8 leading-relaxed font-tech text-[11px] font-mono text-[#d8dee9]";
+    container.innerHTML = toolbar + `<code class="whitespace-pre-wrap break-all">${escapeHTML(modelCardCache.rawBody)}</code>`;
+    return;
+  }
+
+  container.classList.remove('font-mono');
+  container.classList.add('prose', 'prose-invert', 'max-w-none', 'p-2');
+  container.innerHTML = toolbar + modelCardCache.safeHTML;
+}
+
+function setModelCardViewMode(mode) {
+  modelCardViewMode = mode === 'raw' ? 'raw' : 'safe';
+  const container = document.getElementById('tab-content-text');
+  if (activeDetailTab === 'card' && container) {
+    renderModelCard(container);
+  }
+}
+
 async function fetchModelCard(modelName, container) {
   try {
     const resp = await fetch(`/api/models/card?name=${encodeURIComponent(modelName)}`);
@@ -3642,13 +3943,12 @@ async function fetchModelCard(modelName, container) {
     const body = await resp.text();
 
     const isHF = modelName.includes('hf.co/') || modelName.includes('/');
+    let safeHTML = '';
     if (isHF) {
       if (window.marked) {
-        container.innerHTML = marked.parse(body);
-        container.classList.remove('font-mono');
-        container.classList.add('prose', 'prose-invert', 'max-w-none', 'p-2');
+        safeHTML = sanitizeExternalHTML(marked.parse(body));
       } else {
-        container.textContent = body;
+        safeHTML = `<pre class="whitespace-pre-wrap break-all">${escapeHTML(body)}</pre>`;
       }
     } else {
       const parser = new DOMParser();
@@ -3657,17 +3957,16 @@ async function fetchModelCard(modelName, container) {
       if (displayDiv) {
         displayDiv.querySelectorAll('a').forEach(a => {
           a.setAttribute('target', '_blank');
+          a.setAttribute('rel', 'noopener noreferrer');
           a.classList.add('text-[#88c0d0]', 'hover:underline');
         });
-        container.innerHTML = displayDiv.innerHTML;
-        container.classList.remove('font-mono');
-        container.classList.add('prose', 'prose-invert', 'max-w-none', 'p-2');
+        safeHTML = sanitizeExternalHTML(displayDiv.innerHTML);
       } else {
-        container.innerHTML = doc.body.innerHTML;
-        container.classList.remove('font-mono');
-        container.classList.add('prose', 'prose-invert', 'max-w-none', 'p-2');
+        safeHTML = sanitizeExternalHTML(doc.body.innerHTML);
       }
     }
+    modelCardCache = { modelName, rawBody: body, safeHTML };
+    renderModelCard(container);
   } catch (err) {
     container.textContent = `Error loading model card: ${err.message}\n\nYou can view the library page online at:\n- Ollama: https://ollama.com/library/${modelName.split(':')[0]}\n- HuggingFace: https://huggingface.co/${modelName}`;
   }
@@ -3876,6 +4175,7 @@ async function generateCompletion() {
     } else {
       statusText.textContent = "ERROR: " + err.message;
       showToast(`Generation error: ${err.message}`, 'error');
+      recordStreamFailure('completion', err.message);
     }
   } finally {
     isGeneratingCompletion = false;
@@ -4400,9 +4700,14 @@ function startBenchmark() {
   }
   
   const runBtn = document.getElementById('run-benchmark-btn');
+  const cancelBtn = document.getElementById('cancel-benchmark-btn');
   const logContainer = document.getElementById('benchmark-log');
   
   if (runBtn) runBtn.disabled = true;
+  if (cancelBtn) {
+    cancelBtn.classList.remove('hidden');
+    cancelBtn.disabled = false;
+  }
   if (logContainer) {
     logContainer.innerHTML = `<div class="text-[#88c0d0] uppercase animate-pulse">Initializing sequential benchmark suite for ${model}...</div>`;
   }
@@ -4434,6 +4739,8 @@ function startBenchmark() {
     }
     benchmarkEventSource.close();
     if (runBtn) runBtn.disabled = false;
+    if (cancelBtn) cancelBtn.classList.add('hidden');
+    recordStreamFailure('benchmark', e.data || 'Failed to complete benchmark runs.');
     showToast('Benchmark run failed', 'error');
   });
   
@@ -4454,6 +4761,7 @@ function startBenchmark() {
     } finally {
       benchmarkEventSource.close();
       if (runBtn) runBtn.disabled = false;
+      if (cancelBtn) cancelBtn.classList.add('hidden');
     }
   });
   
@@ -4461,7 +4769,28 @@ function startBenchmark() {
     console.warn('Benchmark EventSource error:', err);
     benchmarkEventSource.close();
     if (runBtn) runBtn.disabled = false;
+    if (cancelBtn) cancelBtn.classList.add('hidden');
+    recordStreamFailure('benchmark', 'Connection to benchmark stream was interrupted.');
   };
+}
+
+function cancelBenchmark() {
+  if (!benchmarkEventSource) return;
+  benchmarkEventSource.close();
+  benchmarkEventSource = null;
+  const runBtn = document.getElementById('run-benchmark-btn');
+  const cancelBtn = document.getElementById('cancel-benchmark-btn');
+  const logContainer = document.getElementById('benchmark-log');
+  if (runBtn) runBtn.disabled = false;
+  if (cancelBtn) cancelBtn.classList.add('hidden');
+  if (logContainer) {
+    const div = document.createElement('div');
+    div.className = 'text-[#ebcb8b] font-bold mt-1';
+    div.textContent = '[CANCELLED] Benchmark stream stopped by user.';
+    logContainer.appendChild(div);
+    logContainer.scrollTop = logContainer.scrollHeight;
+  }
+  showToast('Benchmark run stopped', 'warning');
 }
 
 async function fetchBenchmarks() {
@@ -4649,6 +4978,7 @@ function startOptimizerBenchmark() {
   const prompt = promptInput ? promptInput.value.trim() : '';
   
   const runBtn = document.getElementById('run-optimizer-btn');
+  const cancelBtn = document.getElementById('cancel-optimizer-btn');
   const logContainer = document.getElementById('optimizer-log');
   
   // Reset UI elements
@@ -4664,6 +4994,10 @@ function startOptimizerBenchmark() {
   }
   
   if (runBtn) runBtn.disabled = true;
+  if (cancelBtn) {
+    cancelBtn.classList.remove('hidden');
+    cancelBtn.disabled = false;
+  }
   if (logContainer) {
     logContainer.innerHTML = `<div class="text-[#88c0d0] uppercase animate-pulse">Initializing parameter sweep suite for ${model}...</div>`;
   }
@@ -4701,6 +5035,8 @@ function startOptimizerBenchmark() {
     }
     optimizerEventSource.close();
     if (runBtn) runBtn.disabled = false;
+    if (cancelBtn) cancelBtn.classList.add('hidden');
+    recordStreamFailure('optimizer', e.data || 'Sweep failed or was cancelled.');
     showToast('Optimization sweep failed', 'error');
   });
   
@@ -4744,6 +5080,7 @@ function startOptimizerBenchmark() {
     showToast('Optimization sweep completed successfully!', 'success');
     optimizerEventSource.close();
     if (runBtn) runBtn.disabled = false;
+    if (cancelBtn) cancelBtn.classList.add('hidden');
     loadOptimizerHistory();
   });
   
@@ -4751,7 +5088,28 @@ function startOptimizerBenchmark() {
     console.warn('Optimizer EventSource error:', err);
     optimizerEventSource.close();
     if (runBtn) runBtn.disabled = false;
+    if (cancelBtn) cancelBtn.classList.add('hidden');
+    recordStreamFailure('optimizer', 'Connection to optimizer stream was interrupted.');
   };
+}
+
+function cancelOptimizerBenchmark() {
+  if (!optimizerEventSource) return;
+  optimizerEventSource.close();
+  optimizerEventSource = null;
+  const runBtn = document.getElementById('run-optimizer-btn');
+  const cancelBtn = document.getElementById('cancel-optimizer-btn');
+  const logContainer = document.getElementById('optimizer-log');
+  if (runBtn) runBtn.disabled = false;
+  if (cancelBtn) cancelBtn.classList.add('hidden');
+  if (logContainer) {
+    const div = document.createElement('div');
+    div.className = 'text-[#ebcb8b] font-bold mt-1';
+    div.textContent = '[CANCELLED] Optimizer stream stopped by user.';
+    logContainer.appendChild(div);
+    logContainer.scrollTop = logContainer.scrollHeight;
+  }
+  showToast('Optimizer sweep stopped', 'warning');
 }
 
 function highlightBestConfigs(results) {
@@ -5235,4 +5593,3 @@ async function runRAGSimilarityQuery() {
     showToast(error.message, 'error');
   }
 }
-
