@@ -4831,9 +4831,9 @@ function updateTelemetryChart(payload) {
 
   ctx.font = '9px monospace';
   ctx.fillStyle = '#88c0d0';
-  ctx.fillText(`APP CPU: ${cpuVal.toFixed(1)}%`, 10, 15);
+  ctx.fillText(`HOST CPU: ${cpuVal.toFixed(1)}%`, 10, 15);
   ctx.fillStyle = '#a3be8c';
-  ctx.fillText(`APP RAM: ${ramVal.toFixed(1)}%`, 10, 27);
+  ctx.fillText(`HOST RAM: ${ramVal.toFixed(1)}%`, 10, 27);
   ctx.fillStyle = '#ebcb8b';
   const vramScaleLabel = configuredVramGb > 0 ? `${configuredVramGb} GB` : `${maxVramInHistory} GB`;
   ctx.fillText(`OLLAMA VRAM IN USE: ${vramGb.toFixed(2)} GB / ${vramScaleLabel}`, 10, 39);
