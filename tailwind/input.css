@@ -161,6 +161,28 @@
   box-shadow: 0 0 12px rgba(136, 192, 208, 0.3);
 }
 
+/* Benchmark sub-tabs (replaces DaisyUI tabs-box/tab-active which forces white background) */
+.bench-subtab {
+  padding: 6px 16px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-weight: 700;
+  color: #4c566a;
+  transition: color 0.15s, background-color 0.15s;
+  cursor: pointer;
+  letter-spacing: 0.05em;
+  text-align: center;
+  white-space: nowrap;
+}
+.bench-subtab:hover {
+  color: #88c0d0;
+}
+.bench-subtab-active {
+  background-color: #88c0d0;
+  color: #2e3440;
+}
+
 /* Accordion inline detail tabs */
 .detail-tab {
   flex: 1;

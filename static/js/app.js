@@ -4916,49 +4916,60 @@ async function fetchBenchmarks() {
     if (!list || list.length === 0) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="6" class="text-center py-12 text-[#4c566a] italic">
+          <td colspan="7" class="text-center py-12 text-[#4c566a] italic">
             No benchmarking runs recorded. Select a model on the left to begin.
           </td>
         </tr>
       `;
       return;
     }
-    
+
     tbody.innerHTML = list.map(b => {
+      const score = b.reasoning_score || 'F';
       let scoreBadge = '';
-      if (b.reasoning_score.includes('S')) {
+      if (score === 'S') {
         scoreBadge = 'bg-[#a3be8c]/25 text-[#a3be8c] border-[#a3be8c]';
-      } else if (b.reasoning_score.includes('A') || b.reasoning_score.includes('B')) {
+      } else if (score === 'A' || score === 'B') {
         scoreBadge = 'bg-[#88c0d0]/25 text-[#88c0d0] border-[#88c0d0]';
-      } else if (b.reasoning_score.includes('C')) {
+      } else if (score === 'C') {
         scoreBadge = 'bg-[#ebcb8b]/25 text-[#ebcb8b] border-[#ebcb8b]';
-      } else if (b.reasoning_score.includes('F')) {
+      } else if (score === 'F') {
         scoreBadge = 'bg-[#bf616a]/25 text-[#bf616a] border-[#bf616a]';
       } else {
         scoreBadge = 'bg-[#4c566a]/25 text-[#d8dee9] border-[#4c566a]';
       }
-      
-      const noteHtml = b.notes 
-        ? `<div class="text-[10px] text-[#4c566a] mt-0.5 max-w-[250px] truncate" title="${escapeHTML(b.notes)}">${escapeHTML(b.notes)}</div>` 
+
+      const noteHtml = b.notes
+        ? `<div class="text-[10px] text-[#4c566a] mt-0.5 max-w-[200px] truncate" title="${escapeHTML(b.notes)}">${escapeHTML(b.notes)}</div>`
         : '';
-        
+
+      // Server display — prefer name, fall back to hostname from URL
+      let serverDisplay = b.server_name || '';
+      if (!serverDisplay && b.server_url) {
+        try { serverDisplay = new URL(b.server_url).hostname; } catch (_) { serverDisplay = b.server_url; }
+      }
+
       return `
         <tr class="hover:bg-[#3b4252]/20 border-b border-[#4c566a]/20 transition-colors">
           <td class="py-3 text-left font-mono">
             <div class="font-bold text-[#e5e9f0]">${escapeHTML(b.model_name)}</div>
             ${noteHtml}
           </td>
+          <td class="py-3 text-left font-mono text-[11px]">
+            <div class="text-[#88c0d0] font-bold">${escapeHTML(serverDisplay || '—')}</div>
+            <div class="text-[9px] text-[#4c566a] truncate max-w-[120px]" title="${escapeHTML(b.server_url)}">${escapeHTML(b.server_url || '')}</div>
+          </td>
           <td class="text-center">${b.ttft_ms.toFixed(1)} ms</td>
           <td class="text-center font-bold text-[#88c0d0]">${b.tps.toFixed(1)}</td>
           <td class="text-center">${b.avg_latency_ms.toFixed(0)} ms</td>
           <td class="text-center">
             <span class="border px-2 py-0.5 rounded text-[9px] font-bold ${scoreBadge}">
-              ${escapeHTML(b.reasoning_score)}
+              ${escapeHTML(score)}
             </span>
           </td>
           <td class="text-right">
             <div class="flex gap-1 justify-end">
-              <button onclick="openScoreModal(${b.id}, '${escapeHTML(b.reasoning_score)}', '${escapeHTML(b.notes)}')" 
+              <button onclick="openScoreModal(${b.id}, '${escapeHTML(score)}', '${escapeHTML(b.notes)}')"
                       class="btn btn-xs btn-neutral border-[#4c566a] font-tech text-[9px] px-2">
                 RATE
               </button>
@@ -4973,7 +4984,7 @@ async function fetchBenchmarks() {
   } catch (error) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="6" class="text-center py-8 text-[#bf616a] italic">
+        <td colspan="7" class="text-center py-8 text-[#bf616a] italic">
           Failed to load leaderboard: ${error.message}
         </td>
       </tr>
@@ -5057,20 +5068,14 @@ function switchBenchmarkSubtab(tab) {
   const optimizerBtn = document.getElementById('benchmark-subtab-optimizer');
   const standardContainer = document.getElementById('benchmark-standard-container');
   const optimizerContainer = document.getElementById('benchmark-optimizer-container');
-  
-  if (tab === 'standard') {
-    if (standardBtn) standardBtn.classList.add('tab-active');
-    if (optimizerBtn) optimizerBtn.classList.remove('tab-active');
-    if (standardContainer) standardContainer.classList.remove('hidden');
-    if (optimizerContainer) optimizerContainer.classList.add('hidden');
-  } else {
-    if (standardBtn) standardBtn.classList.remove('tab-active');
-    if (optimizerBtn) optimizerBtn.classList.add('tab-active');
-    if (standardContainer) standardContainer.classList.add('hidden');
-    if (optimizerContainer) optimizerContainer.classList.remove('hidden');
-    
-    loadOptimizerHistory();
-  }
+
+  const isStandard = tab === 'standard';
+  if (standardBtn) standardBtn.classList.toggle('bench-subtab-active', isStandard);
+  if (optimizerBtn) optimizerBtn.classList.toggle('bench-subtab-active', !isStandard);
+  if (standardContainer) standardContainer.classList.toggle('hidden', !isStandard);
+  if (optimizerContainer) optimizerContainer.classList.toggle('hidden', isStandard);
+
+  if (!isStandard) loadOptimizerHistory();
 }
 
 let optimizerEventSource = null;

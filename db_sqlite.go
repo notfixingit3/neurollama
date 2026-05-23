@@ -56,6 +56,8 @@ type SchedulerLog struct {
 type Benchmark struct {
 	ID             int64   `json:"id"`
 	ModelName      string  `json:"model_name"`
+	ServerName     string  `json:"server_name"`
+	ServerURL      string  `json:"server_url"`
 	TtftMs         float64 `json:"ttft_ms"`
 	Tps            float64 `json:"tps"`
 	AvgLatencyMs   float64 `json:"avg_latency_ms"`
@@ -282,6 +284,8 @@ func migrate() error {
 		{"chats", "num_gpu", "ALTER TABLE chats ADD COLUMN num_gpu INTEGER NOT NULL DEFAULT -1"},
 		{"chats", "num_thread", "ALTER TABLE chats ADD COLUMN num_thread INTEGER NOT NULL DEFAULT -1"},
 		{"messages", "images", "ALTER TABLE messages ADD COLUMN images TEXT"},
+		{"benchmarks", "server_name", "ALTER TABLE benchmarks ADD COLUMN server_name TEXT NOT NULL DEFAULT ''"},
+		{"benchmarks", "server_url", "ALTER TABLE benchmarks ADD COLUMN server_url TEXT NOT NULL DEFAULT ''"},
 	}
 
 	for _, alter := range alterQueries {
@@ -547,7 +551,9 @@ func LogScheduleAction(modelName, status, message string) error {
 // Benchmark Helpers
 
 func GetBenchmarks() ([]Benchmark, error) {
-	rows, err := DB.Query("SELECT id, model_name, ttft_ms, tps, avg_latency_ms, reasoning_score, COALESCE(notes, ''), datetime(created_at, 'localtime') FROM benchmarks ORDER BY id DESC")
+	rows, err := DB.Query(`SELECT id, model_name, COALESCE(server_name,''), COALESCE(server_url,''),
+		ttft_ms, tps, avg_latency_ms, reasoning_score, COALESCE(notes,''), datetime(created_at,'localtime')
+		FROM benchmarks ORDER BY id DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -556,7 +562,7 @@ func GetBenchmarks() ([]Benchmark, error) {
 	var list []Benchmark
 	for rows.Next() {
 		var b Benchmark
-		if err := rows.Scan(&b.ID, &b.ModelName, &b.TtftMs, &b.Tps, &b.AvgLatencyMs, &b.ReasoningScore, &b.Notes, &b.CreatedAt); err != nil {
+		if err := rows.Scan(&b.ID, &b.ModelName, &b.ServerName, &b.ServerURL, &b.TtftMs, &b.Tps, &b.AvgLatencyMs, &b.ReasoningScore, &b.Notes, &b.CreatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, b)
@@ -564,8 +570,29 @@ func GetBenchmarks() ([]Benchmark, error) {
 	return list, nil
 }
 
-func SaveBenchmark(modelName string, ttft, tps, avgLatency float64) (int64, error) {
-	res, err := DB.Exec("INSERT INTO benchmarks (model_name, ttft_ms, tps, avg_latency_ms) VALUES (?, ?, ?, ?)", modelName, ttft, tps, avgLatency)
+// speedTier returns an auto-computed performance tier based on tokens-per-second.
+func speedTier(tps float64) string {
+	switch {
+	case tps >= 40:
+		return "S"
+	case tps >= 25:
+		return "A"
+	case tps >= 12:
+		return "B"
+	case tps >= 4:
+		return "C"
+	default:
+		return "F"
+	}
+}
+
+func SaveBenchmark(modelName, serverName, serverURL string, ttft, tps, avgLatency float64) (int64, error) {
+	score := speedTier(tps)
+	res, err := DB.Exec(
+		`INSERT INTO benchmarks (model_name, server_name, server_url, ttft_ms, tps, avg_latency_ms, reasoning_score)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		modelName, serverName, serverURL, ttft, tps, avgLatency, score,
+	)
 	if err != nil {
 		return 0, err
 	}

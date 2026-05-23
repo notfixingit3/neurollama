@@ -1100,11 +1100,11 @@
 	        <!-- PANEL 5: BENCHMARK SUITE -->
 	        <div id="ws-panel-benchmark" class="ws-panel hidden flex flex-col gap-4">
           <!-- Sub-tabs navigation bar -->
-          <div class="tabs tabs-box bg-[#242933]/60 p-1 border border-[#4c566a]/40 flex w-fit shrink-0 gap-1">
-            <button id="benchmark-subtab-standard" onclick="switchBenchmarkSubtab('standard')" class="tab tab-sm tab-active text-[11px] font-tech font-bold transition-all px-4 text-[#d8dee9]">
+          <div class="bg-[#242933]/60 p-1 border border-[#4c566a]/40 flex w-fit shrink-0 gap-1 rounded-xl">
+            <button id="benchmark-subtab-standard" onclick="switchBenchmarkSubtab('standard')" class="bench-subtab bench-subtab-active">
               <i class="fa-solid fa-gauge-high mr-1.5"></i>STANDARD BENCHMARKS
             </button>
-            <button id="benchmark-subtab-optimizer" onclick="switchBenchmarkSubtab('optimizer')" class="tab tab-sm text-[11px] font-tech font-bold transition-all px-4 text-[#d8dee9]">
+            <button id="benchmark-subtab-optimizer" onclick="switchBenchmarkSubtab('optimizer')" class="bench-subtab">
               <i class="fa-solid fa-sliders mr-1.5"></i>HYPERPARAMETER OPTIMIZER
             </button>
           </div>
@@ -1159,10 +1159,11 @@
                     <thead>
                       <tr class="text-[#88c0d0] border-b border-[#4c566a]/40">
                         <th class="bg-transparent text-left py-2 font-tech uppercase">Model</th>
+                        <th class="bg-transparent text-left py-2 font-tech uppercase">Server</th>
                         <th class="bg-transparent text-center py-2 font-tech uppercase">TTFT (Avg)</th>
                         <th class="bg-transparent text-center py-2 font-tech uppercase">TPS (Avg)</th>
                         <th class="bg-transparent text-center py-2 font-tech uppercase">Avg Latency</th>
-                        <th class="bg-transparent text-center py-2 font-tech uppercase">Score</th>
+                        <th class="bg-transparent text-center py-2 font-tech uppercase">Speed</th>
                         <th class="bg-transparent text-right py-2 font-tech uppercase">Actions</th>
                       </tr>
                     </thead>

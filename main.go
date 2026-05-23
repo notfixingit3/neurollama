@@ -2120,7 +2120,7 @@ func runBenchmarkSSEHandler(c *gin.Context) {
 		avgTps := totalTps / float64(successfulRuns)
 		avgLatency := totalLatency / float64(successfulRuns)
 
-		id, err := SaveBenchmark(model, avgTtft, avgTps, avgLatency)
+		id, err := SaveBenchmark(model, activeSrv.Name, activeSrv.URL, avgTtft, avgTps, avgLatency)
 		if err != nil {
 			c.SSEvent("error", fmt.Sprintf("Failed to save benchmark: %v", err))
 			return false
@@ -2131,6 +2131,8 @@ func runBenchmarkSSEHandler(c *gin.Context) {
 		resultPayload := map[string]interface{}{
 			"id":             id,
 			"model_name":     model,
+			"server_name":    activeSrv.Name,
+			"server_url":     activeSrv.URL,
 			"ttft_ms":        avgTtft,
 			"tps":            avgTps,
 			"avg_latency_ms": avgLatency,
