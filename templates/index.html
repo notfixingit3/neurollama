@@ -969,34 +969,32 @@
         <!-- PANEL 4: MEMORY STATUS -->
         <div id="ws-panel-memory" class="ws-panel hidden flex flex-col gap-6">
 
-          <!-- Row 1: Node Connectivity & Host Stats — full width, compact -->
-          <div class="tech-panel tech-header-accent rounded-xl px-4 py-3 flex flex-col gap-2">
-            <!-- Header: title + node info + badge all inline -->
-            <div class="flex flex-wrap items-center gap-x-4 gap-y-1 pb-2 border-b border-[#4c566a]/40">
+          <!-- Row 1: Node Connectivity & Host Stats — full width -->
+          <div class="tech-panel tech-header-accent rounded-xl px-4 py-3 flex flex-col gap-3">
+            <!-- Header: title | node info | badge -->
+            <div class="flex flex-wrap items-center gap-2 pb-2 border-b border-[#4c566a]/40">
               <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] shrink-0">
                 <i class="fa-solid fa-server mr-2"></i>Node Connectivity & Host Stats
               </h2>
-              <span class="text-[10px] font-mono text-[#4c566a]">NODE:
-                <span id="telemetry-node-url" class="text-[#88c0d0] font-bold">---</span>
-              </span>
-              <span class="text-[10px] font-mono text-[#4c566a]">TYPE:
-                <span id="telemetry-node-type" class="text-[#88c0d0] font-bold">---</span>
-              </span>
+              <div class="flex items-center gap-4 text-[10px] font-mono ml-2">
+                <span class="text-[#4c566a]">NODE: <span id="telemetry-node-url" class="text-[#88c0d0] font-bold">---</span></span>
+                <span class="text-[#4c566a]">TYPE: <span id="telemetry-node-type" class="text-[#88c0d0] font-bold">---</span></span>
+              </div>
               <span id="node-badge" class="badge badge-xs py-2 px-2 font-mono font-bold bg-[#bf616a] text-[#d8dee9] border-none ml-auto shrink-0">DISCONNECTED</span>
             </div>
 
-            <!-- Chart + all 4 metric bars in one compact row -->
-            <div class="grid grid-cols-1 lg:grid-cols-[1fr_2fr] gap-4 items-center">
-              <!-- Live canvas chart — fixed short height -->
-              <div class="flex flex-col h-16">
-                <span class="text-[9px] font-mono text-[#4c566a]/70 mb-0.5">HOST // CPU &amp; MEM</span>
+            <!-- Chart left, 2×2 bars right — standard 2-column grid -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 items-stretch">
+              <!-- Live canvas chart -->
+              <div class="flex flex-col" style="height:128px">
+                <span class="text-[9px] font-mono text-[#4c566a]/70 mb-1">HOST // CPU &amp; MEM</span>
                 <canvas id="telemetry-chart" class="w-full flex-1 rounded bg-[#1a1c23] border border-[#4c566a]/20"></canvas>
               </div>
 
-              <!-- 4 metric bars in one row -->
-              <div class="grid grid-cols-2 md:grid-cols-4 gap-x-5 gap-y-2 text-[11px] font-mono">
+              <!-- 4 metric bars in a 2×2 grid -->
+              <div class="grid grid-cols-2 gap-x-6 gap-y-4 text-xs font-mono content-center">
                 <div>
-                  <div class="flex justify-between mb-0.5">
+                  <div class="flex justify-between mb-1">
                     <span id="host-cpu-label" class="text-[#4c566a] text-[10px]">HOST CPU</span>
                     <span id="host-cpu-text" class="text-[#88c0d0]">0.0%</span>
                   </div>
@@ -1005,7 +1003,7 @@
                   </div>
                 </div>
                 <div>
-                  <div class="flex justify-between mb-0.5">
+                  <div class="flex justify-between mb-1">
                     <span id="host-ram-label" class="text-[#4c566a] text-[10px]">HOST RAM</span>
                     <span id="host-ram-text" class="text-[#a3be8c] text-[10px]">0.0 / 0.0 GB</span>
                   </div>
@@ -1014,7 +1012,7 @@
                   </div>
                 </div>
                 <div>
-                  <div class="flex justify-between mb-0.5">
+                  <div class="flex justify-between mb-1">
                     <span class="text-[#4c566a] text-[10px]">GPU VRAM</span>
                     <span id="ollama-vram-text" class="text-[#ebcb8b]">---</span>
                   </div>
@@ -1023,7 +1021,7 @@
                   </div>
                 </div>
                 <div>
-                  <div class="flex justify-between mb-0.5">
+                  <div class="flex justify-between mb-1">
                     <span class="text-[#4c566a] text-[10px]">SYS RAM</span>
                     <span id="ollama-sysram-text" class="text-[#b48ead]">---</span>
                   </div>
