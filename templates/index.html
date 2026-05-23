@@ -1104,7 +1104,10 @@
 	              <div id="stream-failure-log" class="overflow-y-auto max-h-48 space-y-2 text-[10px] font-mono">
 	                <div class="text-[#4c566a] italic">No stream failures recorded in this browser.</div>
 	              </div>
-	              <button onclick="clearStreamFailureLog()" class="btn btn-xs btn-neutral border-[#4c566a] font-tech text-[9px] mt-3">CLEAR LOG</button>
+	              <div class="flex gap-2 mt-3">
+                <button onclick="markAllFailuresRead()" class="btn btn-xs btn-ghost border-[#4c566a] font-tech text-[9px]">MARK READ</button>
+                <button onclick="clearStreamFailureLog()" class="btn btn-xs btn-neutral border-[#4c566a] font-tech text-[9px]">CLEAR LOG</button>
+              </div>
 	            </div>
 	          </div>
 	          <div class="lg:col-span-8 flex flex-col">
@@ -1540,6 +1543,30 @@
     </section>
   </main>
 
+  <!-- Stream Failure Popover — anchored above the footer right edge -->
+  <div id="stream-failure-popover"
+       class="hidden fixed bottom-12 right-4 z-50 w-[420px] max-h-[360px] flex flex-col
+              bg-[#242933] border border-[#bf616a]/40 rounded-xl shadow-2xl font-mono text-[11px]">
+    <div class="flex items-center justify-between px-4 py-2.5 border-b border-[#4c566a]/40 shrink-0">
+      <div class="flex items-center gap-2 text-[#bf616a] font-bold uppercase text-[10px] tracking-wider">
+        <i class="fa-solid fa-triangle-exclamation"></i> Stream Failures
+      </div>
+      <div class="flex items-center gap-1">
+        <button onclick="markAllFailuresRead()"
+                class="btn btn-xs btn-ghost text-[#4c566a] hover:text-[#88c0d0] font-tech text-[9px] px-2">Mark read</button>
+        <button onclick="clearStreamFailureLog()"
+                class="btn btn-xs btn-ghost text-[#4c566a] hover:text-[#bf616a] font-tech text-[9px] px-2">Clear all</button>
+        <button onclick="toggleFailurePopover()"
+                class="ml-1 text-[#4c566a] hover:text-[#d8dee9] transition-colors">
+          <i class="fa-solid fa-xmark text-[11px]"></i>
+        </button>
+      </div>
+    </div>
+    <div id="failure-popover-list" class="overflow-y-auto flex-1 px-4 py-2">
+      <div class="text-[#4c566a] italic text-center py-4">No stream failures recorded.</div>
+    </div>
+  </div>
+
   <!-- Tech Status Bar Footer -->
   <footer class="shrink-0 border-t border-[#4c566a]/50 bg-[#242933]/90 backdrop-blur-md px-6 py-2.5 flex items-center justify-between z-20 text-[10px] font-mono text-[#d8dee9]/60">
     <div class="flex items-center gap-4">
@@ -1562,6 +1589,14 @@
       </button>
     </div>
     <div class="flex items-center gap-4">
+      <!-- Stream failure badge -->
+      <button id="failure-badge-btn" onclick="toggleFailurePopover()"
+              class="hidden items-center gap-1 text-[#bf616a] hover:text-[#bf616a]/70 transition-colors"
+              title="Recent stream failures">
+        <i class="fa-solid fa-triangle-exclamation text-[10px]"></i>
+        <span id="failure-badge-count" class="text-[10px] font-bold"></span>
+      </button>
+      <span id="failure-badge-sep" class="text-[#4c566a] hidden">//</span>
       <a href="https://github.com/notfixingit3/neurollama" target="_blank" rel="noopener noreferrer" class="hover:text-[#88c0d0] transition-colors flex items-center gap-1.5">
         <i class="fa-brands fa-github text-xs"></i> GitHub
       </a>

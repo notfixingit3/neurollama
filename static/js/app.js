@@ -51,6 +51,8 @@ async function init() {
   fetchServers();
   // Initialize catalog view (does not need server data)
   renderCatalog();
+  // Restore failure badge from localStorage on load
+  updateFailureBadge();
 
   // Add system prompt input listener
   const sysTextarea = document.getElementById('chat-system-prompt');
@@ -448,15 +450,110 @@ function showToast(message, type = 'info') {
   }, 4000);
 }
 
-function recordStreamFailure(area, message) {
+// Helper: return the active server's display name (name > hostname > URL)
+function activeServerLabel() {
+  const srv = servers.find(s => s.isActive);
+  if (!srv) return null;
+  if (srv.name) return srv.name;
+  try { return new URL(srv.URL).hostname; } catch (_) { return srv.URL || null; }
+}
+
+function recordStreamFailure(area, message, ctx = {}) {
   const failures = JSON.parse(localStorage.getItem('neurollama-stream-failures') || '[]');
   failures.unshift({
+    id: Date.now(),
     area,
+    model: ctx.model || null,
+    node:  ctx.node  || null,
     message: String(message || 'Unknown stream failure'),
-    created_at: new Date().toISOString()
+    created_at: new Date().toISOString(),
+    read: false,
   });
   localStorage.setItem('neurollama-stream-failures', JSON.stringify(failures.slice(0, 20)));
   renderStreamFailureLog();
+  renderFailurePopover();
+  updateFailureBadge();
+}
+
+function updateFailureBadge() {
+  const failures = JSON.parse(localStorage.getItem('neurollama-stream-failures') || '[]');
+  const unread = failures.filter(f => !f.read).length;
+  const btn   = document.getElementById('failure-badge-btn');
+  const count = document.getElementById('failure-badge-count');
+  const sep   = document.getElementById('failure-badge-sep');
+  if (!btn) return;
+  const hasAny = failures.length > 0;
+  btn.classList.toggle('hidden',   !hasAny);
+  btn.classList.toggle('flex',      hasAny);
+  if (sep) {
+    sep.classList.toggle('hidden', !hasAny);
+    sep.classList.toggle('inline', hasAny);
+  }
+  if (count) count.textContent = unread > 0 ? String(unread) : '';
+  btn.classList.toggle('text-[#bf616a]', unread > 0);
+  btn.classList.toggle('text-[#4c566a]', unread === 0 && hasAny);
+}
+
+function deleteStreamFailure(id) {
+  let failures = JSON.parse(localStorage.getItem('neurollama-stream-failures') || '[]');
+  failures = failures.filter(f => f.id !== id);
+  localStorage.setItem('neurollama-stream-failures', JSON.stringify(failures));
+  renderStreamFailureLog();
+  renderFailurePopover();
+  updateFailureBadge();
+}
+
+function markAllFailuresRead() {
+  let failures = JSON.parse(localStorage.getItem('neurollama-stream-failures') || '[]');
+  failures = failures.map(f => ({ ...f, read: true }));
+  localStorage.setItem('neurollama-stream-failures', JSON.stringify(failures));
+  renderStreamFailureLog();
+  renderFailurePopover();
+  updateFailureBadge();
+}
+
+function toggleFailurePopover() {
+  const popover = document.getElementById('stream-failure-popover');
+  if (!popover) return;
+  const isHidden = popover.classList.contains('hidden');
+  popover.classList.toggle('hidden', !isHidden);
+  if (isHidden) {
+    renderFailurePopover();
+    markAllFailuresRead();
+  }
+}
+
+function renderFailurePopover() {
+  const container = document.getElementById('failure-popover-list');
+  if (!container) return;
+  const failures = JSON.parse(localStorage.getItem('neurollama-stream-failures') || '[]');
+  if (failures.length === 0) {
+    container.innerHTML = '<div class="text-[#4c566a] italic text-center py-4">No stream failures recorded.</div>';
+    return;
+  }
+  container.innerHTML = failures.map(item => {
+    const ts = new Date(item.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const unreadDot = !item.read
+      ? `<span class="inline-block w-1.5 h-1.5 rounded-full bg-[#bf616a] mb-0.5 shrink-0"></span>` : '';
+    return `
+      <div class="flex items-start gap-2 py-2 border-b border-[#4c566a]/20 last:border-0">
+        ${unreadDot}
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-1.5 flex-wrap mb-0.5">
+            <span class="text-[#bf616a] font-bold uppercase text-[9px]">${escapeHTML(item.area)}</span>
+            ${item.model ? `<span class="text-[#ebcb8b] font-mono text-[9px]">${escapeHTML(item.model)}</span>` : ''}
+            ${item.node  ? `<span class="text-[#8fbcbb] text-[9px]">@ ${escapeHTML(item.node)}</span>` : ''}
+            <span class="text-[#4c566a] text-[9px] ml-auto shrink-0">${ts}</span>
+          </div>
+          <div class="text-[#d8dee9]/80 text-[10px] break-words leading-relaxed">${escapeHTML(item.message)}</div>
+        </div>
+        <button onclick="deleteStreamFailure(${item.id})" title="Dismiss"
+                class="shrink-0 text-[#4c566a] hover:text-[#bf616a] transition-colors ml-1 mt-0.5">
+          <i class="fa-solid fa-xmark text-[10px]"></i>
+        </button>
+      </div>
+    `;
+  }).join('');
 }
 
 function renderStreamFailureLog() {
@@ -468,10 +565,20 @@ function renderStreamFailureLog() {
     return;
   }
   container.innerHTML = failures.map(item => `
-    <div class="border border-[#4c566a]/30 bg-[#2e3440]/40 rounded-lg p-2">
-      <div class="flex items-center justify-between gap-2 mb-1">
-        <span class="text-[#bf616a] font-bold uppercase">${escapeHTML(item.area)}</span>
-        <span class="text-[#4c566a]">${new Date(item.created_at).toLocaleTimeString()}</span>
+    <div class="border border-[#4c566a]/30 bg-[#2e3440]/40 rounded-lg p-2${item.read ? '' : ' border-l-2 border-l-[#bf616a]'}">
+      <div class="flex items-start justify-between gap-2 mb-1">
+        <div class="flex items-center gap-1.5 flex-wrap">
+          <span class="text-[#bf616a] font-bold uppercase">${escapeHTML(item.area)}</span>
+          ${item.model ? `<span class="text-[#ebcb8b]">${escapeHTML(item.model)}</span>` : ''}
+          ${item.node  ? `<span class="text-[#4c566a]">@ ${escapeHTML(item.node)}</span>` : ''}
+        </div>
+        <div class="flex items-center gap-1.5 shrink-0">
+          <span class="text-[#4c566a]">${new Date(item.created_at).toLocaleTimeString()}</span>
+          <button onclick="deleteStreamFailure(${item.id})"
+                  class="text-[#4c566a] hover:text-[#bf616a] transition-colors" title="Remove">
+            <i class="fa-solid fa-xmark text-[9px]"></i>
+          </button>
+        </div>
       </div>
       <div class="text-[#d8dee9]/80 break-words">${escapeHTML(item.message)}</div>
     </div>
@@ -481,6 +588,11 @@ function renderStreamFailureLog() {
 function clearStreamFailureLog() {
   localStorage.removeItem('neurollama-stream-failures');
   renderStreamFailureLog();
+  renderFailurePopover();
+  updateFailureBadge();
+  // Close popover if open
+  const popover = document.getElementById('stream-failure-popover');
+  if (popover) popover.classList.add('hidden');
   showToast('Stream failure log cleared', 'info');
 }
 
@@ -1482,7 +1594,7 @@ function handlePullModel(event) {
   currentEventSource.addEventListener('error', (e) => {
     showToast(`Failed to pull model '${modelName}'`, 'error');
     console.error('SSE Error:', e);
-    recordStreamFailure('model pull', `Failed to pull ${modelName}`);
+    recordStreamFailure('model pull', `Failed to pull ${modelName}`, { model: modelName, node: activeServerLabel() });
     resetPullUI();
   });
 
@@ -2299,7 +2411,7 @@ async function sendChatMessage() {
     telemetry.textContent = wasAbort ? 'ABORTED' : 'CONNECTION FAILED';
     telemetry.className = wasAbort ? 'text-[#ebcb8b]' : 'text-[#bf616a]';
     if (!wasAbort) {
-      recordStreamFailure('chat', error.message);
+      recordStreamFailure('chat', error.message, { model, node: activeServerLabel() });
       if (retryBtn) {
         retryBtn.classList.remove('hidden');
         retryBtn.classList.add('flex');
@@ -2649,7 +2761,7 @@ async function buildCustomModel() {
     logBox.insertAdjacentHTML('beforeend', `<div class="${wasAbort ? 'text-[#ebcb8b]' : 'text-[#bf616a]'} font-bold mt-2">>> ${escapeHTML(statusText)}</div>`);
     indicator.className = `h-2 w-2 rounded-full ${wasAbort ? 'bg-[#ebcb8b]' : 'bg-[#bf616a]'}`;
     if (!wasAbort) {
-      recordStreamFailure('model build', error.message);
+      recordStreamFailure('model build', error.message, { model: name, node: activeServerLabel() });
     }
   } finally {
     buildAbortController = null;
@@ -4566,7 +4678,7 @@ async function generateCompletion() {
     } else {
       statusText.textContent = "ERROR: " + err.message;
       showToast(`Generation error: ${err.message}`, 'error');
-      recordStreamFailure('completion', err.message);
+      recordStreamFailure('completion', err.message, { model, node: activeServerLabel() });
     }
   } finally {
     isGeneratingCompletion = false;
@@ -4958,17 +5070,7 @@ function handleTelemetryData(data) {
     nodeTypeEl.textContent = data.ollama_node.is_remote ? 'REMOTE' : 'LOCAL';
   }
 
-  // Update CPU/RAM bars & labels
-  const isRemote = data.ollama_node && data.ollama_node.is_remote;
-  const cpuLabel = document.getElementById('host-cpu-label');
-  const ramLabel = document.getElementById('host-ram-label');
-  if (cpuLabel) {
-    cpuLabel.textContent = 'APP CPU:';
-  }
-  if (ramLabel) {
-    ramLabel.textContent = 'APP RAM:';
-  }
-
+  // Update CPU/RAM bars — labels stay as "HOST CPU / HOST RAM" set in HTML
   const cpuText = document.getElementById('host-cpu-text');
   const cpuBar = document.getElementById('host-cpu-bar');
   if (cpuText && cpuBar) {
@@ -5571,7 +5673,7 @@ function startBenchmark() {
     benchmarkEventSource.close();
     benchmarkEventSource = null;
     setBenchmarkRunning(false);
-    recordStreamFailure('benchmark', e.data || 'Failed to complete benchmark runs.');
+    recordStreamFailure('benchmark', e.data || 'Failed to complete benchmark runs.', { model, node: activeServerLabel() });
     showToast('Benchmark run failed', 'error');
   });
   
@@ -5614,7 +5716,7 @@ function startBenchmark() {
     benchmarkEventSource.close();
     benchmarkEventSource = null;
     setBenchmarkRunning(false);
-    recordStreamFailure('benchmark', 'Connection to benchmark stream was interrupted.');
+    recordStreamFailure('benchmark', 'Connection to benchmark stream was interrupted.', { model, node: activeServerLabel() });
   };
 }
 
@@ -6109,7 +6211,7 @@ function startOptimizerBenchmark() {
     optimizerEventSource.close();
     if (runBtn) runBtn.disabled = false;
     if (cancelBtn) cancelBtn.classList.add('hidden');
-    recordStreamFailure('optimizer', e.data || 'Sweep failed or was cancelled.');
+    recordStreamFailure('optimizer', e.data || 'Sweep failed or was cancelled.', { model, node: activeServerLabel() });
     showToast('Optimization sweep failed', 'error');
   });
   
@@ -6162,7 +6264,7 @@ function startOptimizerBenchmark() {
     optimizerEventSource.close();
     if (runBtn) runBtn.disabled = false;
     if (cancelBtn) cancelBtn.classList.add('hidden');
-    recordStreamFailure('optimizer', 'Connection to optimizer stream was interrupted.');
+    recordStreamFailure('optimizer', 'Connection to optimizer stream was interrupted.', { model, node: activeServerLabel() });
   };
 }
 
