@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.2.0-bf616a?style=for-the-badge&logo=git&logoColor=white" alt="Version v0.2.0" />
+  <img src="https://img.shields.io/badge/version-v0.2.2-bf616a?style=for-the-badge&logo=git&logoColor=white" alt="Version v0.2.2" />
   <a href="https://golang.org/"><img src="https://img.shields.io/badge/Go-1.26.3-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go Version" /></a>
   <a href="https://tailwindcss.com/"><img src="https://img.shields.io/badge/Tailwind_CSS-4.3%2B-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white" alt="Tailwind CSS" /></a>
   <a href="https://daisyui.com/"><img src="https://img.shields.io/badge/daisyUI-5.5%2B-5A0EF8?style=for-the-badge&logo=daisyui&logoColor=white" alt="DaisyUI" /></a>
@@ -24,7 +24,7 @@
 
 **NEUROLLAMA** is a lightweight, self-hosted web control panel that provides a beautiful, techy interface to connect, monitor, and query your Ollama instances. Styled using the **Nord Palette** and built with **Go (Gin)** and **Tailwind CSS/daisyUI**, it is designed to look like a futuristic command console.
 
-With NEUROLLAMA, you can connect to multiple local or remote servers, inspect which models are currently loaded in memory, inspect model parameters/configs, build new models using custom Modelfiles, run diagnostics, and chat with models inside a premium Terminal Emulator Playground.
+With NEUROLLAMA, you can connect to multiple local or remote servers, inspect which models are currently loaded in memory, inspect model parameters/configs, build new models using custom Modelfiles, run diagnostics, benchmark models across multiple test types, and chat with models inside a premium Terminal Emulator Playground.
 
 ---
 
@@ -38,31 +38,50 @@ With NEUROLLAMA, you can connect to multiple local or remote servers, inspect wh
 
 ## ⚡ Key Features
 
-- **🌐 Multi-Node Registry**: Register, edit, test, and swap between multiple local or remote Ollama server nodes. Credential values are redacted from API responses, and real-time background telemetry shows active server latency, online status, and version.
-- **📦 Inventory & Telemetry**:
+- **🌐 Multi-Node Registry**: Register, edit, test, and swap between multiple local or remote Ollama server nodes. Credential values are redacted from API responses, and real-time background telemetry shows active server latency, online status, and version. Set a manual GPU VRAM capacity per node — used to scale VRAM bars and the loaded model indicator when Ollama's API cannot report it.
+
+- **📦 Model Hub & Inventory**:
   - View all installed models with parameters, size, and serialization details.
+  - Capability badges (**VIS** / **EMB**) on inventory rows and catalog cards — detected from model family metadata and name heuristics.
   - Inspect full Modelfiles, templates, parameters, system prompts, and sanitized external model cards with raw/source view controls.
-  - Pull models directly from the official **Ollama Library** or Hugging Face (**HF GGUFs**) with real-time download speed and progress bars.
+  - Unified **Model Hub** panel: pull directly from the **Ollama Library** or **Hugging Face** (GGUFs) with real-time download speed and progress bars. Browse a curated 35-model catalog filterable by category, source, and capabilities.
   - Batch select and delete multiple models.
+
 - **💬 TTY0 Chat Playground**:
   - Custom terminal-style playground to interact with your models.
   - Save, load, and edit custom **System Prompt Presets** persisted to SQLite.
-  - Real-time parameter controls: adjust Temperature, Context Limit, Top K, Top P, Seed, Repeat Penalty, hardware allocation, and generation limits.
+  - Real-time parameter controls: Temperature, Context Limit, Top K, Top P, Seed, Repeat Penalty, hardware allocation, and generation limits.
   - Stop in-flight generations and restore the last failed prompt for quick retry.
   - **🧠 Render Thinking Toggle**: Instantly hide/show reasoning tracks (`<think>` blocks) from DeepSeek R1 and other reasoning models.
+
 - **🛠️ Model Builder**:
   - Create new customized models using a simple graphical interface.
   - Automatically compiles a Modelfile from your base model, system prompt, temperature, and custom parameters.
   - Real-time build progress logs stream directly to the UI, with cancellation support.
+
 - **📼 Memory Telemetry**:
-  - View which models Ollama currently has loaded, their sizes, and whether they are mapped to GPU VRAM or system RAM — sourced from Ollama's `/api/ps` endpoint.
-  - ⚠️ **Remote node limitation**: Ollama's API does not expose total VRAM capacity or GPU utilization. For remote servers, loaded model sizes are shown accurately but VRAM percentage bars are not meaningful. The "App Host" CPU/RAM panel always reflects the machine running NEUROLLAMA, not the remote Ollama host.
+  - View which models Ollama currently has loaded, their sizes, and GPU VRAM vs system RAM allocation — sourced from Ollama's `/api/ps` endpoint.
+  - Live canvas chart tracking **Host CPU**, **Host RAM**, and **Ollama VRAM** over time. Chart scale is anchored to the node's configured VRAM capacity when set.
+  - **Loaded model indicator** pinned to the footer status bar: shows model name, parameter size, quantization level, and VRAM used/total (e.g. `gemma3 12B Q4_K_M · 5.9G/24G`). Includes a one-click eject button with confirmation.
+  - SYS RAM row shows **"Local Ollama only"** when the active node is remote, since that metric is only meaningful on the host machine.
+  - ⚠️ **Remote node limitation**: Ollama's API does not expose total VRAM capacity or GPU utilization. For remote servers, loaded model sizes are shown accurately but VRAM percentage bars are relative to any manually configured VRAM value (or hidden if none is set).
+
+- **📈 Benchmarks**:
+  - Five benchmark types: **Standard** (TPS), **Vision** (multimodal TPS), **Embedding** (chunks/sec), **Long-Context** (TPS + degradation %), and **Reasoning** (accuracy %).
+  - Model select is automatically filtered to models that match the selected benchmark type (vision models for Vision, embedding models for Embed, etc.).
+  - Sortable leaderboard with clickable column headers, per-type filtering, letter score ratings, and inline notes.
+  - **Retest** button (↻) on each leaderboard row: switches to Benchmark tab, pre-selects the correct type and model, and starts the run automatically.
+  - Hyperparameter Optimizer for tuning inference parameters.
+
+- **⚙️ Settings**:
+  - **Model Update Scheduler**: configure automatic background checks for model updates at custom intervals. Logs are streamed live.
+
 - **🩺 Preflight Diagnostics**:
   - Validate SQLite, data directory writability, static assets, active Ollama reachability, model inventory access, settings, and streaming route readiness.
-- **📈 Benchmarks & Optimizer**:
-  - Run cancellable benchmark and hyperparameter optimizer streams with browser-local failure diagnostics.
-- **📐 Fluid Collapsible Layout**:
-  - Instantly toggle Node Registry, Chat History, and Config sidebars to optimize screen width for small screens or large terminals. Layout settings persist in local browser storage.
+
+- **📐 Fixed Layout**:
+  - Header and footer are always visible — workspace content scrolls independently between them.
+  - Instantly toggle Node Registry, Chat History, and Config sidebars to optimize screen width. Layout settings persist in local browser storage.
 
 ---
 
@@ -70,8 +89,8 @@ With NEUROLLAMA, you can connect to multiple local or remote servers, inspect wh
 
 * **Backend**: Go 1.26.3 (powered by [Gin Web Framework](https://github.com/gin-gonic/gin))
 * **Database**: SQLite3 (via `modernc.org/sqlite` for CGO-free compilations)
-* **Frontend**: Vanilla HTML5/JS (ES6), Tailwind CSS, daisyUI (Nord theme), FontAwesome icons
-* **Client**: Fetch API, EventSource/Server-Sent Events (SSE) for model download and build streaming
+* **Frontend**: Vanilla HTML5/JS (ES6), Tailwind CSS v4, daisyUI v5 (Nord theme), FontAwesome icons
+* **Streaming**: Fetch API + EventSource/SSE for model downloads, builds, benchmarks, and telemetry
 
 ---
 
@@ -152,7 +171,7 @@ feat: add VRAM telemetry panel
 "Zoinks!"
 ```
 
-## 🤝 Support & Contributions
+## 💬 Support & Contributions
 
 If you find this manager helpful, feel free to submit pull requests, open issues, or buy me a coffee!
 
