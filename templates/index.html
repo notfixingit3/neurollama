@@ -29,7 +29,7 @@
       </div>
       <div>
         <h1 class="text-xl font-bold font-tech tracking-wider text-[#88c0d0] glow-text-blue flex items-center gap-2">
-          NEUROLLAMA <span class="text-xs px-2 py-0.5 bg-[#4c566a] text-[#d8dee9] rounded font-mono">v0.2.0</span>
+          NEUROLLAMA <span class="text-xs px-2 py-0.5 bg-[#4c566a] text-[#d8dee9] rounded font-mono">v0.2.1</span>
         </h1>
         <p class="text-[10px] uppercase font-mono tracking-widest text-[#4c566a] mt-0.5">Control Interface // Epoch 2026</p>
       </div>
@@ -117,6 +117,9 @@
         </button>
         <button id="ws-tab-diagnostics" onclick="switchWorkspace('diagnostics')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
           <i class="fa-solid fa-stethoscope text-[10px]"></i> DIAGNOSTICS
+        </button>
+        <button id="ws-tab-settings" onclick="switchWorkspace('settings')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
+          <i class="fa-solid fa-gear text-[10px]"></i> SETTINGS
         </button>
       </div>
 
@@ -998,10 +1001,8 @@
 
           </div>
 
-          <!-- Right side: Active VRAM + Scheduler (7 cols) -->
-          <div class="lg:col-span-7 flex flex-col gap-6">
-
-            <!-- Loaded Models in GPU/VRAM -->
+          <!-- Right side: Loaded Models in GPU/VRAM (7 cols) -->
+          <div class="lg:col-span-7 flex flex-col">
             <div class="tech-panel tech-header-accent rounded-xl flex flex-col p-4">
               <div class="flex justify-between items-center mb-4 pb-2 border-b border-[#4c566a]/40">
                 <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
@@ -1020,36 +1021,6 @@
                 </div>
               </div>
             </div>
-
-            <!-- Model Update Scheduler -->
-            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col">
-              <div class="flex justify-between items-center mb-3 pb-2 border-b border-[#4c566a]/40">
-                <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
-                  <i class="fa-solid fa-clock-rotate-left mr-2"></i>Model Update Scheduler
-                </h2>
-              </div>
-              <div class="space-y-3 flex flex-col">
-                <div class="flex items-center gap-2">
-                  <div class="form-control flex-1">
-                    <select id="scheduler-interval-select" onchange="updateSchedulerSettings()" class="select select-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
-                      <option value="off">Updates: OFF</option>
-                      <option value="daily">Daily @ 2:00 AM</option>
-                      <option value="weekly">Weekly (Sun @ 2:00 AM)</option>
-                    </select>
-                  </div>
-                  <button id="scheduler-check-btn" onclick="triggerSchedulerCheckNow()" class="btn btn-xs btn-info font-tech uppercase tracking-wide px-3">
-                    Check Now
-                  </button>
-                </div>
-                <div class="flex flex-col">
-                  <span class="text-[9px] font-mono text-[#4c566a] mb-1">SCHEDULER LOGS</span>
-                  <div id="scheduler-logs-container" class="max-h-36 bg-[#161820] border border-[#4c566a]/40 rounded-lg p-2 text-[10px] font-mono text-[#e5e9f0] space-y-1 overflow-y-auto scrollbar-thin">
-                    <div class="text-[#4c566a] italic">No scheduler logs available.</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
           </div>
 	        </div>
 
@@ -1428,6 +1399,64 @@
                   <i class="fa-solid fa-file-circle-exclamation text-2xl mb-2"></i>
                   <p>No documents indexed yet.</p>
                   <p class="text-[10px] mt-1 text-[#4c566a]/70">Upload document files to get started with RAG context injection.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- PANEL 8: SETTINGS -->
+        <div id="ws-panel-settings" class="ws-panel hidden grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+          <!-- Left col: Model Update Scheduler -->
+          <div class="lg:col-span-5 flex flex-col gap-6">
+            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col">
+              <div class="mb-3 pb-2 border-b border-[#4c566a]/40">
+                <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
+                  <i class="fa-solid fa-clock-rotate-left mr-2"></i>Model Update Scheduler
+                </h2>
+                <p class="text-[10px] text-[#4c566a] mt-1">Automatically pull the latest version of every installed model on a schedule.</p>
+              </div>
+              <div class="space-y-3 flex flex-col">
+                <div class="flex items-center gap-2">
+                  <div class="form-control flex-1">
+                    <label class="label py-1"><span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">Check Interval</span></label>
+                    <select id="scheduler-interval-select" onchange="updateSchedulerSettings()" class="select select-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                      <option value="off">Updates: OFF</option>
+                      <option value="daily">Daily @ 2:00 AM</option>
+                      <option value="weekly">Weekly (Sun @ 2:00 AM)</option>
+                    </select>
+                  </div>
+                  <div class="mt-5">
+                    <button id="scheduler-check-btn" onclick="triggerSchedulerCheckNow()" class="btn btn-xs btn-info font-tech uppercase tracking-wide px-3">
+                      Check Now
+                    </button>
+                  </div>
+                </div>
+                <div class="flex flex-col">
+                  <span class="text-[9px] font-mono text-[#4c566a] mb-1 uppercase">Scheduler Logs</span>
+                  <div id="scheduler-logs-container" class="max-h-48 bg-[#161820] border border-[#4c566a]/40 rounded-lg p-2 text-[10px] font-mono text-[#e5e9f0] space-y-1 overflow-y-auto scrollbar-none">
+                    <div class="text-[#4c566a] italic">No scheduler logs available.</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right col: placeholder for future settings -->
+          <div class="lg:col-span-7 flex flex-col gap-6">
+            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col">
+              <div class="mb-3 pb-2 border-b border-[#4c566a]/40">
+                <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
+                  <i class="fa-solid fa-sliders mr-2"></i>Application Preferences
+                </h2>
+                <p class="text-[10px] text-[#4c566a] mt-1">Additional settings will appear here in future releases.</p>
+              </div>
+              <div class="flex items-center justify-center py-12 text-[#4c566a]">
+                <div class="text-center">
+                  <i class="fa-solid fa-gear text-2xl mb-2 opacity-30"></i>
+                  <p class="text-[10px] font-mono uppercase tracking-wider opacity-50">More settings coming soon</p>
                 </div>
               </div>
             </div>

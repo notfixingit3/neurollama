@@ -268,7 +268,7 @@ function switchWorkspace(workspace) {
   }
 
   // Toggle buttons
-  const tabs = ['inventory', 'playground', 'completion', 'builder', 'memory', 'diagnostics', 'benchmark', 'rag'];
+  const tabs = ['inventory', 'playground', 'completion', 'builder', 'memory', 'diagnostics', 'benchmark', 'rag', 'settings'];
   tabs.forEach(t => {
     const btn = document.getElementById(`ws-tab-${t}`);
     const panel = document.getElementById(`ws-panel-${t}`);
@@ -290,6 +290,7 @@ function switchWorkspace(workspace) {
   // Tab specific actions
   if (workspace === 'memory') {
     fetchActiveModels();
+  } else if (workspace === 'settings') {
     fetchSchedulerSettings();
     fetchSchedulerLogs();
   } else if (workspace === 'diagnostics') {
@@ -4596,13 +4597,14 @@ function handleTelemetryData(data) {
     } else {
       modelIndicator.className = 'flex items-center gap-1.5 text-[#a3be8c]';
       let label;
+      const totalLabel = configuredVramBytes > 0 ? `/${activeSrv.vramGb}G` : '';
       if (activeModels.length === 1) {
         // Trim to a readable length: strip namespace prefix, keep base name
         const shortName = (activeModels[0].name || '').split(':')[0].split('/').pop();
-        const vramStr   = `${usedVramGb.toFixed(1)}G`;
+        const vramStr   = `${usedVramGb.toFixed(1)}G${totalLabel}`;
         label = `${shortName} · ${vramStr}`;
       } else {
-        label = `${activeModels.length} models · ${usedVramGb.toFixed(1)}G`;
+        label = `${activeModels.length} models · ${usedVramGb.toFixed(1)}G${totalLabel}`;
       }
       modelIndicatorText.textContent = label;
       // Full names in title for hover tooltip
@@ -4752,7 +4754,9 @@ function updateTelemetryChart(payload) {
 
   if (telemetryHistory.length < 2) return;
 
-  let maxVramInHistory = 8;
+  const activeSrvForChart = (typeof servers !== 'undefined') ? servers.find(s => s.isActive) : null;
+  const configuredVramGb  = activeSrvForChart?.vramGb || 0;
+  let maxVramInHistory = Math.max(8, configuredVramGb);
   telemetryHistory.forEach(pt => {
     if (pt.vram > maxVramInHistory) {
       maxVramInHistory = pt.vram;
@@ -4801,7 +4805,8 @@ function updateTelemetryChart(payload) {
   ctx.fillStyle = '#a3be8c';
   ctx.fillText(`APP RAM: ${ramVal.toFixed(1)}%`, 10, 27);
   ctx.fillStyle = '#ebcb8b';
-  ctx.fillText(`OLLAMA VRAM IN USE: ${vramGb.toFixed(2)} GB (scale: ${maxVramInHistory} GB)`, 10, 39);
+  const vramScaleLabel = configuredVramGb > 0 ? `${configuredVramGb} GB` : `${maxVramInHistory} GB`;
+  ctx.fillText(`OLLAMA VRAM IN USE: ${vramGb.toFixed(2)} GB / ${vramScaleLabel}`, 10, 39);
 }
 
 // --- MODEL UPDATE SCHEDULER ---
