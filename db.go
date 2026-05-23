@@ -10,16 +10,17 @@ import (
 )
 
 type Server struct {
-	ID             string `json:"id"`
-	Name           string `json:"name"`
-	URL            string `json:"url"`
-	IsActive       bool   `json:"isActive"`
-	AuthType       string `json:"authType,omitempty"`
-	AuthToken      string `json:"authToken,omitempty"`
-	AuthUsername   string `json:"authUsername,omitempty"`
-	AuthPassword   string `json:"authPassword,omitempty"`
-	AuthHeaderName string `json:"authHeaderName,omitempty"`
-	AuthHeaderVal  string `json:"authHeaderVal,omitempty"`
+	ID             string  `json:"id"`
+	Name           string  `json:"name"`
+	URL            string  `json:"url"`
+	IsActive       bool    `json:"isActive"`
+	VramGB         float64 `json:"vramGb,omitempty"` // manually configured total GPU VRAM (GB)
+	AuthType       string  `json:"authType,omitempty"`
+	AuthToken      string  `json:"authToken,omitempty"`
+	AuthUsername   string  `json:"authUsername,omitempty"`
+	AuthPassword   string  `json:"authPassword,omitempty"`
+	AuthHeaderName string  `json:"authHeaderName,omitempty"`
+	AuthHeaderVal  string  `json:"authHeaderVal,omitempty"`
 }
 
 type Config struct {
@@ -240,7 +241,7 @@ func MergeAuthFields(existing Server, authType, authToken, authUsername, authPas
 }
 
 // AddServer adds a new server and returns it
-func AddServer(name, url, authType, authToken, authUsername, authPassword, authHeaderName, authHeaderVal string) (Server, error) {
+func AddServer(name, url, authType, authToken, authUsername, authPassword, authHeaderName, authHeaderVal string, vramGB float64) (Server, error) {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -254,6 +255,7 @@ func AddServer(name, url, authType, authToken, authUsername, authPassword, authH
 		Name:           name,
 		URL:            url,
 		IsActive:       len(servers) == 0, // make active if it's the first server
+		VramGB:         vramGB,
 		AuthType:       authType,
 		AuthToken:      authToken,
 		AuthUsername:   authUsername,
@@ -271,7 +273,7 @@ func AddServer(name, url, authType, authToken, authUsername, authPassword, authH
 }
 
 // EditServer updates an existing server's details
-func EditServer(id, name, url, authType, authToken, authUsername, authPassword, authHeaderName, authHeaderVal string) (Server, error) {
+func EditServer(id, name, url, authType, authToken, authUsername, authPassword, authHeaderName, authHeaderVal string, vramGB float64) (Server, error) {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -286,6 +288,7 @@ func EditServer(id, name, url, authType, authToken, authUsername, authPassword, 
 
 			servers[i].Name = name
 			servers[i].URL = url
+			servers[i].VramGB = vramGB
 			servers[i].AuthType = authType
 			servers[i].AuthToken = authToken
 			servers[i].AuthUsername = authUsername

@@ -768,9 +768,11 @@ async function deleteServer(id) {
 
 // Modals control
 function getServerFormPayload(prefix) {
+  const vramRaw = document.getElementById(`${prefix}-server-vram`)?.value;
   return {
     name: document.getElementById(`${prefix}-server-name`).value.trim(),
     url: document.getElementById(`${prefix}-server-url`).value.trim(),
+    vramGb: vramRaw ? parseFloat(vramRaw) : 0,
     authType: document.getElementById(`${prefix}-server-auth-type`).value,
     authToken: document.getElementById(`${prefix}-server-auth-token`).value,
     authUsername: document.getElementById(`${prefix}-server-auth-username`).value,
@@ -838,6 +840,8 @@ function openEditServerModal(id) {
   document.getElementById('edit-server-id').value = srv.id;
   document.getElementById('edit-server-name').value = srv.name;
   document.getElementById('edit-server-url').value = srv.url;
+  const vramEl = document.getElementById('edit-server-vram');
+  if (vramEl) vramEl.value = srv.vramGb > 0 ? srv.vramGb : '';
   
   const typeEl = document.getElementById('edit-server-auth-type');
   if (typeEl) typeEl.value = srv.authType || 'none';
@@ -4556,10 +4560,19 @@ function handleTelemetryData(data) {
   const ollamaSysText  = document.getElementById('ollama-sysram-text');
   const ollamaSysBar   = document.getElementById('ollama-sysram-bar');
 
+  // Look up manually configured VRAM for the active server
+  const activeSrv = servers.find(s => s.isActive);
+  const configuredVramBytes = (activeSrv?.vramGb || 0) * (1024 ** 3);
+  const usedVramGb = totalVramBytes / (1024 ** 3);
+
   if (ollamaVramText) {
-    ollamaVramText.textContent = activeModels.length > 0
-      ? `${(totalVramBytes / (1024 ** 3)).toFixed(2)} GB`
-      : '--- (idle)';
+    if (activeModels.length > 0) {
+      const usedStr = `${usedVramGb.toFixed(2)} GB`;
+      const capStr  = configuredVramBytes > 0 ? ` / ${activeSrv.vramGb} GB` : '';
+      ollamaVramText.textContent = `${usedStr}${capStr}`;
+    } else {
+      ollamaVramText.textContent = '--- (idle)';
+    }
   }
   if (ollamaSysText) {
     ollamaSysText.textContent = activeModels.length > 0
@@ -4567,10 +4580,35 @@ function handleTelemetryData(data) {
       : '--- (idle)';
   }
 
-  // Bar widths are relative to app host RAM total as a rough scale anchor
-  const ramTotal = data.app_host.ram_total || 1;
-  if (ollamaVramBar)  ollamaVramBar.style.width  = `${Math.min(100, (totalVramBytes  / ramTotal) * 100)}%`;
-  if (ollamaSysBar)   ollamaSysBar.style.width    = `${Math.min(100, (totalSysRamBytes / ramTotal) * 100)}%`;
+  // Bar widths: use configured VRAM as scale if available, else fall back to host RAM total
+  const ramTotal  = data.app_host.ram_total || 1;
+  const vramScale = configuredVramBytes > 0 ? configuredVramBytes : ramTotal;
+  if (ollamaVramBar)  ollamaVramBar.style.width  = `${Math.min(100, (totalVramBytes  / vramScale) * 100)}%`;
+  if (ollamaSysBar)   ollamaSysBar.style.width    = `${Math.min(100, (totalSysRamBytes / ramTotal)  * 100)}%`;
+
+  // ── Global header model-loaded indicator ──────────────────────────────────
+  const modelIndicator     = document.getElementById('global-model-indicator');
+  const modelIndicatorText = document.getElementById('global-model-indicator-text');
+  if (modelIndicator && modelIndicatorText) {
+    if (activeModels.length === 0) {
+      modelIndicator.className = 'flex items-center gap-1.5 text-[#4c566a]';
+      modelIndicatorText.textContent = 'IDLE';
+    } else {
+      modelIndicator.className = 'flex items-center gap-1.5 text-[#a3be8c]';
+      let label;
+      if (activeModels.length === 1) {
+        // Trim to a readable length: strip namespace prefix, keep base name
+        const shortName = (activeModels[0].name || '').split(':')[0].split('/').pop();
+        const vramStr   = `${usedVramGb.toFixed(1)}G`;
+        label = `${shortName} · ${vramStr}`;
+      } else {
+        label = `${activeModels.length} models · ${usedVramGb.toFixed(1)}G`;
+      }
+      modelIndicatorText.textContent = label;
+      // Full names in title for hover tooltip
+      modelIndicator.title = activeModels.map(m => m.name).join('\n');
+    }
+  }
 
   // Update active models grid and chart if Memory panel is active
   if (activeWorkspace === 'memory') {

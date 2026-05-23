@@ -54,6 +54,12 @@
           <span id="global-active-server-status-text" class="text-xs uppercase text-[#bf616a]">OFFLINE</span>
         </span>
       </div>
+      <div class="h-4 w-[1px] bg-[#4c566a]"></div>
+      <!-- Loaded model indicator -->
+      <div id="global-model-indicator" class="flex items-center gap-1.5 text-[#4c566a]" title="Models currently loaded in VRAM">
+        <i class="fa-solid fa-microchip text-[10px]"></i>
+        <span id="global-model-indicator-text" class="text-[10px] font-mono uppercase">IDLE</span>
+      </div>
     </div>
   </header>
 
@@ -1473,6 +1479,15 @@
                  class="input input-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
         </div>
 
+        <!-- GPU VRAM (manual, optional) -->
+        <div class="form-control">
+          <label class="label pb-0">
+            <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">GPU VRAM <span class="normal-case text-[#4c566a] font-mono font-normal">(GB, optional — set for remote nodes)</span></span>
+          </label>
+          <input type="number" id="add-server-vram" placeholder="e.g. 24" step="0.5" min="0"
+                 class="input input-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+        </div>
+
         <!-- Authentication Configuration -->
         <div class="border-t border-[#4c566a]/30 pt-3">
           <label class="label pt-0"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Authentication Type</span></label>
@@ -1545,6 +1560,15 @@
         <div class="form-control">
           <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Base URL</span></label>
           <input type="url" id="edit-server-url" placeholder="http://localhost:11434" required 
+                 class="input input-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+        </div>
+
+        <!-- GPU VRAM (manual, optional) -->
+        <div class="form-control">
+          <label class="label pb-0">
+            <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">GPU VRAM <span class="normal-case text-[#4c566a] font-mono font-normal">(GB, optional — set for remote nodes)</span></span>
+          </label>
+          <input type="number" id="edit-server-vram" placeholder="e.g. 24" step="0.5" min="0"
                  class="input input-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
         </div>
 

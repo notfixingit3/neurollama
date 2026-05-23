@@ -33,25 +33,27 @@ type ServerStatusResponse struct {
 }
 
 type AddServerRequest struct {
-	Name           string `json:"name" binding:"required"`
-	URL            string `json:"url" binding:"required"`
-	AuthType       string `json:"authType"`
-	AuthToken      string `json:"authToken"`
-	AuthUsername   string `json:"authUsername"`
-	AuthPassword   string `json:"authPassword"`
-	AuthHeaderName string `json:"authHeaderName"`
-	AuthHeaderVal  string `json:"authHeaderVal"`
+	Name           string  `json:"name" binding:"required"`
+	URL            string  `json:"url" binding:"required"`
+	VramGB         float64 `json:"vramGb"`
+	AuthType       string  `json:"authType"`
+	AuthToken      string  `json:"authToken"`
+	AuthUsername   string  `json:"authUsername"`
+	AuthPassword   string  `json:"authPassword"`
+	AuthHeaderName string  `json:"authHeaderName"`
+	AuthHeaderVal  string  `json:"authHeaderVal"`
 }
 
 type EditServerRequest struct {
-	Name           string `json:"name" binding:"required"`
-	URL            string `json:"url" binding:"required"`
-	AuthType       string `json:"authType"`
-	AuthToken      string `json:"authToken"`
-	AuthUsername   string `json:"authUsername"`
-	AuthPassword   string `json:"authPassword"`
-	AuthHeaderName string `json:"authHeaderName"`
-	AuthHeaderVal  string `json:"authHeaderVal"`
+	Name           string  `json:"name" binding:"required"`
+	URL            string  `json:"url" binding:"required"`
+	VramGB         float64 `json:"vramGb"`
+	AuthType       string  `json:"authType"`
+	AuthToken      string  `json:"authToken"`
+	AuthUsername   string  `json:"authUsername"`
+	AuthPassword   string  `json:"authPassword"`
+	AuthHeaderName string  `json:"authHeaderName"`
+	AuthHeaderVal  string  `json:"authHeaderVal"`
 }
 
 type BatchDeleteRequest struct {
@@ -261,6 +263,7 @@ func addServerHandler(c *gin.Context) {
 		req.AuthType, req.AuthToken,
 		req.AuthUsername, req.AuthPassword,
 		req.AuthHeaderName, req.AuthHeaderVal,
+		req.VramGB,
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -398,6 +401,7 @@ func editServerHandler(c *gin.Context) {
 		req.AuthType, req.AuthToken,
 		req.AuthUsername, req.AuthPassword,
 		req.AuthHeaderName, req.AuthHeaderVal,
+		req.VramGB,
 	)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
