@@ -5321,6 +5321,11 @@ function updateTelemetryChart(payload) {
   });
   maxVramInHistory = Math.ceil(maxVramInHistory / 4) * 4;
 
+  // Reserve 52px at the top for the 3-line text legend so chart lines
+  // never clip the legend text even at 100% utilisation.
+  const LEGEND_RESERVE = 52;
+  const CHART_BOTTOM_PAD = 6;
+
   function drawLine(key, color, maxVal) {
     ctx.beginPath();
     ctx.strokeStyle = color;
@@ -5330,7 +5335,8 @@ function updateTelemetryChart(payload) {
       const pt = telemetryHistory[i];
       const val = pt[key];
       const x = (width / (MAX_TELEMETRY_POINTS - 1)) * i;
-      const y = height - (val / maxVal) * (height - 20) - 10;
+      const y = height - CHART_BOTTOM_PAD
+              - (val / maxVal) * (height - LEGEND_RESERVE - CHART_BOTTOM_PAD);
 
       if (i === 0) {
         ctx.moveTo(x, y);
