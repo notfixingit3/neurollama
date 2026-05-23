@@ -996,8 +996,33 @@
               </div>
             </div>
 
-            <!-- Model updates scheduler panel -->
-            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col min-h-[180px]">
+          </div>
+
+          <!-- Right side: Active VRAM + Scheduler (7 cols) -->
+          <div class="lg:col-span-7 flex flex-col gap-6">
+
+            <!-- Loaded Models in GPU/VRAM -->
+            <div class="tech-panel tech-header-accent rounded-xl flex flex-col p-4">
+              <div class="flex justify-between items-center mb-4 pb-2 border-b border-[#4c566a]/40">
+                <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
+                  <i class="fa-solid fa-chart-pie mr-2"></i>Loaded Models in GPU/VRAM
+                </h2>
+                <button onclick="fetchActiveModels()" class="btn btn-xs btn-outline btn-info font-tech gap-1">
+                  <i class="fa-solid fa-rotate-right text-[10px]"></i> REFRESH_VRAM
+                </button>
+              </div>
+              <div class="overflow-y-auto pr-1">
+                <div id="memory-loading-spinner" class="hidden text-center py-12 text-[#4c566a]">
+                  <i class="fa-solid fa-circle-notch animate-spin mr-2"></i> Interrogating RAM/VRAM allocations...
+                </div>
+                <div id="memory-models-container" class="space-y-4">
+                  <!-- Loaded model cards injected here -->
+                </div>
+              </div>
+            </div>
+
+            <!-- Model Update Scheduler -->
+            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col">
               <div class="flex justify-between items-center mb-3 pb-2 border-b border-[#4c566a]/40">
                 <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
                   <i class="fa-solid fa-clock-rotate-left mr-2"></i>Model Update Scheduler
@@ -1016,7 +1041,6 @@
                     Check Now
                   </button>
                 </div>
-                <!-- Scheduler execution logs -->
                 <div class="flex flex-col">
                   <span class="text-[9px] font-mono text-[#4c566a] mb-1">SCHEDULER LOGS</span>
                   <div id="scheduler-logs-container" class="max-h-36 bg-[#161820] border border-[#4c566a]/40 rounded-lg p-2 text-[10px] font-mono text-[#e5e9f0] space-y-1 overflow-y-auto scrollbar-thin">
@@ -1025,31 +1049,7 @@
                 </div>
               </div>
             </div>
-          </div>
 
-          <!-- Right side: Remote Ollama Active Allocations (7 cols) -->
-          <div class="lg:col-span-7 flex flex-col">
-            <div class="tech-panel tech-header-accent rounded-xl flex flex-col p-4">
-              <div class="flex justify-between items-center mb-4 pb-2 border-b border-[#4c566a]/40">
-                <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
-                  <i class="fa-solid fa-chart-pie mr-2"></i>Loaded Models in GPU/VRAM
-                </h2>
-                <button onclick="fetchActiveModels()" class="btn btn-xs btn-outline btn-info font-tech gap-1">
-                  <i class="fa-solid fa-rotate-right text-[10px]"></i> REFRESH_VRAM
-                </button>
-              </div>
-
-              <!-- Telemetry active models grid -->
-              <div class="overflow-y-auto pr-1">
-                <div id="memory-loading-spinner" class="hidden text-center py-12 text-[#4c566a]">
-                  <i class="fa-solid fa-circle-notch animate-spin mr-2"></i> Interrogating RAM/VRAM allocations...
-                </div>
-
-                <div id="memory-models-container" class="space-y-4">
-                  <!-- Loaded model cards injected here -->
-                </div>
-              </div>
-            </div>
           </div>
 	        </div>
 
