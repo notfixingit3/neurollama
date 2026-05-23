@@ -105,6 +105,7 @@ func main() {
 
 	// Serve static files
 	r.Static("/static", "./static")
+	r.StaticFile("/favicon.ico", "./static/img/favicon.ico")
 
 	// HTML routes
 	r.GET("/", func(c *gin.Context) {
@@ -181,15 +182,32 @@ func main() {
 		api.GET("/diagnostics", diagnosticsHandler)
 	}
 
-	port := strings.TrimSpace(os.Getenv("PORT"))
-	if port == "" {
-		port = "8080"
+	port, err := resolvePort()
+	if err != nil {
+		log.Fatalf("Invalid PORT: %v", err)
 	}
+	addr := fmt.Sprintf(":%d", port)
 
-	log.Printf("NEUROLLAMA is starting on http://localhost:%s", port)
-	if err := r.Run(":" + port); err != nil {
+	log.Printf("NEUROLLAMA is starting on http://localhost%s", addr)
+	if err := r.Run(addr); err != nil {
 		log.Fatalf("Server failed to run: %v", err)
 	}
+}
+
+func resolvePort() (int, error) {
+	rawPort := strings.TrimSpace(os.Getenv("PORT"))
+	if rawPort == "" {
+		return 8080, nil
+	}
+
+	port, err := strconv.Atoi(rawPort)
+	if err != nil {
+		return 0, fmt.Errorf("must be a number between 1 and 65535")
+	}
+	if port < 1 || port > 65535 {
+		return 0, fmt.Errorf("must be between 1 and 65535")
+	}
+	return port, nil
 }
 
 // getServersHandler retrieves all servers and checks their statuses concurrently
@@ -572,12 +590,21 @@ func pullModelSSEHandler(c *gin.Context) {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
-	defer stream.Close()
+
+	var closeOnce sync.Once
+	closeStream := func(reason string) {
+		closeOnce.Do(func() {
+			if closeErr := stream.Close(); closeErr != nil {
+				log.Printf("Warning: failed to close pull stream after %s: %v", reason, closeErr)
+			}
+		})
+	}
+	defer closeStream("request")
 
 	// Launch a goroutine to close the stream on client disconnect
 	go func() {
 		<-ctx.Done()
-		stream.Close()
+		closeStream("client disconnect")
 	}()
 
 	// Set headers for SSE streaming
@@ -1359,9 +1386,10 @@ func parsePhysMem(line string) (float64, rune, float64, rune) {
 	if idxParen := strings.Index(partUsed, "("); idxParen != -1 {
 		partUsed = strings.TrimSpace(partUsed[:idxParen])
 	}
-	var usedVal float64
-	var usedUnit rune
-	fmt.Sscanf(partUsed, "%f%c", &usedVal, &usedUnit)
+	usedVal, usedUnit, ok := parseMemoryAmount(partUsed)
+	if !ok {
+		return 0, 0, 0, 0
+	}
 
 	idxComma := strings.LastIndex(line[:idxUnused], ",")
 	if idxComma == -1 {
@@ -1369,11 +1397,27 @@ func parsePhysMem(line string) (float64, rune, float64, rune) {
 	}
 	partUnused := line[idxComma+1 : idxUnused]
 	partUnused = strings.TrimSpace(partUnused)
-	var unusedVal float64
-	var unusedUnit rune
-	fmt.Sscanf(partUnused, "%f%c", &unusedVal, &unusedUnit)
+	unusedVal, unusedUnit, ok := parseMemoryAmount(partUnused)
+	if !ok {
+		return 0, 0, 0, 0
+	}
 
 	return usedVal, usedUnit, unusedVal, unusedUnit
+}
+
+func parseMemoryAmount(part string) (float64, rune, bool) {
+	part = strings.TrimSpace(part)
+	if len(part) < 2 {
+		return 0, 0, false
+	}
+
+	unit := rune(part[len(part)-1])
+	value, err := strconv.ParseFloat(strings.TrimSpace(part[:len(part)-1]), 64)
+	if err != nil {
+		return 0, 0, false
+	}
+
+	return value, unit, true
 }
 
 func getMacRAM() (uint64, uint64, error) {
@@ -1494,8 +1538,10 @@ func getHostStats() HostStats {
 		for _, line := range lines {
 			parts := strings.Fields(line)
 			if len(parts) >= 2 {
-				var val uint64
-				fmt.Sscanf(parts[1], "%d", &val)
+				val, err := strconv.ParseUint(parts[1], 10, 64)
+				if err != nil {
+					continue
+				}
 				valBytes := val * 1024 // /proc/meminfo is in kB
 				if parts[0] == "MemTotal:" {
 					memTotal = valBytes
@@ -1522,11 +1568,13 @@ func getHostStats() HostStats {
 		if len(lines) > 0 && strings.HasPrefix(lines[0], "cpu ") {
 			parts := strings.Fields(lines[0])
 			if len(parts) >= 5 {
-				var user, nice, system, idle uint64
-				fmt.Sscanf(parts[1], "%d", &user)
-				fmt.Sscanf(parts[2], "%d", &nice)
-				fmt.Sscanf(parts[3], "%d", &system)
-				fmt.Sscanf(parts[4], "%d", &idle)
+				user, errUser := strconv.ParseUint(parts[1], 10, 64)
+				nice, errNice := strconv.ParseUint(parts[2], 10, 64)
+				system, errSystem := strconv.ParseUint(parts[3], 10, 64)
+				idle, errIdle := strconv.ParseUint(parts[4], 10, 64)
+				if errUser != nil || errNice != nil || errSystem != nil || errIdle != nil {
+					return stats
+				}
 				total := user + nice + system + idle
 				active := user + nice + system
 				if total > 0 {
@@ -1654,7 +1702,7 @@ func diagnosticsHandler(c *gin.Context) {
 		addCheck("SQLite Database", "pass", "Database connection is live.", "data/neurollama.db")
 	}
 
-	if err := os.MkdirAll("data", 0755); err != nil {
+	if err := os.MkdirAll("data", 0700); err != nil {
 		addCheck("Data Directory", "fail", "Data directory cannot be created.", err.Error())
 	} else if f, err := os.CreateTemp("data", ".neurollama-health-*"); err != nil {
 		addCheck("Data Directory", "fail", "Data directory is not writable.", err.Error())
@@ -1768,11 +1816,13 @@ func runModelUpdatesCheck() {
 			lastStatus = progress.Status
 			return true
 		})
-		stream.Close()
+		closeErr := stream.Close()
 		cancel()
 
 		if err != nil {
 			_ = LogScheduleAction(m.Name, "failed", fmt.Sprintf("Pull error: %v", err))
+		} else if closeErr != nil {
+			_ = LogScheduleAction(m.Name, "failed", fmt.Sprintf("Failed to close pull stream: %v", closeErr))
 		} else {
 			_ = LogScheduleAction(m.Name, "success", fmt.Sprintf("Updated successfully. Last status: %s", lastStatus))
 		}

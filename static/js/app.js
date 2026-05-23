@@ -3,6 +3,8 @@ let servers = [];
 let models = [];
 let selectedModels = new Set();
 let inspectedModel = null;
+let openAccordionModel = null;
+let accordionEl = null;
 let activeDetailTab = 'modelfile';
 let currentEventSource = null;
 let modelCardCache = null;
@@ -30,6 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function init() {
+  initAccordionRow();
   await fetchServers();
   // If we have an active server, fetch its models
   const activeServer = servers.find(s => s.isActive);
@@ -465,8 +468,18 @@ async function runDiagnostics() {
   try {
     const response = await fetch('/api/diagnostics');
     if (!response.ok) {
-      const err = await response.json();
-      throw new Error(err.error || 'Diagnostics failed');
+      let message = 'Diagnostics failed';
+      const contentType = response.headers.get('content-type') || '';
+      if (response.status === 404) {
+        message = 'Diagnostics API not found. Restart NEUROLLAMA so the backend matches this frontend.';
+      } else if (contentType.includes('application/json')) {
+        const err = await response.json();
+        message = err.error || message;
+      } else {
+        const body = await response.text();
+        message = body || `${message} (${response.status})`;
+      }
+      throw new Error(message);
     }
     const data = await response.json();
     const checks = data.checks || [];
@@ -879,6 +892,47 @@ async function fetchModels() {
   }
 }
 
+function initAccordionRow() {
+  accordionEl = document.createElement('tr');
+  accordionEl.id = 'model-detail-accordion';
+  accordionEl.style.display = 'none';
+  accordionEl.innerHTML = `
+    <td colspan="5" class="p-0">
+      <div class="mx-1 mb-1 p-4 bg-[#1e2430] border border-[#88c0d0]/25 border-t-0 rounded-b-lg text-xs">
+        <div class="flex items-center justify-between mb-3 pb-2 border-b border-[#4c566a]/40">
+          <div class="flex flex-wrap gap-1.5 items-center">
+            <span class="font-tech text-[11px] font-bold text-[#88c0d0] mr-2"><i class="fa-solid fa-microchip mr-1"></i>Telemetry</span>
+            <span id="badge-format" class="badge badge-outline border-[#4c566a] text-[#81a1c1] text-[10px] font-semibold"></span>
+            <span id="badge-family" class="badge badge-outline border-[#4c566a] text-[#88c0d0] text-[10px] font-semibold"></span>
+            <span id="badge-quant" class="badge badge-outline border-[#4c566a] text-[#a3be8c] text-[10px] font-semibold"></span>
+            <span id="badge-params" class="badge badge-outline border-[#4c566a] text-[#ebcb8b] text-[10px] font-semibold"></span>
+            <span class="text-[10px] text-[#4c566a] font-mono ml-2">Digest: <span id="detail-digest" class="text-[#81a1c1]"></span></span>
+          </div>
+          <button onclick="clearInspectedModel()" class="btn btn-xs btn-ghost text-[#4c566a] hover:text-[#bf616a] p-1" title="Close">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+        <div class="flex gap-1 bg-[#242933]/60 p-1 border border-[#4c566a]/40 mb-3 rounded-lg">
+          <button id="ws-tab-modelfile" onclick="switchDetailTab('modelfile')" class="detail-tab detail-tab-active">FILE</button>
+          <button id="ws-tab-parameters" onclick="switchDetailTab('parameters')" class="detail-tab">PARAMS</button>
+          <button id="ws-tab-template" onclick="switchDetailTab('template')" class="detail-tab">TEMPLATE</button>
+          <button id="ws-tab-system" onclick="switchDetailTab('system')" class="detail-tab">SYSTEM</button>
+          <button id="ws-tab-card" onclick="switchDetailTab('card')" class="detail-tab">CARD</button>
+        </div>
+        <div class="overflow-auto max-h-72 bg-[#161820] border border-[#4c566a]/60 rounded-lg p-3 text-[11px] font-mono text-[#d8dee9] relative">
+          <button onclick="copyTabContent()" class="btn btn-xs btn-neutral absolute top-2 right-2 border-[#4c566a] hover:bg-[#4c566a]" title="Copy to clipboard">
+            <i class="fa-regular fa-copy"></i>
+          </button>
+          <div id="tab-content-text" class="whitespace-pre-wrap break-all pr-8 leading-relaxed font-tech">Loading...</div>
+        </div>
+      </div>
+    </td>`;
+}
+
+function modelRowId(name) {
+  return 'model-row-' + name.replace(/[^a-zA-Z0-9]/g, '-');
+}
+
 function renderModels() {
   const listBody = document.getElementById('models-list-body');
   
@@ -893,6 +947,11 @@ function renderModels() {
     return;
   }
 
+  // Detach accordion before wiping innerHTML
+  if (accordionEl && accordionEl.parentNode === listBody) {
+    listBody.removeChild(accordionEl);
+  }
+
   listBody.innerHTML = models.map(model => {
     const isChecked = selectedModels.has(model.name);
     const dateFormatted = new Date(model.modified_at).toLocaleDateString(undefined, {
@@ -900,12 +959,13 @@ function renderModels() {
       day: 'numeric',
       year: 'numeric'
     });
-    
     const sizeFormatted = formatBytes(model.size);
     const paramSize = (model.details && model.details.parameter_size) || 'N/A';
+    const rowId = modelRowId(model.name);
+    const isOpen = openAccordionModel === model.name;
 
     return `
-      <tr class="hover:bg-[#3b4252]/30 border-b border-[#4c566a]/30 transition-colors">
+      <tr id="${rowId}" class="hover:bg-[#3b4252]/30 border-b border-[#4c566a]/30 transition-colors${isOpen ? ' bg-[#3b4252]/20' : ''}">
         <td>
           <input type="checkbox" onchange="toggleSelectModel('${model.name}', this.checked)" ${isChecked ? 'checked' : ''}
                  class="checkbox checkbox-xs checkbox-primary border-[#4c566a]" />
@@ -923,8 +983,8 @@ function renderModels() {
         </td>
         <td>
           <div class="flex items-center gap-1.5">
-            <button onclick="inspectModel('${model.name}')" class="btn btn-xs btn-neutral border-[#4c566a] text-[10px] font-tech" title="Inspect Telemetry">
-              INSPECT
+            <button onclick="inspectModel('${model.name}')" class="btn btn-xs btn-neutral border-[#4c566a] text-[10px] font-tech w-[62px]" title="Inspect Telemetry">
+              ${isOpen ? 'CLOSE' : 'INSPECT'}
             </button>
             <button onclick="cloneModelPrompt('${model.name}')" class="btn btn-xs btn-outline btn-info text-[10px] font-tech" title="Clone Model">
               CLONE
@@ -937,7 +997,24 @@ function renderModels() {
       </tr>
     `;
   }).join('');
-  
+
+  // Re-append accordion and restore its position if a model is open
+  if (accordionEl) {
+    if (openAccordionModel) {
+      const targetRow = document.getElementById(modelRowId(openAccordionModel));
+      if (targetRow) {
+        targetRow.insertAdjacentElement('afterend', accordionEl);
+        accordionEl.style.display = '';
+      } else {
+        listBody.appendChild(accordionEl);
+        accordionEl.style.display = 'none';
+        openAccordionModel = null;
+      }
+    } else {
+      listBody.appendChild(accordionEl);
+    }
+  }
+
   // Re-check select all box if necessary
   const allChecked = models.length > 0 && models.every(m => selectedModels.has(m.name));
   document.getElementById('select-all-checkbox').checked = allChecked;
@@ -1300,49 +1377,62 @@ function drawSpeedGraph() {
 // --- METADATA INSPECTOR ---
 
 async function inspectModel(name) {
-  const panel = document.getElementById('model-detail-panel');
-  const emptyState = document.getElementById('detail-empty-state');
-  const content = document.getElementById('detail-content');
-  const nameHeader = document.getElementById('detail-model-name');
-  const tabContent = document.getElementById('tab-content-text');
+  // Toggle: same model clicked while open → close
+  if (openAccordionModel === name) {
+    clearInspectedModel();
+    return;
+  }
 
-  emptyState.classList.add('hidden');
-  content.classList.remove('hidden');
-  
-  tabContent.textContent = 'Retrieving telemetry...';
-  
-  // Badges
-  document.getElementById('badge-format').textContent = '...';
-  document.getElementById('badge-family').textContent = '...';
-  document.getElementById('badge-quant').textContent = '...';
-  document.getElementById('badge-params').textContent = '...';
-  document.getElementById('detail-digest').textContent = 'sha256:...';
+  if (!accordionEl) return;
+
+  const targetRow = document.getElementById(modelRowId(name));
+  if (!targetRow) return;
+
+  // Close any currently open accordion first
+  if (openAccordionModel) clearInspectedModel();
+
+  // Move accordion row to sit directly below the clicked row
+  targetRow.insertAdjacentElement('afterend', accordionEl);
+  accordionEl.style.display = '';
+  openAccordionModel = name;
+
+  // Re-render models to update INSPECT/CLOSE button labels
+  renderModels();
+
+  // Show loading state (elements are now in DOM)
+  accordionEl.querySelector('#tab-content-text').textContent = 'Retrieving telemetry...';
+  accordionEl.querySelector('#badge-format').textContent = '...';
+  accordionEl.querySelector('#badge-family').textContent = '...';
+  accordionEl.querySelector('#badge-quant').textContent = '...';
+  accordionEl.querySelector('#badge-params').textContent = '...';
+  accordionEl.querySelector('#detail-digest').textContent = '...';
+
+  // Reset to modelfile tab
+  activeDetailTab = 'modelfile';
+  const tabs = ['modelfile', 'parameters', 'template', 'system', 'card'];
+  tabs.forEach(t => {
+    const btn = accordionEl.querySelector(`#ws-tab-${t}`);
+    if (btn) btn.classList.toggle('detail-tab-active', t === 'modelfile');
+  });
 
   try {
     const response = await fetch(`/api/models/detail?name=${encodeURIComponent(name)}`);
     if (!response.ok) throw new Error('Failed to load model details');
 
     inspectedModel = await response.json();
-    inspectedModel.name = name; // attach name
+    inspectedModel.name = name;
 
-    // Render static data
-    nameHeader.textContent = name;
-    
     const details = inspectedModel.details || {};
-    document.getElementById('badge-format').textContent = (details.format || 'gguf').toUpperCase();
-    document.getElementById('badge-family').textContent = (details.family || 'unknown').toLowerCase();
-    document.getElementById('badge-quant').textContent = details.quantization_level || 'N/A';
-    document.getElementById('badge-params').textContent = details.parameter_size || 'N/A';
-    
-    // Find digest or model fingerprint if available
-    let digest = 'Unknown';
-    const activeModelObj = models.find(m => m.name === name);
-    if (activeModelObj) {
-      digest = activeModelObj.digest.substring(0, 16) + '...';
-    }
-    document.getElementById('detail-digest').textContent = digest;
+    accordionEl.querySelector('#badge-format').textContent = (details.format || 'gguf').toUpperCase();
+    accordionEl.querySelector('#badge-family').textContent = (details.family || 'unknown').toLowerCase();
+    accordionEl.querySelector('#badge-quant').textContent = details.quantization_level || 'N/A';
+    accordionEl.querySelector('#badge-params').textContent = details.parameter_size || 'N/A';
 
-    // Render tab content
+    const activeModelObj = models.find(m => m.name === name);
+    accordionEl.querySelector('#detail-digest').textContent = activeModelObj
+      ? activeModelObj.digest.substring(0, 16) + '...'
+      : 'unknown';
+
     renderTabContent();
   } catch (error) {
     console.error(error);
@@ -1354,21 +1444,17 @@ async function inspectModel(name) {
 function clearInspectedModel() {
   inspectedModel = null;
   modelCardCache = null;
-  document.getElementById('detail-empty-state').classList.remove('hidden');
-  document.getElementById('detail-content').classList.add('hidden');
+  openAccordionModel = null;
+  if (accordionEl) accordionEl.style.display = 'none';
+  renderModels();
 }
 
 function switchDetailTab(tabName) {
-  // Update buttons
   const tabs = ['modelfile', 'parameters', 'template', 'system', 'card'];
   tabs.forEach(t => {
     const btn = document.getElementById(`ws-tab-${t}`);
     if (btn) {
-      if (t === tabName) {
-        btn.classList.add('tab-active');
-      } else {
-        btn.classList.remove('tab-active');
-      }
+      btn.classList.toggle('detail-tab-active', t === tabName);
     }
   });
 
@@ -3192,16 +3278,15 @@ function togglePlaygroundSidebar(type) {
 function updatePlaygroundLayoutClasses() {
   const chatsSidebar = document.getElementById('playground-chats-sidebar');
   const configSidebar = document.getElementById('playground-config-sidebar');
-  const consoleColumn = document.getElementById('playground-console-column');
+  const leftPanel = document.getElementById('playground-left-panel');
   const toggleChatsIcon = document.getElementById('toggle-chats-icon');
   const toggleConfigIcon = document.getElementById('toggle-config-icon');
 
-  if (!chatsSidebar || !configSidebar || !consoleColumn) return;
+  if (!chatsSidebar || !configSidebar) return;
 
   const chatsHidden = chatsSidebar.classList.contains('hidden');
   const configHidden = configSidebar.classList.contains('hidden');
 
-  // Update icons pointing direction
   if (toggleChatsIcon) {
     toggleChatsIcon.className = chatsHidden ? 'fa-solid fa-chevron-right' : 'fa-solid fa-chevron-left';
   }
@@ -3209,23 +3294,13 @@ function updatePlaygroundLayoutClasses() {
     toggleConfigIcon.className = configHidden ? 'fa-solid fa-chevron-right' : 'fa-solid fa-chevron-left';
   }
 
-  // Re-adjust columns classes for the main console grid element
-  // First clear any existing lg:col-span class
-  consoleColumn.className = consoleColumn.className.replace(/\blg:col-span-\d+\b/, '').trim();
-
-  // Reference string literals to ensure Tailwind compiler registers them
-  const c6 = 'lg:col-span-6';
-  const c9 = 'lg:col-span-9';
-  const c12 = 'lg:col-span-12';
-
-  if (chatsHidden && configHidden) {
-    consoleColumn.classList.add(c12);
-  } else if (chatsHidden) {
-    consoleColumn.classList.add(c9);
-  } else if (configHidden) {
-    consoleColumn.classList.add(c9);
-  } else {
-    consoleColumn.classList.add(c6);
+  // Hide the whole left panel only when both sidebars are collapsed
+  if (leftPanel) {
+    if (chatsHidden && configHidden) {
+      leftPanel.classList.add('hidden');
+    } else {
+      leftPanel.classList.remove('hidden');
+    }
   }
 }
 
@@ -4336,10 +4411,10 @@ function handleTelemetryData(data) {
   const cpuLabel = document.getElementById('host-cpu-label');
   const ramLabel = document.getElementById('host-ram-label');
   if (cpuLabel) {
-    cpuLabel.textContent = isRemote ? 'MANAGER CPU:' : 'HOST CPU:';
+    cpuLabel.textContent = 'APP CPU:';
   }
   if (ramLabel) {
-    ramLabel.textContent = isRemote ? 'MANAGER RAM:' : 'HOST RAM:';
+    ramLabel.textContent = 'APP RAM:';
   }
 
   const cpuText = document.getElementById('host-cpu-text');
@@ -4358,6 +4433,35 @@ function handleTelemetryData(data) {
     const percent = data.app_host.ram_total > 0 ? (data.app_host.ram_used / data.app_host.ram_total) * 100 : 0;
     ramBar.style.width = `${Math.min(100, percent)}%`;
   }
+
+  // Compute Ollama node stats from /api/ps active_models
+  const activeModels = data.active_models || [];
+  let totalVramBytes = 0, totalSysRamBytes = 0;
+  activeModels.forEach(m => {
+    totalVramBytes  += m.size_vram || 0;
+    totalSysRamBytes += Math.max(0, (m.size || 0) - (m.size_vram || 0));
+  });
+
+  const ollamaVramText = document.getElementById('ollama-vram-text');
+  const ollamaVramBar  = document.getElementById('ollama-vram-bar');
+  const ollamaSysText  = document.getElementById('ollama-sysram-text');
+  const ollamaSysBar   = document.getElementById('ollama-sysram-bar');
+
+  if (ollamaVramText) {
+    ollamaVramText.textContent = activeModels.length > 0
+      ? `${(totalVramBytes / (1024 ** 3)).toFixed(2)} GB`
+      : '--- (idle)';
+  }
+  if (ollamaSysText) {
+    ollamaSysText.textContent = activeModels.length > 0
+      ? `${(totalSysRamBytes / (1024 ** 3)).toFixed(2)} GB`
+      : '--- (idle)';
+  }
+
+  // Bar widths are relative to app host RAM total as a rough scale anchor
+  const ramTotal = data.app_host.ram_total || 1;
+  if (ollamaVramBar)  ollamaVramBar.style.width  = `${Math.min(100, (totalVramBytes  / ramTotal) * 100)}%`;
+  if (ollamaSysBar)   ollamaSysBar.style.width    = `${Math.min(100, (totalSysRamBytes / ramTotal) * 100)}%`;
 
   // Update active models grid and chart if Memory panel is active
   if (activeWorkspace === 'memory') {
@@ -4532,9 +4636,9 @@ function updateTelemetryChart(payload) {
     ctx.lineTo(0, height);
     ctx.closePath();
     
-    let rgbPrefix = color.substring(0, color.length - 1);
+    const fillColor = color.replace(/,\s*[\d.]+\)$/, ', 0.15)');
     const grad = ctx.createLinearGradient(0, 0, 0, height);
-    grad.addColorStop(0, `${rgbPrefix}, 0.15)`);
+    grad.addColorStop(0, fillColor);
     grad.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = grad;
     ctx.fill();
@@ -4546,11 +4650,11 @@ function updateTelemetryChart(payload) {
 
   ctx.font = '9px monospace';
   ctx.fillStyle = '#88c0d0';
-  ctx.fillText(`CPU: ${cpuVal.toFixed(1)}%`, 10, 15);
+  ctx.fillText(`APP CPU: ${cpuVal.toFixed(1)}%`, 10, 15);
   ctx.fillStyle = '#a3be8c';
-  ctx.fillText(`RAM: ${ramVal.toFixed(1)}%`, 10, 27);
+  ctx.fillText(`APP RAM: ${ramVal.toFixed(1)}%`, 10, 27);
   ctx.fillStyle = '#ebcb8b';
-  ctx.fillText(`VRAM: ${vramGb.toFixed(2)} GB (Max Scale: ${maxVramInHistory}GB)`, 10, 39);
+  ctx.fillText(`OLLAMA VRAM IN USE: ${vramGb.toFixed(2)} GB (scale: ${maxVramInHistory} GB)`, 10, 39);
 }
 
 // --- MODEL UPDATE SCHEDULER ---
@@ -4689,6 +4793,22 @@ async function triggerManualCompression() {
 
 let benchmarkEventSource = null;
 
+function setBenchmarkRunning(isRunning) {
+  const runBtn = document.getElementById('run-benchmark-btn');
+  const cancelBtn = document.getElementById('cancel-benchmark-btn');
+
+  if (runBtn) {
+    runBtn.disabled = isRunning;
+    runBtn.innerHTML = isRunning
+      ? '<span class="loading loading-spinner loading-xs mr-1.5"></span>Measuring'
+      : '<i class="fa-solid fa-play mr-1.5"></i>Start Measurement';
+  }
+  if (cancelBtn) {
+    cancelBtn.classList.toggle('hidden', !isRunning);
+    cancelBtn.disabled = !isRunning;
+  }
+}
+
 function startBenchmark() {
   const modelSelect = document.getElementById('benchmark-model-select');
   if (!modelSelect) return;
@@ -4699,15 +4819,9 @@ function startBenchmark() {
     return;
   }
   
-  const runBtn = document.getElementById('run-benchmark-btn');
-  const cancelBtn = document.getElementById('cancel-benchmark-btn');
   const logContainer = document.getElementById('benchmark-log');
   
-  if (runBtn) runBtn.disabled = true;
-  if (cancelBtn) {
-    cancelBtn.classList.remove('hidden');
-    cancelBtn.disabled = false;
-  }
+  setBenchmarkRunning(true);
   if (logContainer) {
     logContainer.innerHTML = `<div class="text-[#88c0d0] uppercase animate-pulse">Initializing sequential benchmark suite for ${model}...</div>`;
   }
@@ -4738,8 +4852,8 @@ function startBenchmark() {
       logContainer.scrollTop = logContainer.scrollHeight;
     }
     benchmarkEventSource.close();
-    if (runBtn) runBtn.disabled = false;
-    if (cancelBtn) cancelBtn.classList.add('hidden');
+    benchmarkEventSource = null;
+    setBenchmarkRunning(false);
     recordStreamFailure('benchmark', e.data || 'Failed to complete benchmark runs.');
     showToast('Benchmark run failed', 'error');
   });
@@ -4760,16 +4874,16 @@ function startBenchmark() {
       console.error(err);
     } finally {
       benchmarkEventSource.close();
-      if (runBtn) runBtn.disabled = false;
-      if (cancelBtn) cancelBtn.classList.add('hidden');
+      benchmarkEventSource = null;
+      setBenchmarkRunning(false);
     }
   });
   
   benchmarkEventSource.onerror = (err) => {
     console.warn('Benchmark EventSource error:', err);
     benchmarkEventSource.close();
-    if (runBtn) runBtn.disabled = false;
-    if (cancelBtn) cancelBtn.classList.add('hidden');
+    benchmarkEventSource = null;
+    setBenchmarkRunning(false);
     recordStreamFailure('benchmark', 'Connection to benchmark stream was interrupted.');
   };
 }
@@ -4778,11 +4892,8 @@ function cancelBenchmark() {
   if (!benchmarkEventSource) return;
   benchmarkEventSource.close();
   benchmarkEventSource = null;
-  const runBtn = document.getElementById('run-benchmark-btn');
-  const cancelBtn = document.getElementById('cancel-benchmark-btn');
   const logContainer = document.getElementById('benchmark-log');
-  if (runBtn) runBtn.disabled = false;
-  if (cancelBtn) cancelBtn.classList.add('hidden');
+  setBenchmarkRunning(false);
   if (logContainer) {
     const div = document.createElement('div');
     div.className = 'text-[#ebcb8b] font-bold mt-1';
@@ -5354,31 +5465,49 @@ async function handleRAGUpload(file) {
   };
   
   try {
+    const t0 = Date.now();
     logMessage(`Initializing parse for: ${file.name} (${(file.size / 1024).toFixed(1)} KB)...`);
     updateProgress(10, 'Reading file...');
-    
+
     let text = '';
     const extension = file.name.split('.').pop().toLowerCase();
-    
+
     if (extension === 'pdf') {
       if (!window.pdfjsLib) {
-        throw new Error('PDF.js library is not loaded.');
+        throw new Error('PDF.js library not loaded — check your internet connection and refresh the page.');
       }
-      logMessage('Parsing PDF pages client-side using PDF.js...');
-      updateProgress(20, 'Parsing PDF...');
-      
+      if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+      }
+      logMessage('Reading PDF into memory...');
+      updateProgress(15, 'Reading PDF...');
+
       const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-      logMessage(`Found ${pdf.numPages} pages in PDF.`);
-      
+      logMessage('Parsing PDF structure with PDF.js...');
+      updateProgress(20, 'Parsing PDF...');
+
+      let pdf;
+      try {
+        pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      } catch (pdfErr) {
+        throw new Error(`PDF.js failed to open file: ${pdfErr.message || pdfErr}`);
+      }
+
+      logMessage(`Found ${pdf.numPages} page(s) — extracting text...`);
+      if (pdf.numPages > 50) {
+        logMessage(`⚠ Large document (${pdf.numPages} pages). This may take a moment.`);
+      }
+
       for (let i = 1; i <= pdf.numPages; i++) {
-        logMessage(`Extracting text from page ${i}/${pdf.numPages}...`);
         const page = await pdf.getPage(i);
         const content = await page.getTextContent();
         const pageText = content.items.map(item => item.str).join(' ');
         text += pageText + '\n';
-        
+
         const pct = 20 + Math.round((i / pdf.numPages) * 30);
+        if (i % 10 === 0 || i === pdf.numPages) {
+          logMessage(`Extracted page ${i}/${pdf.numPages} — ${text.length.toLocaleString()} chars so far`);
+        }
         updateProgress(pct, `Parsing PDF (page ${i}/${pdf.numPages})...`);
       }
     } else if (extension === 'txt' || extension === 'md') {
@@ -5392,20 +5521,20 @@ async function handleRAGUpload(file) {
     } else {
       throw new Error('Unsupported file format. Only .txt, .md, and .pdf files are allowed.');
     }
-    
+
     if (!text.trim()) {
-      throw new Error('Extracted document text is empty.');
+      throw new Error('No extractable text found in this file. It may be an image-only/scanned PDF — try converting to text first.');
     }
-    
-    logMessage(`Extracted ${text.length} characters of plain text.`);
-    logMessage('Chunking document contents into ~800 char blocks with 100 char overlap...');
+
+    logMessage(`Extracted ${text.length.toLocaleString()} chars in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+    logMessage('Chunking into ~800-char blocks (100-char overlap)...');
     updateProgress(60, 'Chunking text...');
-    
+
     const chunks = chunkText(text, 800, 100);
-    logMessage(`Created ${chunks.length} chunks to index.`);
-    
-    updateProgress(70, 'Generating embeddings & submitting to indexer...');
-    
+    logMessage(`${chunks.length} chunks ready — sending to Ollama for embedding (this may take a moment if the model is cold-loading)...`);
+
+    updateProgress(70, `Embedding ${chunks.length} chunks via ${model}...`);
+
     const payload = {
       name: file.name,
       embedding_model: model,
@@ -5414,16 +5543,20 @@ async function handleRAGUpload(file) {
         content: c
       }))
     };
-    
+
     const response = await fetch('/api/rag/documents', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    
+
     if (!response.ok) {
-      const errData = await response.json();
-      throw new Error(errData.error || 'Failed to index document');
+      let errMsg = `Server error ${response.status}`;
+      try {
+        const errData = await response.json();
+        errMsg = errData.error || errMsg;
+      } catch (_) {}
+      throw new Error(errMsg);
     }
     
     const resData = await response.json();

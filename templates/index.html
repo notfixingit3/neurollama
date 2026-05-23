@@ -5,16 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{.title}}</title>
   
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/img/favicon.ico">
   <!-- Font Awesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <!-- Tailwind Output -->
-  <link rel="stylesheet" href="/static/css/output.css?v=0.0.9">
+  <link rel="stylesheet" href="/static/css/output.css?v=0.0.10">
   <!-- Marked Markdown Parser -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
   <!-- PDF.js library for client-side PDF parsing -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
 </head>
-<body class="bg-[#2e3440] text-[#e5e9f0] h-screen overflow-hidden cyber-grid flex flex-col font-sans">
+<body class="bg-[#2e3440] text-[#e5e9f0] min-h-screen cyber-grid flex flex-col font-sans">
 
   <!-- Header Banner -->
   <header class="border-b border-[#4c566a] bg-[#242933]/90 backdrop-blur-md px-6 py-4 flex flex-wrap justify-between items-center z-20 sticky top-0 shadow-lg">
@@ -27,7 +29,7 @@
       </div>
       <div>
         <h1 class="text-xl font-bold font-tech tracking-wider text-[#88c0d0] glow-text-blue flex items-center gap-2">
-          NEUROLLAMA <span class="text-xs px-2 py-0.5 bg-[#4c566a] text-[#d8dee9] rounded font-mono">v0.1.0</span>
+          NEUROLLAMA <span class="text-xs px-2 py-0.5 bg-[#4c566a] text-[#d8dee9] rounded font-mono">v0.2.0</span>
         </h1>
         <p class="text-[10px] uppercase font-mono tracking-widest text-[#4c566a] mt-0.5">Control Interface // Epoch 2026</p>
       </div>
@@ -56,11 +58,11 @@
   </header>
 
   <!-- Main Workspace Grid -->
-  <main class="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 overflow-hidden">
+  <main class="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 p-6">
     
     <!-- Left Sidebar: Server connection list (3 cols) -->
-    <section id="node-registry-sidebar" class="lg:col-span-3 flex flex-col h-full overflow-hidden transition-all duration-300">
-      <div class="tech-panel tech-header-accent rounded-xl flex-1 flex flex-col p-4 overflow-hidden">
+    <section id="node-registry-sidebar" class="lg:col-span-3 flex flex-col transition-all duration-300">
+      <div class="tech-panel tech-header-accent rounded-xl flex flex-col p-4">
         <div class="flex justify-between items-center mb-4 pb-2 border-b border-[#4c566a]/40">
           <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
             <i class="fa-solid fa-server mr-2"></i>Node Registry
@@ -71,7 +73,7 @@
         </div>
 
         <!-- Servers list container -->
-        <div id="server-list" class="flex-1 overflow-y-auto space-y-3 pr-1">
+        <div id="server-list" class="overflow-y-auto max-h-[60vh] space-y-3 pr-1">
           <!-- Loading skeleton -->
           <div class="animate-pulse space-y-3">
             <div class="h-16 bg-[#3b4252] rounded-lg"></div>
@@ -82,7 +84,7 @@
     </section>
 
     <!-- Right Workspace Section: Tabs & Contents (9 cols) -->
-    <section id="main-workspace-section" class="lg:col-span-9 flex flex-col h-full overflow-hidden gap-4 transition-all duration-300">
+    <section id="main-workspace-section" class="lg:col-span-9 flex flex-col gap-4 transition-all duration-300">
       
       <!-- Top Workspace Tabs Bar -->
       <div class="flex overflow-x-auto whitespace-nowrap gap-2 bg-[#242933]/60 p-1.5 border border-[#4c566a]/40 rounded-xl font-tech font-bold text-[10px] md:text-xs scrollbar-none">
@@ -98,28 +100,26 @@
         <button id="ws-tab-builder" onclick="switchWorkspace('builder')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
           <i class="fa-solid fa-wrench text-[10px]"></i> BUILDER
         </button>
-	        <button id="ws-tab-memory" onclick="switchWorkspace('memory')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
-	          <i class="fa-solid fa-memory text-[10px]"></i> MEMORY
-	        </button>
-	        <button id="ws-tab-diagnostics" onclick="switchWorkspace('diagnostics')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
-	          <i class="fa-solid fa-stethoscope text-[10px]"></i> DIAGNOSTICS
-	        </button>
 	        <button id="ws-tab-benchmark" onclick="switchWorkspace('benchmark')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
-	          <i class="fa-solid fa-gauge-high text-[10px]"></i> BENCHMARKS
-	        </button>
+          <i class="fa-solid fa-gauge-high text-[10px]"></i> BENCHMARKS
+        </button>
         <button id="ws-tab-rag" onclick="switchWorkspace('rag')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
           <i class="fa-solid fa-file-shield text-[10px]"></i> RAG
+        </button>
+        <button id="ws-tab-memory" onclick="switchWorkspace('memory')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
+          <i class="fa-solid fa-memory text-[10px]"></i> MEMORY
+        </button>
+        <button id="ws-tab-diagnostics" onclick="switchWorkspace('diagnostics')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
+          <i class="fa-solid fa-stethoscope text-[10px]"></i> DIAGNOSTICS
         </button>
       </div>
 
       <!-- Workspace Panels Wrapper -->
-      <div class="flex-1 relative overflow-hidden">
+      <div>
 
         <!-- PANEL 1: INVENTORY & TELEMETRY -->
-        <div id="ws-panel-inventory" class="ws-panel absolute inset-0 grid grid-cols-1 lg:grid-cols-12 gap-6 h-full overflow-hidden">
-          
-          <!-- Middle Panel: Model Registry & Pull Form (7 cols) -->
-          <div class="lg:col-span-7 flex flex-col h-full overflow-y-auto pr-1 gap-6">
+        <div id="ws-panel-inventory" class="ws-panel flex flex-col gap-6">
+          <div class="flex flex-col gap-6">
             <!-- Pull Model panel -->
             <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col flex-shrink-0">
               <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] mb-3">
@@ -128,7 +128,7 @@
               <form id="pull-model-form" onsubmit="handlePullModel(event)" class="flex gap-2">
                 <div class="relative flex-1">
                   <input type="text" id="pull-model-name" placeholder="e.g. llama3:8b, mistral, qwen2.5:1.5b" required
-                         class="input input-sm input-bordered w-full bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none" />
+                         class="input input-sm w-full bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none" />
                 </div>
                 <button type="submit" id="pull-btn" class="btn btn-sm btn-info font-tech tracking-wider gap-1 text-xs">
                   <i class="fa-solid fa-download"></i> PULL
@@ -167,8 +167,42 @@
               </div>
             </div>
 
+            <!-- Model Registry Explorer -->
+            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col h-[260px] flex-shrink-0 overflow-hidden">
+              <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] mb-3 flex justify-between items-center">
+                <span><i class="fa-solid fa-compass mr-2"></i>Model Registry Explorer</span>
+                <span class="text-[10px] text-[#4c566a] uppercase font-mono">Ollama Library + Hugging Face</span>
+              </h2>
+
+              <!-- Hugging Face pull inline form -->
+              <div class="mb-3">
+                <form id="hf-pull-form" onsubmit="handleHfPull(event)" class="flex gap-2">
+                  <div class="relative flex-1">
+                    <span class="absolute inset-y-0 left-0 flex items-center pl-2.5 text-[#81a1c1] font-mono text-[9px]">HF_TAG:</span>
+                    <input type="text" id="hf-pull-name" placeholder="hf.co/bartowski/Llama-3-8B-Instruct-GGUF:Q4_K_M" required
+                           class="input input-xs w-full pl-16 bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none" />
+                  </div>
+                  <button type="submit" id="hf-pull-btn" class="btn btn-xs btn-info font-tech tracking-wider text-[10px]">
+                    <i class="fa-solid fa-download"></i> HF_PULL
+                  </button>
+                </form>
+              </div>
+
+              <!-- Popular Models Catalog Header & Filter -->
+              <div class="flex justify-between items-center mb-2 pb-1 border-b border-[#4c566a]/20">
+                <span class="text-[10px] font-tech uppercase text-[#88c0d0]">Popular Models</span>
+                <input type="text" id="catalog-filter" placeholder="Filter catalog..." oninput="filterCatalog()"
+                       class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-[9px] w-36 focus:border-[#88c0d0] focus:outline-none" />
+              </div>
+
+              <!-- Popular Models List Grid (scrollable) -->
+              <div id="catalog-grid" class="overflow-y-auto max-h-32 grid grid-cols-1 sm:grid-cols-2 gap-2 pr-1 text-xs">
+                <!-- Injected via JS -->
+              </div>
+            </div>
+
             <!-- Models Registry List panel -->
-            <div class="tech-panel tech-header-accent rounded-xl flex-1 min-h-[220px] flex flex-col p-4 overflow-hidden">
+            <div class="tech-panel tech-header-accent rounded-xl min-h-[220px] flex flex-col p-4">
               <div class="flex justify-between items-center mb-3 pb-2 border-b border-[#4c566a]/40">
                 <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
                   <i class="fa-solid fa-tags mr-2"></i>Model Inventory
@@ -182,7 +216,7 @@
               </div>
 
               <!-- Models List Container -->
-              <div class="flex-1 overflow-auto">
+              <div class="overflow-auto">
                 <table class="table table-xs w-full text-left font-mono">
                   <thead>
                     <tr class="border-b border-[#4c566a]/50 text-[#88c0d0] uppercase tracking-wider text-[10px]">
@@ -203,106 +237,18 @@
                 </table>
               </div>
             </div>
-
-            <!-- Model Registry Explorer -->
-            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col h-[260px] flex-shrink-0 overflow-hidden">
-              <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] mb-3 flex justify-between items-center">
-                <span><i class="fa-solid fa-compass mr-2"></i>Model Registry Explorer</span>
-                <span class="text-[10px] text-[#4c566a] uppercase font-mono">Ollama Library + Hugging Face</span>
-              </h2>
-
-              <!-- Hugging Face pull inline form -->
-              <div class="mb-3">
-                <form id="hf-pull-form" onsubmit="handleHfPull(event)" class="flex gap-2">
-                  <div class="relative flex-1">
-                    <span class="absolute inset-y-0 left-0 flex items-center pl-2.5 text-[#81a1c1] font-mono text-[9px]">HF_TAG:</span>
-                    <input type="text" id="hf-pull-name" placeholder="hf.co/bartowski/Llama-3-8B-Instruct-GGUF:Q4_K_M" required
-                           class="input input-xs input-bordered w-full pl-16 bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none" />
-                  </div>
-                  <button type="submit" id="hf-pull-btn" class="btn btn-xs btn-info font-tech tracking-wider text-[10px]">
-                    <i class="fa-solid fa-download"></i> HF_PULL
-                  </button>
-                </form>
-              </div>
-
-              <!-- Popular Models Catalog Header & Filter -->
-              <div class="flex justify-between items-center mb-2 pb-1 border-b border-[#4c566a]/20">
-                <span class="text-[10px] font-tech uppercase text-[#88c0d0]">Popular Models</span>
-                <input type="text" id="catalog-filter" placeholder="Filter catalog..." oninput="filterCatalog()"
-                       class="input input-xs input-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-[9px] w-36 focus:border-[#88c0d0] focus:outline-none" />
-              </div>
-
-              <!-- Popular Models List Grid (scrollable) -->
-              <div id="catalog-grid" class="flex-1 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-2 pr-1 text-xs">
-                <!-- Injected via JS -->
-              </div>
-            </div>
-          </div>
-
-          <!-- Right Panel: Metadata & Inspecting (5 cols) -->
-          <div class="lg:col-span-5 flex flex-col h-full overflow-hidden">
-            <div class="tech-panel tech-header-accent rounded-xl flex-1 flex flex-col p-4 overflow-hidden">
-              <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] mb-4 pb-2 border-b border-[#4c566a]/40">
-                <i class="fa-solid fa-microchip mr-2"></i>Telemetry & Inspection
-              </h2>
-
-              <!-- Telemetry Details Panel -->
-              <div id="model-detail-panel" class="flex-1 flex flex-col overflow-hidden text-xs">
-                
-                <!-- Default Empty State -->
-                <div id="detail-empty-state" class="flex-1 flex flex-col items-center justify-center text-center p-6 text-[#4c566a] space-y-3">
-                  <div class="h-16 w-16 rounded-full border border-dashed border-[#4c566a] flex items-center justify-center text-2xl mb-2 animate-pulse">
-                    <i class="fa-solid fa-compass"></i>
-                  </div>
-                  <p class="font-tech uppercase tracking-widest text-[11px]">System Ready</p>
-                  <p class="text-[10px] max-w-[200px] leading-relaxed">Select a model card or click Inspect to view telemetry, prompts, and parameters.</p>
-                </div>
-
-                <!-- Active Details Content (Initially Hidden) -->
-                <div id="detail-content" class="hidden flex-1 flex flex-col overflow-hidden">
-                  <!-- Model Name and stats -->
-                  <div class="mb-4">
-                    <h3 id="detail-model-name" class="text-md font-bold font-tech text-[#e5e9f0] glow-text-blue truncate">llama3:8b</h3>
-                    <div class="flex flex-wrap gap-1.5 mt-2">
-                      <span id="badge-format" class="badge badge-outline border-[#4c566a] text-[#81a1c1] text-[10px] font-semibold">gguf</span>
-                      <span id="badge-family" class="badge badge-outline border-[#4c566a] text-[#88c0d0] text-[10px] font-semibold">llama</span>
-                      <span id="badge-quant" class="badge badge-outline border-[#4c566a] text-[#a3be8c] text-[10px] font-semibold">Q4_K_M</span>
-                      <span id="badge-params" class="badge badge-outline border-[#4c566a] text-[#ebcb8b] text-[10px] font-semibold">8B</span>
-                    </div>
-                  </div>
-
-                  <!-- Tab Selectors -->
-                  <div class="tabs tabs-boxed bg-[#242933]/60 p-1 border border-[#4c566a]/40 mb-3 grid grid-cols-5 text-center">
-                    <button id="ws-tab-modelfile" onclick="switchDetailTab('modelfile')" class="tab tab-xs tab-active text-[10px] font-tech font-bold transition-all">FILE</button>
-                    <button id="ws-tab-parameters" onclick="switchDetailTab('parameters')" class="tab tab-xs text-[10px] font-tech font-bold transition-all">PARAMS</button>
-                    <button id="ws-tab-template" onclick="switchDetailTab('template')" class="tab tab-xs text-[10px] font-tech font-bold transition-all">TEMPLATE</button>
-                    <button id="ws-tab-system" onclick="switchDetailTab('system')" class="tab tab-xs text-[10px] font-tech font-bold transition-all">SYSTEM</button>
-                    <button id="ws-tab-card" onclick="switchDetailTab('card')" class="tab tab-xs text-[10px] font-tech font-bold transition-all">CARD</button>
-                  </div>
-
-                  <!-- Tab Contents -->
-                  <div class="flex-1 overflow-auto bg-[#1e222a] border border-[#4c566a]/60 rounded-lg p-3 text-[11px] font-mono text-[#d8dee9] relative">
-                    <button onclick="copyTabContent()" class="btn btn-xs btn-neutral absolute top-2 right-2 border-[#4c566a] hover:bg-[#4c566a]" title="Copy to clipboard">
-                      <i class="fa-regular fa-copy"></i>
-                    </button>
-	                    <div id="tab-content-text" class="whitespace-pre-wrap break-all pr-8 leading-relaxed font-tech">Loading metadata...</div>
-                  </div>
-                  
-                  <div class="mt-3 text-[10px] text-[#4c566a] flex justify-between items-center">
-                    <span>Digest: <span id="detail-digest" class="font-mono text-[#81a1c1]">sha256:...</span></span>
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
 
         <!-- PANEL 2: PLAYGROUND (CHAT) -->
-        <div id="ws-panel-playground" class="ws-panel hidden absolute inset-0 grid grid-cols-1 lg:grid-cols-12 gap-6 h-full overflow-hidden">
-          
-          <!-- Recent Chats Sidebar (3 cols) -->
-          <div id="playground-chats-sidebar" class="lg:col-span-3 flex flex-col h-full overflow-hidden transition-all duration-300">
-            <div class="tech-panel tech-header-accent rounded-xl flex-1 flex flex-col p-4 overflow-hidden">
+        <div id="ws-panel-playground" class="ws-panel hidden flex flex-row gap-6">
+
+          <!-- Left panel: Chats + Config stacked, fixed narrow width -->
+          <div id="playground-left-panel" class="flex flex-col gap-4 overflow-y-auto shrink-0" style="width:280px;max-height:calc(100vh - 120px)">
+
+          <!-- Recent Chats Sidebar -->
+          <div id="playground-chats-sidebar" class="flex flex-col transition-all duration-300">
+            <div class="tech-panel tech-header-accent rounded-xl flex flex-col p-4">
               <div class="flex justify-between items-center mb-3 pb-2 border-b border-[#4c566a]/40">
                 <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
                   <i class="fa-solid fa-comments mr-2"></i>Recent Chats
@@ -313,7 +259,7 @@
               </div>
 
               <!-- Chats list container -->
-              <div id="chat-sessions-list" class="flex-1 overflow-y-auto space-y-2 pr-1 font-mono text-xs">
+              <div id="chat-sessions-list" class="overflow-y-auto max-h-64 space-y-2 pr-1 font-mono text-xs">
                 <div class="animate-pulse space-y-3">
                   <div class="h-12 bg-[#3b4252]/40 rounded-lg"></div>
                   <div class="h-12 bg-[#3b4252]/40 rounded-lg"></div>
@@ -322,9 +268,9 @@
             </div>
           </div>
 
-          <!-- Settings Column (3 cols) -->
-          <div id="playground-config-sidebar" class="lg:col-span-3 flex flex-col h-full overflow-hidden transition-all duration-300">
-            <div class="tech-panel tech-header-accent rounded-xl flex-1 min-h-0 p-4 flex flex-col overflow-y-auto gap-4">
+          <!-- Settings Column -->
+          <div id="playground-config-sidebar" class="flex flex-col transition-all duration-300">
+            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col gap-4">
               <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] border-b border-[#4c566a]/40 pb-2">
                 <i class="fa-solid fa-sliders mr-2"></i>Playground Config
               </h2>
@@ -332,7 +278,7 @@
               <!-- Model select -->
               <div class="form-control">
                 <label class="label pt-0"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Model Selection</span></label>
-                <select id="chat-model-select" class="select select-sm select-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                <select id="chat-model-select" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
                   <option value="">-- No models available --</option>
                 </select>
               </div>
@@ -346,7 +292,7 @@
                     <button id="delete-preset-btn" onclick="deleteActivePreset()" class="btn btn-neutral btn-xs border-[#4c566a] font-tech text-[9px] px-1 py-0 text-[#bf616a] hidden" title="Delete selected preset">DELETE</button>
                   </div>
                 </div>
-                <select id="chat-preset-select" onchange="applyPresetPrompt()" class="select select-sm select-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                <select id="chat-preset-select" onchange="applyPresetPrompt()" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
                   <option value="">-- Custom Prompt --</option>
                 </select>
               </div>
@@ -354,7 +300,7 @@
               <!-- Prompt Templates selector -->
               <div class="form-control">
                 <label class="label p-0"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Prompt Templates</span></label>
-                <select id="chat-template-select" onchange="applyPromptTemplate()" class="select select-sm select-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                <select id="chat-template-select" onchange="applyPromptTemplate()" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
                   <option value="">-- Select Template --</option>
                   <option value="chain_of_thought">Chain of Thought (CoT)</option>
                   <option value="few_shot">Few-Shot Examples</option>
@@ -368,7 +314,7 @@
               <div class="form-control">
                 <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">System Override</span></label>
                 <textarea id="chat-system-prompt" rows="3" placeholder="Define custom behavior..."
-                          class="textarea textarea-sm textarea-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full resize-none"></textarea>
+                          class="textarea textarea-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full resize-none"></textarea>
               </div>
 
               <!-- Document RAG Integration -->
@@ -381,7 +327,7 @@
                 </div>
                 <div class="form-control" id="chat-rag-model-container">
                   <label class="label pt-0"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Embedding Model</span></label>
-                  <select id="chat-rag-model-select" class="select select-xs select-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                  <select id="chat-rag-model-select" class="select select-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
                     <option value="">-- Select Embedding Model --</option>
                   </select>
                 </div>
@@ -413,11 +359,19 @@
                 <!-- Context limit input -->
                 <div class="form-control">
                   <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Context Limit</span></label>
-                  <select id="chat-ctx-limit" class="select select-xs select-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
-                    <option value="2048" selected>2048 tokens</option>
-                    <option value="4096">4096 tokens</option>
-                    <option value="8192">8192 tokens</option>
-                    <option value="16384">16384 tokens</option>
+                  <select id="chat-ctx-limit" class="select select-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                    <option value="2048" selected>2K — 2,048</option>
+                    <option value="4096">4K — 4,096</option>
+                    <option value="8192">8K — 8,192</option>
+                    <option value="16384">16K — 16,384</option>
+                    <option value="32768">32K — 32,768</option>
+                    <option value="65536">64K — 65,536</option>
+                    <option value="131072">128K — 131,072</option>
+                    <option value="200000">200K — 200,000</option>
+                    <option value="262144">256K — 262,144</option>
+                    <option value="524288">512K — 524,288</option>
+                    <option value="1000000">1M — 1,000,000</option>
+                    <option value="100000000">100M — 100,000,000</option>
                   </select>
                 </div>
 
@@ -455,7 +409,7 @@
                 <div class="form-control">
                   <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Seed (Random/Fixed)</span></label>
                   <input type="number" id="chat-seed" placeholder="e.g. 42 (empty for random)"
-                         class="input input-xs input-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                         class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
                 </div>
 
                 <!-- Min P -->
@@ -492,21 +446,21 @@
                 <div class="form-control">
                   <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Max Tokens (num_predict)</span></label>
                   <input type="number" id="chat-num-predict" placeholder="-1 (default)"
-                         class="input input-xs input-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                         class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
                 </div>
 
                 <!-- GPU Layers (num_gpu) -->
                 <div class="form-control">
                   <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">GPU Layers (num_gpu)</span></label>
                   <input type="number" id="chat-num-gpu" placeholder="-1 (default)"
-                         class="input input-xs input-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                         class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
                 </div>
 
                 <!-- CPU Threads (num_thread) -->
                 <div class="form-control">
                   <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">CPU Threads (num_thread)</span></label>
                   <input type="number" id="chat-num-thread" placeholder="-1 (default)"
-                         class="input input-xs input-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                         class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
                 </div>
 
                 <!-- API Snippets trigger -->
@@ -539,9 +493,11 @@
             </div>
           </div>
 
-          <!-- Chat Console Column (6 cols) -->
-          <div id="playground-console-column" class="lg:col-span-6 flex flex-col h-full overflow-hidden transition-all duration-300">
-            <div class="tech-panel tech-header-accent rounded-xl flex-1 flex flex-col overflow-hidden bg-[#1a1c23] scanline-effect border-[#4c566a]/70">
+          </div><!-- /playground-left-panel -->
+
+          <!-- Chat Console Column -->
+          <div id="playground-console-column" class="flex-1 min-w-0 flex flex-col transition-all duration-300">
+            <div class="tech-panel tech-header-accent rounded-xl flex flex-col bg-[#1a1c23] scanline-effect border-[#4c566a]/70">
               
               <!-- Console Top Status Info -->
               <div class="flex justify-between items-center px-3 py-1.5 border-b border-[#4c566a]/50 text-[10px] font-mono text-[#4c566a] bg-[#161820] min-h-[36px]">
@@ -584,7 +540,7 @@
               </div>
 
               <!-- Chat messages scroll box -->
-              <div id="chat-message-history" class="flex-1 overflow-y-auto p-4 space-y-4 font-mono text-xs scroll-smooth">
+              <div id="chat-message-history" class="overflow-y-auto min-h-[300px] max-h-[60vh] p-4 space-y-4 font-mono text-xs scroll-smooth">
                 <!-- Welcome prompt -->
                 <div class="chat chat-start">
                   <div class="chat-image avatar">
@@ -612,7 +568,7 @@
                   <input type="file" id="chat-image-input" class="hidden" accept="image/*" multiple onchange="handleChatImageFiles(this.files)" />
 
                   <textarea id="chat-input-text" rows="2" placeholder="Type prompt query or paste image... (Cmd+Enter to send)" onkeydown="checkChatShortcut(event)"
-                            class="textarea textarea-sm textarea-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none flex-1 resize-none h-12 py-1.5"></textarea>
+                            class="textarea textarea-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none flex-1 resize-none h-12 py-1.5"></textarea>
 	                  <button id="chat-send-btn" onclick="sendChatMessage()" class="btn btn-sm btn-info h-12 w-12 font-tech px-0 flex items-center justify-center">
 	                    <i class="fa-solid fa-paper-plane text-sm"></i>
 	                  </button>
@@ -629,11 +585,11 @@
         </div>
 
         <!-- PANEL: COMPLETION WORKSPACE -->
-        <div id="ws-panel-completion" class="ws-panel hidden absolute inset-0 grid grid-cols-1 lg:grid-cols-12 gap-6 h-full overflow-hidden">
+        <div id="ws-panel-completion" class="ws-panel hidden grid grid-cols-1 lg:grid-cols-12 gap-6">
           
           <!-- Left sidebar (3 cols) -->
-          <div id="completion-config-sidebar" class="lg:col-span-3 flex flex-col h-full overflow-hidden transition-all duration-300">
-            <div class="tech-panel tech-header-accent rounded-xl flex-1 min-h-0 p-4 flex flex-col overflow-y-auto gap-4">
+          <div id="completion-config-sidebar" class="lg:col-span-3 flex flex-col transition-all duration-300">
+            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col gap-4">
               <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] border-b border-[#4c566a]/40 pb-2">
                 <i class="fa-solid fa-align-left mr-2"></i>Completion Config
               </h2>
@@ -641,7 +597,7 @@
               <!-- Model select -->
               <div class="form-control">
                 <label class="label pt-0"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Model Selection</span></label>
-                <select id="completion-model-select" class="select select-sm select-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                <select id="completion-model-select" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
                   <option value="">-- No models available --</option>
                 </select>
               </div>
@@ -650,7 +606,7 @@
               <div class="form-control">
                 <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">System Prompt</span></label>
                 <textarea id="completion-system-prompt" rows="3" placeholder="Define completion system instruction..."
-                          class="textarea textarea-sm textarea-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full resize-none"></textarea>
+                          class="textarea textarea-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full resize-none"></textarea>
               </div>
 
               <!-- Advanced options section -->
@@ -671,11 +627,19 @@
                 <!-- Context limit input -->
                 <div class="form-control">
                   <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Context Limit</span></label>
-                  <select id="completion-ctx-limit" class="select select-xs select-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
-                    <option value="2048" selected>2048 tokens</option>
-                    <option value="4096">4096 tokens</option>
-                    <option value="8192">8192 tokens</option>
-                    <option value="16384">16384 tokens</option>
+                  <select id="completion-ctx-limit" class="select select-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                    <option value="2048" selected>2K — 2,048</option>
+                    <option value="4096">4K — 4,096</option>
+                    <option value="8192">8K — 8,192</option>
+                    <option value="16384">16K — 16,384</option>
+                    <option value="32768">32K — 32,768</option>
+                    <option value="65536">64K — 65,536</option>
+                    <option value="131072">128K — 131,072</option>
+                    <option value="200000">200K — 200,000</option>
+                    <option value="262144">256K — 262,144</option>
+                    <option value="524288">512K — 524,288</option>
+                    <option value="1000000">1M — 1,000,000</option>
+                    <option value="100000000">100M — 100,000,000</option>
                   </select>
                 </div>
 
@@ -713,21 +677,21 @@
                 <div class="form-control">
                   <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Max Tokens (num_predict)</span></label>
                   <input type="number" id="completion-num-predict" placeholder="-1 (default)"
-                         class="input input-xs input-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                         class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
                 </div>
 
                 <!-- GPU Layers (num_gpu) -->
                 <div class="form-control">
                   <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">GPU Layers (num_gpu)</span></label>
                   <input type="number" id="completion-num-gpu" placeholder="-1 (default)"
-                         class="input input-xs input-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                         class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
                 </div>
 
                 <!-- CPU Threads (num_thread) -->
                 <div class="form-control">
                   <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">CPU Threads (num_thread)</span></label>
                   <input type="number" id="completion-num-thread" placeholder="-1 (default)"
-                         class="input input-xs input-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                         class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
                 </div>
               </div>
 
@@ -744,8 +708,8 @@
           </div>
 
           <!-- Main Editor (9 cols) -->
-          <div id="completion-editor-column" class="lg:col-span-9 flex flex-col h-full overflow-hidden transition-all duration-300">
-            <div class="tech-panel tech-header-accent rounded-xl flex-1 flex flex-col overflow-hidden bg-[#1a1c23] border-[#4c566a]/70">
+          <div id="completion-editor-column" class="lg:col-span-9 flex flex-col transition-all duration-300">
+            <div class="tech-panel tech-header-accent rounded-xl flex flex-col bg-[#1a1c23] border-[#4c566a]/70">
               
               <!-- Console Top Status Info -->
               <div class="p-3 border-b border-[#4c566a]/40 bg-[#242933]/40 flex justify-between items-center text-[10px] font-tech text-[#81a1c1]">
@@ -759,20 +723,20 @@
               </div>
 
               <!-- Split Layout: Prompt input top, Document/Completion editor bottom -->
-              <div class="flex-1 flex flex-col p-4 gap-4 overflow-hidden min-h-0">
-                
+              <div class="flex flex-col p-4 gap-4">
+
                 <!-- Prompt Input -->
-                <div class="flex-1 flex flex-col min-h-[150px] relative">
+                <div class="flex flex-col relative">
                   <label class="label p-0 pb-1.5 flex justify-between items-center">
                     <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Completion Prompt</span>
                     <button onclick="clearCompletionPrompt()" class="btn btn-xs btn-ghost text-[#bf616a] hover:bg-[#bf616a]/15 text-[9px] font-tech font-bold px-1.5">CLEAR PROMPT</button>
                   </label>
                   <textarea id="completion-prompt-text" placeholder="Type instructions or prefix context here to start completion generation..."
-                            class="textarea textarea-bordered bg-[#2e3440]/40 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full flex-1 resize-none p-3 leading-relaxed"></textarea>
+                            class="textarea bg-[#2e3440]/40 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full min-h-[150px] resize-y p-3 leading-relaxed"></textarea>
                 </div>
 
                 <!-- Document Editor -->
-                <div class="flex-1 flex flex-col min-h-[200px] relative">
+                <div class="flex flex-col relative">
                   <label class="label p-0 pb-1.5 flex justify-between items-center">
                     <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Document Output Editor</span>
                     <div class="flex gap-1.5">
@@ -785,7 +749,7 @@
                     </div>
                   </label>
                   <textarea id="completion-document-text" placeholder="Completion results will stream here. You can also edit this text..."
-                            class="textarea textarea-bordered bg-[#2e3440]/40 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full flex-1 resize-none p-3 leading-relaxed"></textarea>
+                            class="textarea bg-[#2e3440]/40 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full min-h-[200px] resize-y p-3 leading-relaxed"></textarea>
                 </div>
 
               </div>
@@ -795,11 +759,11 @@
         </div>
 
         <!-- PANEL 3: MODEL BUILDER -->
-        <div id="ws-panel-builder" class="ws-panel hidden absolute inset-0 grid grid-cols-1 lg:grid-cols-12 gap-6 h-full overflow-hidden">
+        <div id="ws-panel-builder" class="ws-panel hidden grid grid-cols-1 lg:grid-cols-12 gap-6">
           
           <!-- Builder Inputs (5 cols) -->
-          <div class="lg:col-span-5 flex flex-col h-full overflow-hidden">
-            <div class="tech-panel tech-header-accent rounded-xl flex-1 min-h-0 p-4 flex flex-col overflow-y-auto gap-4">
+          <div class="lg:col-span-5 flex flex-col">
+            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col gap-4">
               <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] border-b border-[#4c566a]/40 pb-2">
                 <i class="fa-solid fa-compass-drafting mr-2"></i>Model Recipe
               </h2>
@@ -807,7 +771,7 @@
               <!-- Base model select -->
               <div class="form-control">
                 <label class="label pt-0"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Base Model (FROM)</span></label>
-                <select id="builder-base-select" onchange="onBaseModelChange()" class="select select-sm select-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                <select id="builder-base-select" onchange="onBaseModelChange()" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
                   <option value="">-- No models available --</option>
                 </select>
               </div>
@@ -816,7 +780,7 @@
               <div class="form-control">
                 <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">New Model Name</span></label>
                 <input type="text" id="builder-name-input" placeholder="e.g. customized-llama3" oninput="generateModelfilePreview()" required
-                       class="input input-sm input-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                       class="input input-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
               </div>
 
               <!-- Temperature slider -->
@@ -832,10 +796,19 @@
               <!-- Context window limit -->
               <div class="form-control">
                 <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Context Window Size</span></label>
-                <select id="builder-ctx-select" onchange="generateModelfilePreview()" class="select select-sm select-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
-                  <option value="2048" selected>2048 tokens</option>
-                  <option value="4096">4096 tokens</option>
-                  <option value="8192">8192 tokens</option>
+                <select id="builder-ctx-select" onchange="generateModelfilePreview()" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                  <option value="2048" selected>2K — 2,048</option>
+                  <option value="4096">4K — 4,096</option>
+                  <option value="8192">8K — 8,192</option>
+                  <option value="16384">16K — 16,384</option>
+                  <option value="32768">32K — 32,768</option>
+                  <option value="65536">64K — 65,536</option>
+                  <option value="131072">128K — 131,072</option>
+                  <option value="200000">200K — 200,000</option>
+                  <option value="262144">256K — 262,144</option>
+                  <option value="524288">512K — 524,288</option>
+                  <option value="1000000">1M — 1,000,000</option>
+                  <option value="100000000">100M — 100,000,000</option>
                 </select>
               </div>
 
@@ -843,7 +816,7 @@
               <div class="form-control">
                 <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Custom Stop Sequence</span></label>
                 <input type="text" id="builder-stop-input" placeholder='e.g. "<|im_end|>"' oninput="generateModelfilePreview()"
-                       class="input input-sm input-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                       class="input input-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
               </div>
 
               <!-- LoRA Adapters dynamic list -->
@@ -861,7 +834,7 @@
               <div class="form-control">
                 <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Prompt Template (TEMPLATE)</span></label>
                 <textarea id="builder-template-input" rows="2" placeholder='e.g. "{{ if .System }}<|im_start|>system\n{{ .System }}<|im_end|>\n{{ end }}..."' oninput="generateModelfilePreview()"
-                          class="textarea textarea-sm textarea-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-[10px] focus:border-[#88c0d0] focus:outline-none w-full resize-none leading-normal"></textarea>
+                          class="textarea textarea-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-[10px] focus:border-[#88c0d0] focus:outline-none w-full resize-none leading-normal"></textarea>
               </div>
 
               <!-- Merge Recipe Metadata -->
@@ -873,7 +846,7 @@
                 <div id="builder-merge-inputs" class="hidden space-y-2 mt-2 pl-3 border-l border-[#4c566a]/40">
                   <div>
                     <label class="label py-0.5"><span class="text-[9px] font-mono text-[#4c566a] uppercase">Merge Method</span></label>
-                    <select id="builder-merge-method" onchange="generateModelfilePreview()" class="select select-xs select-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-[10px] w-full focus:outline-none text-[#d8dee9]">
+                    <select id="builder-merge-method" onchange="generateModelfilePreview()" class="select select-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-[10px] w-full focus:outline-none text-[#d8dee9]">
                       <option value="SLERP">SLERP (Spherical Linear Interpolation)</option>
                       <option value="Linear">Linear Interpolation (Average)</option>
                       <option value="Passthrough">Passthrough / Frankenmerging</option>
@@ -882,12 +855,12 @@
                   <div>
                     <label class="label py-0.5"><span class="text-[9px] font-mono text-[#4c566a] uppercase">Secondary Model</span></label>
                     <input type="text" id="builder-merge-model" placeholder="e.g. llama3-base" oninput="generateModelfilePreview()"
-                           class="input input-xs input-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-[10px] w-full focus:outline-none" />
+                           class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-[10px] w-full focus:outline-none" />
                   </div>
                   <div>
                     <label class="label py-0.5"><span class="text-[9px] font-mono text-[#4c566a] uppercase">Merge Ratios (Weights)</span></label>
                     <input type="text" id="builder-merge-ratio" placeholder="e.g. 0.5, 0.3, 0.2" oninput="generateModelfilePreview()"
-                           class="input input-xs input-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-[10px] w-full focus:outline-none" />
+                           class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-[10px] w-full focus:outline-none" />
                   </div>
                 </div>
               </div>
@@ -896,21 +869,21 @@
               <div class="form-control">
                 <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">System Directive</span></label>
                 <textarea id="builder-system-input" rows="4" placeholder="Instruction prompt defining custom model behavior..." oninput="generateModelfilePreview()"
-                          class="textarea textarea-sm textarea-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full resize-none"></textarea>
+                          class="textarea textarea-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full resize-none"></textarea>
               </div>
             </div>
           </div>
 
           <!-- Compiler Preview & Output (7 cols) -->
-          <div class="lg:col-span-7 flex flex-col h-full overflow-hidden gap-4">
+          <div class="lg:col-span-7 flex flex-col gap-4">
             
             <!-- Modelfile Preview -->
-            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col overflow-hidden flex-4 min-h-[180px]">
+            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col min-h-[180px]">
               <h2 class="text-xs font-tech font-bold uppercase tracking-wider text-[#88c0d0] mb-2 flex justify-between items-center">
                 <span>Modelfile Generation Preview</span>
                 <span class="text-[9px] text-[#4c566a] uppercase">Auto-Generated</span>
               </h2>
-              <div class="flex-1 overflow-auto bg-[#1e222a] border border-[#4c566a]/60 rounded-lg p-3 text-[11px] font-mono text-[#d8dee9] relative">
+              <div class="overflow-auto max-h-48 bg-[#1e222a] border border-[#4c566a]/60 rounded-lg p-3 text-[11px] font-mono text-[#d8dee9] relative">
                 <pre id="builder-modelfile-preview" class="whitespace-pre-wrap font-tech leading-relaxed">FROM ...</pre>
               </div>
 	              <div class="flex gap-2 mt-3">
@@ -924,12 +897,12 @@
             </div>
 
             <!-- Build Progress Console -->
-            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col overflow-hidden flex-5 min-h-[220px] bg-[#1a1c23] scanline-effect border-[#4c566a]/70">
+            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col min-h-[220px] bg-[#1a1c23] scanline-effect border-[#4c566a]/70">
               <h2 class="text-xs font-tech font-bold uppercase tracking-wider text-[#88c0d0] mb-2 border-b border-[#4c566a]/40 pb-1 flex justify-between items-center">
                 <span>Compiler Status Output</span>
                 <span id="compiler-indicator" class="h-2 w-2 rounded-full bg-[#4c566a]"></span>
               </h2>
-              <div id="compiler-log-box" class="flex-1 overflow-y-auto bg-[#161820] border border-[#4c566a]/40 rounded-lg p-3 text-[11px] font-mono text-[#a3be8c] space-y-1">
+              <div id="compiler-log-box" class="overflow-y-auto min-h-[150px] max-h-64 bg-[#161820] border border-[#4c566a]/40 rounded-lg p-3 text-[11px] font-mono text-[#a3be8c] space-y-1">
                 <div class="text-[#4c566a] italic">Compiler idling... Set recipe options and press COMPILE_MODEL.</div>
               </div>
             </div>
@@ -937,17 +910,17 @@
         </div>
 
         <!-- PANEL 4: MEMORY STATUS -->
-        <div id="ws-panel-memory" class="ws-panel hidden absolute inset-0 grid grid-cols-1 lg:grid-cols-12 gap-6 h-full overflow-hidden">
+        <div id="ws-panel-memory" class="ws-panel hidden grid grid-cols-1 lg:grid-cols-12 gap-6">
           <!-- Left side: Host Telemetry & Connection status (5 cols) -->
-          <div class="lg:col-span-5 flex flex-col h-full overflow-hidden gap-6">
-            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col flex-1 overflow-hidden">
+          <div class="lg:col-span-5 flex flex-col gap-6">
+            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col">
               <div class="flex justify-between items-center mb-3 pb-2 border-b border-[#4c566a]/40">
                 <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
                   <i class="fa-solid fa-server mr-2"></i>Node Connectivity & Host Stats
                 </h2>
                 <span id="node-badge" class="badge badge-xs py-2 px-2 font-mono font-bold bg-[#bf616a] text-[#d8dee9] border-none">DISCONNECTED</span>
               </div>
-              <div class="space-y-4 flex-1 flex flex-col">
+              <div class="space-y-4 flex flex-col">
                 <div class="grid grid-cols-2 gap-2 text-xs font-mono bg-[#2e3440]/60 p-3 rounded-lg border border-[#4c566a]/30">
                   <div>
                     <span class="text-[#4c566a]">ACTIVE NODE:</span>
@@ -959,44 +932,72 @@
                   </div>
                 </div>
                 <!-- Mini canvas/utilization meter -->
-                <div class="flex-1 min-h-[150px] relative flex flex-col">
-                  <span class="text-[10px] font-mono text-[#4c566a] mb-1">REAL-TIME INFERENCE & HOST LOAD</span>
+                <div class="min-h-[150px] relative flex flex-col">
+                  <div class="flex items-baseline gap-2 mb-1">
+                    <span class="text-[10px] font-mono text-[#4c566a]">APP HOST // CPU & MEM</span>
+                    <span class="text-[9px] font-mono text-[#4c566a]/60 italic">this machine, not the Ollama node</span>
+                  </div>
                   <canvas id="telemetry-chart" class="w-full flex-1 rounded bg-[#1a1c23] border border-[#4c566a]/20"></canvas>
                 </div>
-                <div class="grid grid-cols-2 gap-4 text-xs font-mono">
-                  <div>
-                    <div class="flex justify-between text-[11px] mb-1">
-                      <span id="host-cpu-label" class="text-[#4c566a]">HOST CPU:</span>
-                      <span id="host-cpu-text" class="text-[#a3be8c]">0.0%</span>
+                <div class="space-y-3 text-xs font-mono">
+                  <div class="text-[9px] uppercase tracking-wider text-[#4c566a] border-b border-[#4c566a]/20 pb-1">This Machine</div>
+                  <div class="grid grid-cols-2 gap-4">
+                    <div>
+                      <div class="flex justify-between text-[11px] mb-1">
+                        <span id="host-cpu-label" class="text-[#4c566a]">APP CPU:</span>
+                        <span id="host-cpu-text" class="text-[#88c0d0]">0.0%</span>
+                      </div>
+                      <div class="w-full bg-[#3b4252] rounded-full h-1.5 overflow-hidden">
+                        <div id="host-cpu-bar" class="bg-[#88c0d0] h-1.5" style="width: 0%"></div>
+                      </div>
                     </div>
-                    <div class="w-full bg-[#3b4252] rounded-full h-1.5 overflow-hidden">
-                      <div id="host-cpu-bar" class="bg-[#a3be8c] h-1.5" style="width: 0%"></div>
+                    <div>
+                      <div class="flex justify-between text-[11px] mb-1">
+                        <span id="host-ram-label" class="text-[#4c566a]">APP RAM:</span>
+                        <span id="host-ram-text" class="text-[#a3be8c]">0.0 GB / 0.0 GB</span>
+                      </div>
+                      <div class="w-full bg-[#3b4252] rounded-full h-1.5 overflow-hidden">
+                        <div id="host-ram-bar" class="bg-[#a3be8c] h-1.5" style="width: 0%"></div>
+                      </div>
                     </div>
                   </div>
-                  <div>
-                    <div class="flex justify-between text-[11px] mb-1">
-                      <span id="host-ram-label" class="text-[#4c566a]">HOST RAM:</span>
-                      <span id="host-ram-text" class="text-[#a3be8c]">0.0 GB / 0.0 GB</span>
+                  <div class="text-[9px] uppercase tracking-wider text-[#4c566a] border-b border-[#4c566a]/20 pb-1">Ollama Node (via /api/ps)</div>
+                  <div class="grid grid-cols-2 gap-4">
+                    <div>
+                      <div class="flex justify-between text-[11px] mb-1">
+                        <span class="text-[#4c566a]">GPU VRAM:</span>
+                        <span id="ollama-vram-text" class="text-[#ebcb8b]">---</span>
+                      </div>
+                      <div class="w-full bg-[#3b4252] rounded-full h-1.5 overflow-hidden">
+                        <div id="ollama-vram-bar" class="bg-[#ebcb8b] h-1.5" style="width: 0%"></div>
+                      </div>
                     </div>
-                    <div class="w-full bg-[#3b4252] rounded-full h-1.5 overflow-hidden">
-                      <div id="host-ram-bar" class="bg-[#a3be8c] h-1.5" style="width: 0%"></div>
+                    <div>
+                      <div class="flex justify-between text-[11px] mb-1">
+                        <span class="text-[#4c566a]">SYS RAM:</span>
+                        <span id="ollama-sysram-text" class="text-[#b48ead]">---</span>
+                      </div>
+                      <div class="w-full bg-[#3b4252] rounded-full h-1.5 overflow-hidden">
+                        <div id="ollama-sysram-bar" class="bg-[#b48ead] h-1.5" style="width: 0%"></div>
+                      </div>
                     </div>
                   </div>
+                  <p class="text-[9px] text-[#4c566a]/70 italic">GPU VRAM and SYS RAM reflect loaded model allocations only — total capacity not exposed by Ollama API.</p>
                 </div>
               </div>
             </div>
 
             <!-- Model updates scheduler panel -->
-            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col h-[35%] min-h-[180px] overflow-hidden">
+            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col min-h-[180px]">
               <div class="flex justify-between items-center mb-3 pb-2 border-b border-[#4c566a]/40">
                 <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
                   <i class="fa-solid fa-clock-rotate-left mr-2"></i>Model Update Scheduler
                 </h2>
               </div>
-              <div class="space-y-3 flex-1 flex flex-col overflow-hidden">
+              <div class="space-y-3 flex flex-col">
                 <div class="flex items-center gap-2">
                   <div class="form-control flex-1">
-                    <select id="scheduler-interval-select" onchange="updateSchedulerSettings()" class="select select-xs select-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                    <select id="scheduler-interval-select" onchange="updateSchedulerSettings()" class="select select-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
                       <option value="off">Updates: OFF</option>
                       <option value="daily">Daily @ 2:00 AM</option>
                       <option value="weekly">Weekly (Sun @ 2:00 AM)</option>
@@ -1007,9 +1008,9 @@
                   </button>
                 </div>
                 <!-- Scheduler execution logs -->
-                <div class="flex-1 flex flex-col overflow-hidden">
+                <div class="flex flex-col">
                   <span class="text-[9px] font-mono text-[#4c566a] mb-1">SCHEDULER LOGS</span>
-                  <div id="scheduler-logs-container" class="flex-1 bg-[#161820] border border-[#4c566a]/40 rounded-lg p-2 text-[10px] font-mono text-[#e5e9f0] space-y-1 overflow-y-auto scrollbar-thin">
+                  <div id="scheduler-logs-container" class="max-h-36 bg-[#161820] border border-[#4c566a]/40 rounded-lg p-2 text-[10px] font-mono text-[#e5e9f0] space-y-1 overflow-y-auto scrollbar-thin">
                     <div class="text-[#4c566a] italic">No scheduler logs available.</div>
                   </div>
                 </div>
@@ -1018,8 +1019,8 @@
           </div>
 
           <!-- Right side: Remote Ollama Active Allocations (7 cols) -->
-          <div class="lg:col-span-7 flex flex-col h-full overflow-hidden">
-            <div class="tech-panel tech-header-accent rounded-xl flex-1 flex flex-col p-4 overflow-hidden">
+          <div class="lg:col-span-7 flex flex-col">
+            <div class="tech-panel tech-header-accent rounded-xl flex flex-col p-4">
               <div class="flex justify-between items-center mb-4 pb-2 border-b border-[#4c566a]/40">
                 <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
                   <i class="fa-solid fa-chart-pie mr-2"></i>Loaded Models in GPU/VRAM
@@ -1030,7 +1031,7 @@
               </div>
 
               <!-- Telemetry active models grid -->
-              <div class="flex-1 overflow-y-auto pr-1">
+              <div class="overflow-y-auto pr-1">
                 <div id="memory-loading-spinner" class="hidden text-center py-12 text-[#4c566a]">
                   <i class="fa-solid fa-circle-notch animate-spin mr-2"></i> Interrogating RAM/VRAM allocations...
                 </div>
@@ -1044,9 +1045,9 @@
 	        </div>
 
 	        <!-- PANEL 5: DIAGNOSTICS -->
-	        <div id="ws-panel-diagnostics" class="ws-panel hidden absolute inset-0 grid grid-cols-1 lg:grid-cols-12 gap-6 h-full overflow-hidden">
-	          <div class="lg:col-span-4 flex flex-col h-full overflow-hidden gap-4">
-	            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col gap-4">
+	        <div id="ws-panel-diagnostics" class="ws-panel hidden grid grid-cols-1 lg:grid-cols-12 gap-6">
+	          <div class="lg:col-span-4 flex flex-col gap-4 pr-1">
+	            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col gap-4 shrink-0">
 	              <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] border-b border-[#4c566a]/40 pb-2">
 	                <i class="fa-solid fa-stethoscope mr-2"></i>Preflight Console
 	              </h2>
@@ -1071,25 +1072,25 @@
 	                Checks local persistence, static assets, active Ollama reachability, model inventory, settings, and stream-route readiness.
 	              </div>
 	            </div>
-	            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col flex-1 overflow-hidden">
+	            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col min-h-[220px]">
 	              <h2 class="text-xs font-tech font-bold uppercase tracking-wider text-[#88c0d0] border-b border-[#4c566a]/40 pb-2 mb-3">
 	                <i class="fa-solid fa-triangle-exclamation mr-2"></i>Recent Stream Failures
 	              </h2>
-	              <div id="stream-failure-log" class="flex-1 overflow-y-auto space-y-2 text-[10px] font-mono">
+	              <div id="stream-failure-log" class="overflow-y-auto max-h-48 space-y-2 text-[10px] font-mono">
 	                <div class="text-[#4c566a] italic">No stream failures recorded in this browser.</div>
 	              </div>
 	              <button onclick="clearStreamFailureLog()" class="btn btn-xs btn-neutral border-[#4c566a] font-tech text-[9px] mt-3">CLEAR LOG</button>
 	            </div>
 	          </div>
-	          <div class="lg:col-span-8 flex flex-col h-full overflow-hidden">
-	            <div class="tech-panel tech-header-accent rounded-xl flex-1 flex flex-col p-4 overflow-hidden">
+	          <div class="lg:col-span-8 flex flex-col">
+	            <div class="tech-panel tech-header-accent rounded-xl flex flex-col p-4">
 	              <div class="flex items-center justify-between mb-3 pb-2 border-b border-[#4c566a]/40">
 	                <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
 	                  <i class="fa-solid fa-list-check mr-2"></i>System Health Checks
 	                </h2>
 	                <span id="diagnostics-generated-at" class="text-[10px] text-[#4c566a] font-mono">Not run yet</span>
 	              </div>
-	              <div id="diagnostics-results" class="flex-1 overflow-y-auto space-y-3 pr-1">
+	              <div id="diagnostics-results" class="overflow-y-auto space-y-3 pr-1">
 	                <div class="text-center py-16 text-[#4c566a] italic text-xs">Run preflight to inspect NEUROLLAMA readiness.</div>
 	              </div>
 	            </div>
@@ -1097,9 +1098,9 @@
 	        </div>
 
 	        <!-- PANEL 5: BENCHMARK SUITE -->
-	        <div id="ws-panel-benchmark" class="ws-panel hidden absolute inset-0 flex flex-col h-full overflow-hidden gap-4">
+	        <div id="ws-panel-benchmark" class="ws-panel hidden flex flex-col gap-4">
           <!-- Sub-tabs navigation bar -->
-          <div class="tabs tabs-boxed bg-[#242933]/60 p-1 border border-[#4c566a]/40 flex w-fit shrink-0 gap-1">
+          <div class="tabs tabs-box bg-[#242933]/60 p-1 border border-[#4c566a]/40 flex w-fit shrink-0 gap-1">
             <button id="benchmark-subtab-standard" onclick="switchBenchmarkSubtab('standard')" class="tab tab-sm tab-active text-[11px] font-tech font-bold transition-all px-4 text-[#d8dee9]">
               <i class="fa-solid fa-gauge-high mr-1.5"></i>STANDARD BENCHMARKS
             </button>
@@ -1109,35 +1110,37 @@
           </div>
 
           <!-- SUBTAB 1: STANDARD BENCHMARKS -->
-          <div id="benchmark-standard-container" class="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 overflow-hidden">
+          <div id="benchmark-standard-container" class="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <!-- Left side: Run Controls & Output console (5 cols) -->
-            <div class="lg:col-span-5 flex flex-col h-full overflow-hidden gap-6">
-              <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col h-full overflow-hidden">
+            <div class="lg:col-span-5 flex flex-col gap-6">
+              <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col">
                 <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] mb-3 pb-2 border-b border-[#4c566a]/40">
                   <i class="fa-solid fa-vial mr-2"></i>Inference Benchmarker
                 </h2>
-                <div class="space-y-4 flex-1 flex flex-col overflow-hidden">
+                <div class="space-y-4 flex flex-col">
                   <div class="form-control w-full">
                     <label class="label py-1">
                       <span class="label-text text-[11px] font-mono text-[#4c566a] uppercase">Select Model to Benchmark</span>
                     </label>
-                    <div class="flex gap-2">
-                      <select id="benchmark-model-select" class="select select-sm select-bordered flex-1 bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none text-[#d8dee9]">
+                    <div class="space-y-2">
+                      <select id="benchmark-model-select" class="select select-sm flex-1 bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none text-[#d8dee9]">
                         <!-- Populated dynamically -->
                       </select>
-	                      <button id="run-benchmark-btn" onclick="startBenchmark()" class="btn btn-sm btn-info font-tech uppercase tracking-wide px-4">
-	                        Run Tests
-	                      </button>
-	                      <button id="cancel-benchmark-btn" onclick="cancelBenchmark()" class="btn btn-sm btn-outline btn-error font-tech uppercase tracking-wide px-3 hidden">
-	                        Stop
-	                      </button>
-	                    </div>
+                      <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
+                        <button id="run-benchmark-btn" onclick="startBenchmark()" class="btn btn-sm btn-info font-tech uppercase tracking-wide px-4 min-h-9">
+                          <i class="fa-solid fa-play mr-1.5"></i>Start Measurement
+                        </button>
+                        <button id="cancel-benchmark-btn" onclick="cancelBenchmark()" class="btn btn-sm btn-outline btn-error font-tech uppercase tracking-wide px-3 min-h-9 hidden">
+                          <i class="fa-solid fa-stop mr-1.5"></i>Stop
+                        </button>
+                      </div>
+                    </div>
                   </div>
 
                   <!-- Test progress logs -->
-                  <div class="flex-1 flex flex-col overflow-hidden">
+                  <div class="flex flex-col">
                     <span class="text-[10px] font-mono text-[#4c566a] mb-1">LIVE BENCHMARK OUTPUT</span>
-                    <div id="benchmark-log" class="flex-1 bg-[#161820] border border-[#4c566a]/40 rounded-lg p-3 text-[11px] font-mono text-[#a3be8c] space-y-1 overflow-y-auto scanline-effect">
+                    <div id="benchmark-log" class="min-h-[200px] max-h-72 bg-[#161820] border border-[#4c566a]/40 rounded-lg p-3 text-[11px] font-mono text-[#a3be8c] space-y-1 overflow-y-auto scanline-effect">
                       <div class="text-[#4c566a] italic">Select a model and run tests to inspect live TPS/TTFT measurements.</div>
                     </div>
                   </div>
@@ -1146,13 +1149,13 @@
             </div>
 
             <!-- Right side: Leaderboard / Results Table (7 cols) -->
-            <div class="lg:col-span-7 flex flex-col h-full overflow-hidden">
-              <div class="tech-panel tech-header-accent rounded-xl flex-1 flex flex-col p-4 overflow-hidden">
+            <div class="lg:col-span-7 flex flex-col">
+              <div class="tech-panel tech-header-accent rounded-xl flex flex-col p-4">
                 <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] mb-4 pb-2 border-b border-[#4c566a]/40">
                   <i class="fa-solid fa-trophy mr-2"></i>Inference Speed Leaderboard
                 </h2>
-                <div class="flex-1 overflow-x-auto overflow-y-auto">
-                  <table class="table table-compact w-full text-xs font-mono text-[#d8dee9] border-collapse">
+                <div class="overflow-x-auto">
+                  <table class="table table-xs w-full text-xs font-mono text-[#d8dee9] border-collapse">
                     <thead>
                       <tr class="text-[#88c0d0] border-b border-[#4c566a]/40">
                         <th class="bg-transparent text-left py-2 font-tech uppercase">Model</th>
@@ -1173,26 +1176,26 @@
           </div>
 
           <!-- SUBTAB 2: HYPERPARAMETER OPTIMIZER -->
-          <div id="benchmark-optimizer-container" class="hidden grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 overflow-hidden">
+          <div id="benchmark-optimizer-container" class="hidden grid grid-cols-1 lg:grid-cols-12 gap-6 pr-1">
             <!-- Left side: Optimizer Controls & Console Log (5 cols) -->
-            <div class="lg:col-span-5 flex flex-col h-full overflow-hidden gap-6">
-              <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col h-full overflow-hidden">
+            <div class="lg:col-span-5 flex flex-col gap-6">
+              <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col">
                 <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] mb-3 pb-2 border-b border-[#4c566a]/40">
                   <i class="fa-solid fa-sliders mr-2"></i>Parameter Sweep Optimizer
                 </h2>
-                <div class="space-y-4 flex-1 flex flex-col overflow-hidden">
+                <div class="space-y-4 flex flex-col">
                   <div class="form-control w-full">
                     <label class="label py-1">
                       <span class="label-text text-[11px] font-mono text-[#4c566a] uppercase">Select Model to Evaluate</span>
                     </label>
-                    <select id="optimizer-model-select" class="select select-sm select-bordered flex-1 bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none text-[#d8dee9] w-full mb-3">
+                    <select id="optimizer-model-select" class="select select-sm flex-1 bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none text-[#d8dee9] w-full mb-3">
                       <!-- Populated dynamically -->
                     </select>
 
                     <label class="label py-1">
                       <span class="label-text text-[11px] font-mono text-[#4c566a] uppercase">Custom Prompt</span>
                     </label>
-                    <textarea id="optimizer-prompt-input" rows="3" class="textarea textarea-sm textarea-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none text-[#d8dee9] w-full resize-none" placeholder="Enter evaluation prompt..."></textarea>
+                    <textarea id="optimizer-prompt-input" rows="3" class="textarea textarea-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none text-[#d8dee9] w-full resize-none" placeholder="Enter evaluation prompt..."></textarea>
                   </div>
                   
 	                  <div class="flex gap-2">
@@ -1205,9 +1208,9 @@
 	                  </div>
 
                   <!-- Live progress logs -->
-                  <div class="flex-1 flex flex-col overflow-hidden">
+                  <div class="flex flex-col">
                     <span class="text-[10px] font-mono text-[#4c566a] mb-1">OPTIMIZER LIVE FEED</span>
-                    <div id="optimizer-log" class="flex-1 bg-[#161820] border border-[#4c566a]/40 rounded-lg p-3 text-[11px] font-mono text-[#a3be8c] space-y-1 overflow-y-auto scanline-effect">
+                    <div id="optimizer-log" class="min-h-[200px] max-h-72 bg-[#161820] border border-[#4c566a]/40 rounded-lg p-3 text-[11px] font-mono text-[#a3be8c] space-y-1 overflow-y-auto scanline-effect">
                       <div class="text-[#4c566a] italic">Select a model and run optimization to sweep hyperparameters and measure stats.</div>
                     </div>
                   </div>
@@ -1216,10 +1219,10 @@
             </div>
 
             <!-- Right side: Comparative Results & History (7 cols) -->
-            <div class="lg:col-span-7 flex flex-col h-full overflow-hidden gap-6">
+            <div class="lg:col-span-7 flex flex-col gap-6">
               
               <!-- Report Card Comparison -->
-              <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col overflow-hidden">
+              <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col">
                 <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] mb-3 pb-2 border-b border-[#4c566a]/40">
                   <i class="fa-solid fa-chart-line mr-2"></i>Comparative Optimization Report
                 </h2>
@@ -1261,12 +1264,12 @@
               </div>
 
               <!-- Past Results Dashboard -->
-              <div class="tech-panel tech-header-accent rounded-xl flex-1 flex flex-col p-4 overflow-hidden">
+              <div class="tech-panel tech-header-accent rounded-xl flex flex-col p-4">
                 <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] mb-3 pb-2 border-b border-[#4c566a]/40 flex justify-between items-center">
                   <span><i class="fa-solid fa-clock-rotate-left mr-2"></i>Parameter Optimization History</span>
                   <span class="text-[9px] text-[#4c566a] uppercase">Last 3 runs per Server/Model/Setting</span>
                 </h2>
-                <div class="flex-1 overflow-y-auto">
+                <div class="overflow-y-auto">
                   <div id="optimizer-history-container" class="space-y-4 pr-1">
                     <!-- Dynamic grouped runs will be rendered here -->
                   </div>
@@ -1278,13 +1281,13 @@
         </div>
 
         <!-- PANEL 7: DOCUMENT RAG -->
-        <div id="ws-panel-rag" class="ws-panel hidden absolute inset-0 grid grid-cols-1 lg:grid-cols-12 gap-6 h-full overflow-hidden">
+        <div id="ws-panel-rag" class="ws-panel hidden grid grid-cols-1 lg:grid-cols-12 gap-6">
           
           <!-- Left column: Upload & Config & Similarity Query Tester (5 cols) -->
-          <div class="lg:col-span-5 flex flex-col h-full overflow-hidden gap-4">
+          <div class="lg:col-span-5 flex flex-col gap-4">
             
             <!-- Upload & Config Panel -->
-            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col shrink-0 gap-3">
+            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col gap-3">
               <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] border-b border-[#4c566a]/40 pb-2">
                 <i class="fa-solid fa-file-arrow-up mr-2"></i>Index New Documents
               </h2>
@@ -1294,7 +1297,7 @@
                 <label class="label py-1">
                   <span class="label-text text-[10px] font-mono text-[#88c0d0] uppercase font-bold">Embedding Model</span>
                 </label>
-                <select id="rag-model-select" class="select select-sm select-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none text-[#d8dee9] w-full">
+                <select id="rag-model-select" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none text-[#d8dee9] w-full">
                   <!-- Populated dynamically -->
                 </select>
               </div>
@@ -1326,18 +1329,18 @@
             </div>
 
             <!-- Similarity Query Tester -->
-            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col flex-1 overflow-hidden">
+            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col">
               <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] border-b border-[#4c566a]/40 pb-2 mb-3">
                 <i class="fa-solid fa-magnifying-glass-chart mr-2"></i>Test Similarity Query
               </h2>
               
               <div class="flex gap-2 mb-3 shrink-0">
-                <input type="text" id="rag-test-query" placeholder="Type a prompt to test chunk matching..." class="input input-sm input-bordered flex-1 bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none text-[#d8dee9]" />
+                <input type="text" id="rag-test-query" placeholder="Type a prompt to test chunk matching..." class="input input-sm flex-1 bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none text-[#d8dee9]" />
                 <button onclick="runRAGSimilarityQuery()" class="btn btn-sm btn-info font-tech uppercase tracking-wide px-4">Search</button>
               </div>
 
               <!-- Query results -->
-              <div class="flex-1 overflow-y-auto pr-1">
+              <div class="overflow-y-auto max-h-64 pr-1">
                 <div id="rag-query-results" class="space-y-3">
                   <div class="text-[#4c566a] italic text-xs text-center py-8">Run a query to inspect cosine similarity scores and retrieved chunks.</div>
                 </div>
@@ -1347,8 +1350,8 @@
           </div>
 
           <!-- Right column: Document Index & List (7 cols) -->
-          <div class="lg:col-span-7 flex flex-col h-full overflow-hidden">
-            <div class="tech-panel tech-header-accent rounded-xl flex-1 flex flex-col p-4 overflow-hidden">
+          <div class="lg:col-span-7 flex flex-col">
+            <div class="tech-panel tech-header-accent rounded-xl flex flex-col p-4">
               <div class="flex justify-between items-center mb-4 pb-2 border-b border-[#4c566a]/40">
                 <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
                   <i class="fa-solid fa-folder-open mr-2"></i>Indexed Documents
@@ -1359,8 +1362,8 @@
               </div>
 
               <!-- Document table container -->
-              <div class="flex-1 overflow-y-auto">
-                <table class="table table-compact w-full font-mono text-[11px] text-[#d8dee9]">
+              <div class="overflow-y-auto">
+                <table class="table table-xs w-full font-mono text-[11px] text-[#d8dee9]">
                   <thead>
                     <tr class="text-[#88c0d0] border-b border-[#4c566a]/30 uppercase text-[9px] font-tech font-bold">
                       <th class="bg-transparent pl-0">Document Name</th>
@@ -1421,19 +1424,19 @@
         <div class="form-control">
           <label class="label pt-0"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Node Name</span></label>
           <input type="text" id="add-server-name" placeholder="e.g. Local Machine, Remote Cloud" required 
-                 class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                 class="input input-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
         </div>
         <div class="form-control">
           <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Base URL</span></label>
           <input type="url" id="add-server-url" placeholder="http://localhost:11434" required 
-                 class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                 class="input input-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
         </div>
 
         <!-- Authentication Configuration -->
         <div class="border-t border-[#4c566a]/30 pt-3">
           <label class="label pt-0"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Authentication Type</span></label>
           <select id="add-server-auth-type" onchange="toggleAuthFields('add')"
-                  class="select select-sm select-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                  class="select select-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
             <option value="none">None</option>
             <option value="bearer">Bearer Token</option>
             <option value="basic">Basic Auth</option>
@@ -1446,7 +1449,7 @@
 	          <div class="form-control">
 	            <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Token</span></label>
 	            <input type="password" id="add-server-auth-token" placeholder="Bearer token value"
-	                   class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+	                   class="input input-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
           </div>
         </div>
 
@@ -1454,12 +1457,12 @@
           <div class="form-control">
             <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Username</span></label>
             <input type="text" id="add-server-auth-username" placeholder="Username"
-                   class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                   class="input input-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
           </div>
           <div class="form-control">
             <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Password</span></label>
             <input type="password" id="add-server-auth-password" placeholder="Password"
-                   class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                   class="input input-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
           </div>
         </div>
 
@@ -1467,12 +1470,12 @@
           <div class="form-control">
             <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Header Name</span></label>
             <input type="text" id="add-server-auth-header-name" placeholder="X-API-Key"
-                   class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                   class="input input-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
           </div>
           <div class="form-control">
             <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Header Value</span></label>
             <input type="text" id="add-server-auth-header-val" placeholder="token-secret"
-                   class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                   class="input input-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
           </div>
         </div>
 
@@ -1496,19 +1499,19 @@
         <div class="form-control">
           <label class="label pt-0"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Node Name</span></label>
           <input type="text" id="edit-server-name" placeholder="e.g. Local Machine, Remote Cloud" required 
-                 class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                 class="input input-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
         </div>
         <div class="form-control">
           <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Base URL</span></label>
           <input type="url" id="edit-server-url" placeholder="http://localhost:11434" required 
-                 class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                 class="input input-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
         </div>
 
         <!-- Authentication Configuration -->
         <div class="border-t border-[#4c566a]/30 pt-3">
           <label class="label pt-0"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Authentication Type</span></label>
           <select id="edit-server-auth-type" onchange="toggleAuthFields('edit')"
-                  class="select select-sm select-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                  class="select select-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
             <option value="none">None</option>
             <option value="bearer">Bearer Token</option>
             <option value="basic">Basic Auth</option>
@@ -1521,7 +1524,7 @@
 	          <div class="form-control">
 	            <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Token</span></label>
 	            <input type="password" id="edit-server-auth-token" placeholder="Leave blank to keep saved token"
-	                   class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+	                   class="input input-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
 	          </div>
 	        </div>
 
@@ -1529,12 +1532,12 @@
           <div class="form-control">
             <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Username</span></label>
             <input type="text" id="edit-server-auth-username" placeholder="Username"
-                   class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                   class="input input-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
           </div>
 	          <div class="form-control">
 	            <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Password</span></label>
 	            <input type="password" id="edit-server-auth-password" placeholder="Leave blank to keep saved password"
-	                   class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+	                   class="input input-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
 	          </div>
 	        </div>
 
@@ -1542,12 +1545,12 @@
           <div class="form-control">
             <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Header Name</span></label>
             <input type="text" id="edit-server-auth-header-name" placeholder="X-API-Key"
-                   class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                   class="input input-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
           </div>
 	          <div class="form-control">
 	            <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Header Value</span></label>
 	            <input type="password" id="edit-server-auth-header-val" placeholder="Leave blank to keep saved value"
-	                   class="input input-sm input-bordered bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+	                   class="input input-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
 	          </div>
 	        </div>
 
@@ -1636,7 +1639,7 @@
       <div class="space-y-4 text-xs font-mono">
         <div>
           <label class="block text-[#4c566a] mb-1 font-bold">REASONING SCORE</label>
-          <select id="modal-score-select" class="select select-sm select-bordered w-full bg-[#1f232a] border-[#4c566a] text-xs text-[#d8dee9] focus:outline-none focus:border-[#88c0d0]">
+          <select id="modal-score-select" class="select select-sm w-full bg-[#1f232a] border-[#4c566a] text-xs text-[#d8dee9] focus:outline-none focus:border-[#88c0d0]">
             <option value="S (Phenomenal)">S (Phenomenal)</option>
             <option value="A (Excellent)">A (Excellent)</option>
             <option value="B (Good)">B (Good)</option>
@@ -1647,7 +1650,7 @@
         <div>
           <label class="block text-[#4c566a] mb-1 font-bold">NOTES / EXPERIMENTAL OBSERVATIONS</label>
           <textarea id="modal-notes-area" rows="4" placeholder="e.g. Follows instructions well, slow thinking phase..."
-                    class="textarea textarea-bordered w-full bg-[#1f232a] border-[#4c566a] text-xs text-[#d8dee9] focus:outline-none focus:border-[#88c0d0]"></textarea>
+                    class="textarea w-full bg-[#1f232a] border-[#4c566a] text-xs text-[#d8dee9] focus:outline-none focus:border-[#88c0d0]"></textarea>
         </div>
       </div>
       <div class="modal-action mt-6 flex gap-2 justify-end">
@@ -1671,6 +1674,6 @@
   </div>
 
   <!-- App Script -->
-  <script src="/static/js/app.js?v=0.1.0"></script>
+  <script src="/static/js/app.js?v=0.1.1"></script>
 </body>
 </html>

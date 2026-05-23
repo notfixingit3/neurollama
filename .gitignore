@@ -33,6 +33,10 @@ Thumbs.db
 .sisyphus/
 node_modules/
 
+# Tailwind standalone binary (not committed — too large)
+# Download: curl -sL https://github.com/tailwindlabs/tailwindcss/releases/download/v4.3.0/tailwindcss-macos-arm64 -o tailwindcss && chmod +x tailwindcss
+tailwindcss
+
 # Local database and compiled binary
 data/
 ollama-manager

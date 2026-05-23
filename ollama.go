@@ -477,6 +477,7 @@ func (c *OllamaClient) StreamCreate(ctx context.Context, createReq CreateRequest
 }
 
 // GetEmbeddings retrieves vector representations of texts using active Ollama server, trying /api/embed first then /api/embeddings.
+// Uses a 5-minute timeout so cold model loads (which can take 30s+) don't cause spurious failures.
 func (c *OllamaClient) GetEmbeddings(model string, inputs []string) ([][]float64, error) {
 	reqBody, err := json.Marshal(map[string]interface{}{
 		"model": model,
@@ -486,7 +487,12 @@ func (c *OllamaClient) GetEmbeddings(model string, inputs []string) ([][]float64
 		return nil, err
 	}
 
-	resp, err := c.HTTPClient.Post(
+	longClient := &http.Client{
+		Transport: c.HTTPClient.Transport,
+		Timeout:   5 * time.Minute,
+	}
+
+	resp, err := longClient.Post(
 		fmt.Sprintf("%s/api/embed", c.BaseURL),
 		"application/json",
 		bytes.NewBuffer(reqBody),
@@ -517,7 +523,7 @@ func (c *OllamaClient) GetEmbeddings(model string, inputs []string) ([][]float64
 			return nil, err
 		}
 
-		respOld, err := c.HTTPClient.Post(
+		respOld, err := longClient.Post(
 			fmt.Sprintf("%s/api/embeddings", c.BaseURL),
 			"application/json",
 			bytes.NewBuffer(reqBodyOld),
@@ -527,8 +533,14 @@ func (c *OllamaClient) GetEmbeddings(model string, inputs []string) ([][]float64
 		}
 
 		if respOld.StatusCode != http.StatusOK {
-			bodyBytes, _ := io.ReadAll(respOld.Body)
-			respOld.Body.Close()
+			bodyBytes, readErr := io.ReadAll(respOld.Body)
+			closeErr := respOld.Body.Close()
+			if readErr != nil {
+				return nil, fmt.Errorf("fallback embeddings failed with status %d and unreadable response body: %w", respOld.StatusCode, readErr)
+			}
+			if closeErr != nil {
+				return nil, fmt.Errorf("failed to close fallback embedding response: %w", closeErr)
+			}
 			return nil, fmt.Errorf("fallback embeddings failed with status %d: %s", respOld.StatusCode, string(bodyBytes))
 		}
 
@@ -536,9 +548,12 @@ func (c *OllamaClient) GetEmbeddings(model string, inputs []string) ([][]float64
 			Embedding []float64 `json:"embedding"`
 		}
 		decodeErr := json.NewDecoder(respOld.Body).Decode(&embedRespOld)
-		respOld.Body.Close()
+		closeErr := respOld.Body.Close()
 		if decodeErr != nil {
 			return nil, fmt.Errorf("failed to parse fallback embedding: %w", decodeErr)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("failed to close fallback embedding response: %w", closeErr)
 		}
 		embeddings[i] = embedRespOld.Embedding
 	}

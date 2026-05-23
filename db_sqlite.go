@@ -14,23 +14,23 @@ import (
 var DB *sql.DB
 
 type Chat struct {
-	ID               int64    `json:"id"`
-	Title            string   `json:"title"`
-	Model            string   `json:"model"`
-	SystemPrompt     string   `json:"system_prompt"`
-	Temperature      float64  `json:"temperature"`
-	NumCtx           int      `json:"num_ctx"`
-	TopK             int      `json:"top_k"`
-	TopP             float64  `json:"top_p"`
-	RepeatPenalty    float64  `json:"repeat_penalty"`
-	Seed             *int     `json:"seed"`
-	MinP             float64  `json:"min_p"`
-	PresencePenalty  float64  `json:"presence_penalty"`
-	FrequencyPenalty float64  `json:"frequency_penalty"`
-	NumPredict       int      `json:"num_predict"`
-	NumGPU           int      `json:"num_gpu"`
-	NumThread        int      `json:"num_thread"`
-	CreatedAt        string   `json:"created_at"`
+	ID               int64   `json:"id"`
+	Title            string  `json:"title"`
+	Model            string  `json:"model"`
+	SystemPrompt     string  `json:"system_prompt"`
+	Temperature      float64 `json:"temperature"`
+	NumCtx           int     `json:"num_ctx"`
+	TopK             int     `json:"top_k"`
+	TopP             float64 `json:"top_p"`
+	RepeatPenalty    float64 `json:"repeat_penalty"`
+	Seed             *int    `json:"seed"`
+	MinP             float64 `json:"min_p"`
+	PresencePenalty  float64 `json:"presence_penalty"`
+	FrequencyPenalty float64 `json:"frequency_penalty"`
+	NumPredict       int     `json:"num_predict"`
+	NumGPU           int     `json:"num_gpu"`
+	NumThread        int     `json:"num_thread"`
+	CreatedAt        string  `json:"created_at"`
 }
 
 type Preset struct {
@@ -105,12 +105,11 @@ type RAGChunkWithDocInfo struct {
 	Embedding    []float64 `json:"embedding"`
 }
 
-
 // InitDB initializes the SQLite database connection and runs migrations
 func InitDB(dbPath string) error {
 	// Create directory if it doesn't exist
 	dir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("failed to create database directory: %w", err)
 	}
 
@@ -746,5 +745,3 @@ func GetRAGChunksForModel(embeddingModel string) ([]RAGChunkWithDocInfo, error) 
 	}
 	return list, nil
 }
-
-

@@ -9,12 +9,16 @@
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/version-v0.2.0-bf616a?style=for-the-badge&logo=git&logoColor=white" alt="Version v0.2.0" />
   <a href="https://golang.org/"><img src="https://img.shields.io/badge/Go-1.26.3-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go Version" /></a>
-  <a href="https://tailwindcss.com/"><img src="https://img.shields.io/badge/Tailwind_CSS-3.4%2B-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white" alt="Tailwind CSS" /></a>
-  <a href="https://daisyui.com/"><img src="https://img.shields.io/badge/daisyUI-4.7%2B-5A0EF8?style=for-the-badge&logo=daisyui&logoColor=white" alt="DaisyUI" /></a>
+  <a href="https://tailwindcss.com/"><img src="https://img.shields.io/badge/Tailwind_CSS-4.3%2B-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white" alt="Tailwind CSS" /></a>
+  <a href="https://daisyui.com/"><img src="https://img.shields.io/badge/daisyUI-5.5%2B-5A0EF8?style=for-the-badge&logo=daisyui&logoColor=white" alt="DaisyUI" /></a>
   <a href="https://github.com/notfixingit3/neurollama/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-a3be8c?style=for-the-badge" alt="MIT License" /></a>
   <a href="https://buymeacoffee.com/notfixingit"><img src="https://img.shields.io/badge/Buy%20Me%20A%20Coffee-notfixingit-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me A Coffee" /></a>
 </p>
+
+> [!WARNING]
+> **Pre-release software.** NEUROLLAMA is under active development and has not reached a stable release. Features may be incomplete, broken, or change without notice. Running this software may trigger cascading failures in your local Ollama setup, spontaneous model downloads, existential dread, or other unforeseeable consequences. We are not responsible for lost models, corrupted databases, rogue AI agents, or the heat death of your GPU. Use at your own risk. You have been warned.
 
 ---
 
@@ -77,8 +81,8 @@ With NEUROLLAMA, you can connect to multiple local or remote servers, monitor ac
 ### Prerequisites
 
 * [Go](https://go.dev/doc/install) 1.26.3.
-* [Node.js & npm](https://nodejs.org/en/download/) (only for rebuilding Tailwind CSS styles).
 * A running [Ollama](https://ollama.com/) instance (ensure the server has origin permissions enabled if running remotely; typically start Ollama with `OLLAMA_ORIGINS="*" ollama serve`).
+* **Node.js is not required.** CSS is pre-compiled and committed. See [Rebuilding CSS](#rebuilding-css) only if you modify styles.
 
 ### Installation
 
@@ -88,24 +92,41 @@ With NEUROLLAMA, you can connect to multiple local or remote servers, monitor ac
    cd neurollama
    ```
 
-2. **Compile Tailwind CSS**:
-   ```bash
-   cd tailwind
-   npm install
-   npm run build
-   cd ..
-   ```
-
-3. **Compile the Go binary**:
+2. **Compile the Go binary**:
    ```bash
    go build -o neurollama .
    ```
 
-4. **Run the server**:
+3. **Run the server**:
    ```bash
    ./neurollama
    ```
    The application will start on: **`http://localhost:8080`**
+
+---
+
+## 🎨 Rebuilding CSS
+
+The compiled `static/css/output.css` is committed to the repo — you only need this if you modify `tailwind/input.css` or templates.
+
+CSS is built using the [Tailwind CSS v4 standalone CLI](https://tailwindcss.com/blog/standalone-cli) — **no Node.js or npm required**.
+
+**One-time binary download (macOS arm64):**
+```bash
+curl -sL https://github.com/tailwindlabs/tailwindcss/releases/download/v4.3.0/tailwindcss-macos-arm64 -o tailwindcss && chmod +x tailwindcss
+```
+
+For other platforms replace `macos-arm64` with `macos-x64`, `linux-x64`, `linux-arm64`, or `windows-x64.exe`.
+
+**Build:**
+```bash
+./tailwindcss -i tailwind/input.css -o static/css/output.css --minify
+```
+
+**Watch mode (auto-rebuild on save):**
+```bash
+./tailwindcss -i tailwind/input.css -o static/css/output.css --watch
+```
 
 ---
 
@@ -121,6 +142,16 @@ With NEUROLLAMA, you can connect to multiple local or remote servers, monitor ac
     ```
 
 ---
+
+## 🤝 Contributing
+
+All commit messages must end with a random Scooby-Doo quote. This is non-negotiable.
+
+```
+feat: add VRAM telemetry panel
+
+"Zoinks!"
+```
 
 ## 🤝 Support & Contributions
 

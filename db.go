@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sync"
 )
 
@@ -28,10 +27,33 @@ type Config struct {
 }
 
 var (
-	configPath = filepath.Join("data", "servers.json")
-	servers    []Server
-	mu         sync.Mutex
+	servers []Server
+	mu      sync.Mutex
 )
+
+const (
+	dataDir          = "data"
+	serverConfigFile = "servers.json"
+)
+
+func openDataRoot() (*os.Root, error) {
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		return nil, fmt.Errorf("failed to create data directory: %w", err)
+	}
+
+	root, err := os.OpenRoot(dataDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open data directory: %w", err)
+	}
+
+	return root, nil
+}
+
+func closeDataRoot(root *os.Root, operationErr *error) {
+	if closeErr := root.Close(); closeErr != nil && *operationErr == nil {
+		*operationErr = fmt.Errorf("failed to close data directory: %w", closeErr)
+	}
+}
 
 // Generate a simple unique ID
 func generateID() string {
@@ -44,18 +66,18 @@ func generateID() string {
 }
 
 // LoadConfig loads the servers list from data/servers.json
-func LoadConfig() error {
+func LoadConfig() (err error) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	// Ensure data directory exists
-	dir := filepath.Dir(configPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create data directory: %w", err)
+	root, err := openDataRoot()
+	if err != nil {
+		return err
 	}
+	defer closeDataRoot(root, &err)
 
 	// Check if config file exists
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+	if _, err = root.Stat(serverConfigFile); os.IsNotExist(err) {
 		// Create default config with local Ollama
 		servers = []Server{
 			{
@@ -69,10 +91,15 @@ func LoadConfig() error {
 		err = SaveConfigInternal()
 		mu.Lock() // Re-lock for defer Unlock
 		return err
+	} else if err != nil {
+		return fmt.Errorf("failed to stat config file: %w", err)
+	}
+	if err = root.Chmod(serverConfigFile, 0600); err != nil {
+		return fmt.Errorf("failed to secure config file permissions: %w", err)
 	}
 
 	// Read and parse file
-	data, err := os.ReadFile(configPath)
+	data, err := root.ReadFile(serverConfigFile)
 	if err != nil {
 		return fmt.Errorf("failed to read config file: %w", err)
 	}
@@ -105,14 +132,20 @@ func LoadConfig() error {
 }
 
 // SaveConfigInternal saves the current servers slice to disk (expects lock to be held or managed)
-func SaveConfigInternal() error {
+func SaveConfigInternal() (err error) {
 	cfg := Config{Servers: servers}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	if err := os.WriteFile(configPath, data, 0644); err != nil {
+	root, err := openDataRoot()
+	if err != nil {
+		return err
+	}
+	defer closeDataRoot(root, &err)
+
+	if err := root.WriteFile(serverConfigFile, data, 0600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 	return nil
@@ -148,9 +181,9 @@ func GetActiveServer() (Server, error) {
 	if len(servers) > 0 {
 		// Fallback to first server
 		servers[0].IsActive = true
-		cfg := Config{Servers: servers}
-		data, _ := json.MarshalIndent(cfg, "", "  ")
-		_ = os.WriteFile(configPath, data, 0644)
+		if err := SaveConfigInternal(); err != nil {
+			return Server{}, err
+		}
 		return servers[0], nil
 	}
 
