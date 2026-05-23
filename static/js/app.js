@@ -4589,24 +4589,26 @@ function handleTelemetryData(data) {
 
   // ── Global header model-loaded indicator ──────────────────────────────────
   const modelIndicator     = document.getElementById('global-model-indicator');
-  const modelIndicatorText = document.getElementById('global-model-indicator-text');
-  if (modelIndicator && modelIndicatorText) {
+  const modelIndicatorName = document.getElementById('global-model-indicator-name');
+  const modelIndicatorVram = document.getElementById('global-model-indicator-vram');
+  if (modelIndicator && modelIndicatorName && modelIndicatorVram) {
     if (activeModels.length === 0) {
       modelIndicator.className = 'flex items-center gap-1.5 text-[#4c566a]';
-      modelIndicatorText.textContent = 'IDLE';
+      modelIndicatorName.textContent = 'IDLE';
+      modelIndicatorVram.textContent = '';
+      modelIndicatorVram.classList.add('hidden');
     } else {
       modelIndicator.className = 'flex items-center gap-1.5 text-[#a3be8c]';
-      let label;
       const totalLabel = configuredVramBytes > 0 ? `/${activeSrv.vramGb}G` : '';
+      const vramStr    = `· ${usedVramGb.toFixed(1)}G${totalLabel}`;
       if (activeModels.length === 1) {
-        // Trim to a readable length: strip namespace prefix, keep base name
         const shortName = (activeModels[0].name || '').split(':')[0].split('/').pop();
-        const vramStr   = `${usedVramGb.toFixed(1)}G${totalLabel}`;
-        label = `${shortName} · ${vramStr}`;
+        modelIndicatorName.textContent = shortName;
       } else {
-        label = `${activeModels.length} models · ${usedVramGb.toFixed(1)}G${totalLabel}`;
+        modelIndicatorName.textContent = `${activeModels.length} models`;
       }
-      modelIndicatorText.textContent = label;
+      modelIndicatorVram.textContent = vramStr;
+      modelIndicatorVram.classList.remove('hidden');
       // Full names in title for hover tooltip
       modelIndicator.title = activeModels.map(m => m.name).join('\n');
     }
