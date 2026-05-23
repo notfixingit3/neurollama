@@ -16,10 +16,10 @@
   <!-- PDF.js library for client-side PDF parsing -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
 </head>
-<body class="bg-[#2e3440] text-[#e5e9f0] min-h-screen cyber-grid flex flex-col font-sans">
+<body class="bg-[#2e3440] text-[#e5e9f0] h-screen overflow-hidden cyber-grid flex flex-col font-sans">
 
   <!-- Header Banner -->
-  <header class="border-b border-[#4c566a] bg-[#242933]/90 backdrop-blur-md px-6 py-4 flex flex-wrap justify-between items-center z-20 sticky top-0 shadow-lg">
+  <header class="shrink-0 border-b border-[#4c566a] bg-[#242933]/90 backdrop-blur-md px-6 py-4 flex flex-wrap justify-between items-center z-20 shadow-lg">
     <div class="flex items-center gap-3">
       <button onclick="toggleNodeRegistry()" class="btn btn-ghost border border-[#4c566a]/60 text-[#88c0d0] hover:bg-[#3b4252] h-9 w-9 flex items-center justify-center rounded-lg p-0" title="Toggle Node Registry">
         <i id="toggle-registry-icon" class="fa-solid fa-chevron-left text-xs"></i>
@@ -54,18 +54,11 @@
           <span id="global-active-server-status-text" class="text-xs uppercase text-[#bf616a]">OFFLINE</span>
         </span>
       </div>
-      <div class="h-4 w-[1px] bg-[#4c566a]"></div>
-      <!-- Loaded model indicator -->
-      <div id="global-model-indicator" class="flex items-center gap-1.5 text-[#4c566a]" title="Models currently loaded in VRAM">
-        <i class="fa-solid fa-microchip text-[10px]"></i>
-        <span id="global-model-indicator-name" class="text-[10px] font-mono uppercase max-w-[100px] truncate inline-block align-middle">IDLE</span>
-        <span id="global-model-indicator-vram" class="text-[10px] font-mono uppercase hidden shrink-0"></span>
-      </div>
     </div>
   </header>
 
   <!-- Main Workspace Grid -->
-  <main class="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 p-6">
+  <main class="flex-1 overflow-y-auto grid grid-cols-1 lg:grid-cols-12 gap-6 p-6">
     
     <!-- Left Sidebar: Server connection list (3 cols) -->
     <section id="node-registry-sidebar" class="lg:col-span-3 flex flex-col transition-all duration-300">
@@ -1470,13 +1463,19 @@
   </main>
 
   <!-- Tech Status Bar Footer -->
-  <footer class="h-10 border-t border-[#4c566a]/50 bg-[#242933]/90 backdrop-blur-md px-6 py-2.5 flex flex-wrap justify-between items-center z-20 text-[10px] font-mono text-[#d8dee9]/60 shrink-0">
+  <footer class="shrink-0 border-t border-[#4c566a]/50 bg-[#242933]/90 backdrop-blur-md px-6 py-2.5 flex items-center justify-between z-20 text-[10px] font-mono text-[#d8dee9]/60">
     <div class="flex items-center gap-4">
       <span>© 2026 NEUROLLAMA // MIT License</span>
       <span class="hidden md:inline text-[#4c566a]">//</span>
       <span class="hidden md:inline flex items-center gap-1.5">
         SYSTEM: <span class="h-2 w-2 rounded-full bg-[#a3be8c]"></span> <span class="text-[#a3be8c] font-semibold">STABLE</span>
       </span>
+    </div>
+    <!-- Loaded model indicator -->
+    <div id="global-model-indicator" class="flex items-center gap-1.5 text-[#4c566a]" title="Models currently loaded in VRAM">
+      <i class="fa-solid fa-microchip text-[10px]"></i>
+      <span id="global-model-indicator-name" class="uppercase max-w-[160px] truncate inline-block align-middle">IDLE</span>
+      <span id="global-model-indicator-vram" class="uppercase hidden shrink-0"></span>
     </div>
     <div class="flex items-center gap-4">
       <a href="https://github.com/notfixingit3/neurollama" target="_blank" rel="noopener noreferrer" class="hover:text-[#88c0d0] transition-colors flex items-center gap-1.5">
