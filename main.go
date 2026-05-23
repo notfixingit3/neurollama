@@ -26,7 +26,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const appVersion = "v0.2.4"
+const appVersion = "v0.2.5"
 
 type ServerStatusResponse struct {
 	Server
@@ -186,6 +186,9 @@ func main() {
 		api.GET("/presets", getPresetsHandler)
 		api.POST("/presets", createPresetHandler)
 		api.DELETE("/presets/:id", deletePresetHandler)
+
+		// Node management
+		api.POST("/nodes/:id/refresh", refreshNodeHandler)
 
 		// Telemetry & Scheduler endpoints
 		api.GET("/settings", getSettingsHandler)
@@ -1458,6 +1461,47 @@ var (
 	nodeModelCache map[string]modelCacheEntry // keyed by server ID
 )
 
+// ── SSE Node-Status Broadcast Hub ────────────────────────────────────────────
+// When a node changes state the poller broadcasts to every connected client
+// via their individual buffered channel. The telemetry stream handler selects
+// on this channel alongside its normal ticker so clients get instant updates.
+
+var (
+	nodeStatusSubsMu sync.RWMutex
+	nodeStatusSubs   []chan ServerStatusResponse
+)
+
+func subscribeNodeStatus() chan ServerStatusResponse {
+	ch := make(chan ServerStatusResponse, 16)
+	nodeStatusSubsMu.Lock()
+	nodeStatusSubs = append(nodeStatusSubs, ch)
+	nodeStatusSubsMu.Unlock()
+	return ch
+}
+
+func unsubscribeNodeStatus(ch chan ServerStatusResponse) {
+	nodeStatusSubsMu.Lock()
+	defer nodeStatusSubsMu.Unlock()
+	for i, sub := range nodeStatusSubs {
+		if sub == ch {
+			nodeStatusSubs = append(nodeStatusSubs[:i], nodeStatusSubs[i+1:]...)
+			close(ch)
+			return
+		}
+	}
+}
+
+func broadcastNodeStatus(resp ServerStatusResponse) {
+	nodeStatusSubsMu.RLock()
+	defer nodeStatusSubsMu.RUnlock()
+	for _, ch := range nodeStatusSubs {
+		select {
+		case ch <- resp:
+		default: // buffer full — drop; client will catch up on next tick
+		}
+	}
+}
+
 func isRemoteURL(urlStr string) bool {
 	u := strings.ToLower(urlStr)
 	return !strings.Contains(u, "localhost") &&
@@ -1773,9 +1817,16 @@ func pollOneNodeStatus(srv Server) {
 		},
 		updatedAt: time.Now(),
 	}
+
 	nodeStatusMu.Lock()
+	old, hadOld := nodeStatusCache[srv.ID]
 	nodeStatusCache[srv.ID] = entry
 	nodeStatusMu.Unlock()
+
+	// Push SSE event on any meaningful state change (first poll or flip).
+	if !hadOld || old.response.Status != status || old.response.Version != version {
+		broadcastNodeStatus(entry.response)
+	}
 }
 
 func pollAllNodeModels() {
@@ -1836,22 +1887,67 @@ func telemetryStreamHandler(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
+	// Register for reactive node-status events.
+	nodeStatusCh := subscribeNodeStatus()
+	defer unsubscribeNodeStatus(nodeStatusCh)
+
 	c.Stream(func(w io.Writer) bool {
 		select {
 		case <-ctx.Done():
 			return false
+
 		case <-ticker.C:
 			telemetryMutex.Lock()
 			data, err := json.Marshal(currentTelemetry)
 			telemetryMutex.Unlock()
-
 			if err == nil {
 				c.SSEvent("telemetry", string(data))
-				return true
+			}
+
+		case resp, ok := <-nodeStatusCh:
+			if !ok {
+				return false
+			}
+			data, err := json.Marshal(resp)
+			if err == nil {
+				c.SSEvent("nodeStatus", string(data))
 			}
 		}
 		return true
 	})
+}
+
+// refreshNodeHandler drops a node's cached status and immediately re-polls,
+// returning the fresh result. Used by the manual refresh button (Phase 2).
+// POST /api/nodes/:id/refresh
+func refreshNodeHandler(c *gin.Context) {
+	id := c.Param("id")
+
+	var found *Server
+	for _, s := range GetServers() {
+		if s.ID == id {
+			cp := s
+			found = &cp
+			break
+		}
+	}
+	if found == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
+		return
+	}
+
+	// Drop stale entry then re-poll synchronously (3s timeout via NewPollerClient).
+	nodeStatusMu.Lock()
+	delete(nodeStatusCache, id)
+	nodeStatusMu.Unlock()
+
+	pollOneNodeStatus(*found)
+
+	nodeStatusMu.RLock()
+	entry := nodeStatusCache[id]
+	nodeStatusMu.RUnlock()
+
+	c.JSON(http.StatusOK, entry.response)
 }
 
 // Settings Handlers

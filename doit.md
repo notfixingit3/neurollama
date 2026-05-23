@@ -1,7 +1,7 @@
 # NEUROLLAMA — Scale & Performance Roadmap
 
 Tracking 16 items across 4 phases. Each phase ships as a patch version bump.
-Current version: **v0.2.4**
+Current version: **v0.2.5**
 
 > **Context:** With 10+ Ollama nodes and 100+ models per node, the current
 > request-time fetching model breaks down. Every page load hits all nodes live,
@@ -57,24 +57,24 @@ Foundation. Everything in Phase 2–4 builds on the cache established here.
 
 Removes browser polling for node status; everything becomes event-driven.
 
-- [ ] **7. SSE nodeStatus events** (`main.go`)
+- [x] **7. SSE nodeStatus events** (`main.go`)
   - Background status poller compares new result against cached result
   - On state change (online↔offline), push `nodeStatus` SSE event to all connected clients
   - Event payload: `{ id, status, latency, version }`
   - Reuse existing `/api/telemetry/stream` SSE connection — add new event type
 
-- [ ] **8. Manual node refresh endpoint** (`main.go`)
+- [x] **8. Manual node refresh endpoint** (`main.go`)
   - `POST /api/nodes/:id/refresh`
   - Drops the node's cache slot and triggers an immediate re-poll
   - Returns updated status once re-poll completes (or 3s timeout)
 
-- [ ] **9. Consume nodeStatus SSE events** (`static/js/app.js`)
+- [x] **9. Consume nodeStatus SSE events** (`static/js/app.js`)
   - Add `nodeStatus` event listener on the existing telemetry EventSource
   - Update status dot and latency for the relevant server card reactively
   - Remove the repeated `fetchServers()` calls scattered through CRUD handlers
     (add/edit/delete server currently re-fetch the full list)
 
-- [ ] **10. Stale-while-revalidate for model list** (`static/js/app.js`)
+- [x] **10. Stale-while-revalidate for model list** (`static/js/app.js`)
   - On Inventory tab activate: immediately render any list stored in `localStorage('model-cache')`
   - Fetch fresh list from `/api/models` (now fast — cache read) in background
   - Silently update the table and write new result to localStorage
@@ -137,7 +137,7 @@ Fleet-level visibility and cross-node operations.
 | Version | Phase | Description |
 |---------|-------|-------------|
 | v0.2.3  | —     | lint/gosec clean, --help/--version, healthcheck |
-| v0.2.4  | 1     | Current: server-side cache, lazy-load, optimistic render |
-| v0.2.5  | 2     | Real-time push: SSE node events, no browser polling |
+| v0.2.4  | 1     | server-side cache, lazy-load, optimistic render |
+| v0.2.5  | 2     | Current: SSE node events, no-refetch CRUD, stale-while-revalidate |
 | v0.2.6  | 3     | Scale UX: pagination, cross-node search API, refresh indicators |
 | v0.2.7  | 4     | Multi-node: fleet overview, cross-node model search UI |

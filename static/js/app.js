@@ -286,6 +286,18 @@ function switchWorkspace(workspace) {
   // Tab specific actions
   if (workspace === 'inventory') {
     if (!modelsLoaded) {
+      // Show any stale data from localStorage immediately while fresh data loads.
+      try {
+        const cachedRaw = localStorage.getItem('neurollama-model-cache');
+        if (cachedRaw) {
+          const { models: cachedModels } = JSON.parse(cachedRaw);
+          if (Array.isArray(cachedModels) && cachedModels.length > 0) {
+            models = cachedModels;
+            renderModels();
+          }
+        }
+      } catch { /* corrupt cache — ignore */ }
+      // Fetch fresh from server-side cache (instant) then update the table.
       fetchModels();
     }
   } else if (workspace === 'memory') {
@@ -641,22 +653,28 @@ async function selectServer(id) {
     const updatedSrv = await response.json();
     showToast(`Switched active node to ${updatedSrv.name}`, 'success');
 
-    modelsLoaded = false; // new server — invalidate lazy-load guard
-    await fetchServers();
-    
-    // Clear selections and inspected model details
+    // Update local state directly — no full re-fetch needed.
+    servers = servers.map(s => ({
+      ...s,
+      isActive: s.id === id,
+      ...(s.id === id
+        ? { status: updatedSrv.status, latency: updatedSrv.latency, version: updatedSrv.version }
+        : {}),
+    }));
+    renderServers();
+    updateActiveServerUI(servers.find(s => s.isActive));
+
+    modelsLoaded = false;
     selectedModels.clear();
     document.getElementById('select-all-checkbox').checked = false;
     updateBatchActionsUI();
     clearInspectedModel();
     resetChatSession();
-    
+
     if (updatedSrv.status === 'online') {
       await fetchModels();
       populateModelDropdowns();
-      if (activeWorkspace === 'memory') {
-        fetchActiveModels();
-      }
+      if (activeWorkspace === 'memory') fetchActiveModels();
     } else {
       renderModelsEmpty('Selected node is offline');
       populateModelDropdowns();
@@ -683,15 +701,20 @@ async function handleAddServer(event) {
       throw new Error(err.error || 'Failed to add server');
     }
 
+    const newSrv = await response.json();
     showToast(`Node '${name}' registered successfully`, 'success');
     closeAddServerModal();
     document.getElementById('add-server-form').reset();
     toggleAuthFields('add');
-    
-    modelsLoaded = false; // new server may become active
-    await fetchServers();
-    // If we only have 1 server now, it became active automatically. Fetch models.
-    if (servers.length === 1 && servers[0].status === 'online') {
+
+    // Push directly into local state — backend sets isActive when it is the first server.
+    const wasEmpty = servers.length === 0;
+    servers.push(newSrv);
+    renderServers();
+    updateActiveServerUI(servers.find(s => s.isActive));
+
+    modelsLoaded = false;
+    if (wasEmpty && newSrv.status === 'online') {
       await fetchModels();
       populateModelDropdowns();
     }
@@ -718,13 +741,19 @@ async function handleEditServer(event) {
       throw new Error(err.error || 'Failed to edit server');
     }
 
+    const updatedSrv = await response.json();
     showToast(`Node '${name}' updated successfully`, 'success');
     closeEditServerModal();
-    
-    modelsLoaded = false; // edited node may be the active one — reload models
-    await fetchServers();
+
+    // Update local state directly — no full re-fetch needed.
+    const idx = servers.findIndex(s => s.id === id);
+    if (idx !== -1) servers[idx] = { ...servers[idx], ...updatedSrv };
+    renderServers();
+    updateActiveServerUI(servers.find(s => s.isActive));
+
     const active = servers.find(s => s.isActive);
     if (active && active.id === id) {
+      modelsLoaded = false;
       if (active.status === 'online') {
         await fetchModels();
         populateModelDropdowns();
@@ -750,11 +779,17 @@ async function deleteServer(id) {
 
     showToast(`Node '${srv.name}' removed`, 'warning');
     const wasActive = srv.isActive;
-    
-    if (wasActive) modelsLoaded = false; // active server removed — reload for new active
-    await fetchServers();
+
+    // Mirror backend logic: remove from local state, auto-promote servers[0] if active was deleted.
+    servers = servers.filter(s => s.id !== id);
+    if (wasActive && servers.length > 0) {
+      servers[0] = { ...servers[0], isActive: true };
+    }
+    renderServers();
+    updateActiveServerUI(servers.find(s => s.isActive));
 
     if (wasActive) {
+      modelsLoaded = false;
       const newActive = servers.find(s => s.isActive);
       if (newActive && newActive.status === 'online') {
         await fetchModels();
@@ -896,6 +931,10 @@ async function fetchModels() {
     models = data.models || [];
     modelsLoaded = true;
     renderModels();
+    // Persist for stale-while-revalidate on next page load.
+    try {
+      localStorage.setItem('neurollama-model-cache', JSON.stringify({ models, ts: Date.now() }));
+    } catch { /* storage quota exceeded — skip */ }
   } catch (error) {
     console.error(error);
     renderModelsEmpty(error.message);
@@ -4486,6 +4525,30 @@ let telemetryHistory = [];
 let loadedModels = [];           // module-level mirror of active_models for footer actions
 const MAX_TELEMETRY_POINTS = 50;
 
+// handleNodeStatusUpdate: called when the backend pushes a nodeStatus SSE event.
+// Updates the server card status dot, latency, and version in-place without
+// re-fetching the full server list.
+function handleNodeStatusUpdate(updated) {
+  const idx = servers.findIndex(s => s.id === updated.id);
+  if (idx === -1) return; // unknown node — ignore
+
+  const prev = servers[idx];
+  servers[idx] = {
+    ...prev,
+    status:  updated.status,
+    latency: updated.latency,
+    version: updated.version,
+  };
+
+  // Re-render the server list to reflect the new status dot / latency.
+  renderServers();
+
+  // If this is the active server, also refresh the footer status indicator.
+  if (servers[idx].isActive) {
+    updateActiveServerUI(servers[idx]);
+  }
+}
+
 function startTelemetrySSE() {
   if (telemetryEventSource) {
     telemetryEventSource.close();
@@ -4499,6 +4562,16 @@ function startTelemetrySSE() {
       handleTelemetryData(data);
     } catch (err) {
       console.error('Failed to parse telemetry data', err);
+    }
+  });
+
+  // Reactive node-status updates pushed by the backend poller on state changes.
+  telemetryEventSource.addEventListener('nodeStatus', (e) => {
+    try {
+      const updated = JSON.parse(e.data);
+      handleNodeStatusUpdate(updated);
+    } catch (err) {
+      console.error('Failed to parse nodeStatus event', err);
     }
   });
 
