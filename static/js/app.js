@@ -4499,9 +4499,9 @@ function handleTelemetryData(data) {
       const urlObj = new URL(data.ollama_node.url);
       host = urlObj.host;
     } catch (e) {}
-    nodeBadge.textContent = isRemote ? `REMOTE NODE: ${host}` : "LOCAL NODE";
-    nodeBadge.className = isRemote 
-      ? 'badge badge-xs py-2 px-2 font-mono font-bold bg-[#81a1c1] text-[#2e3440] border-none shadow-sm shadow-[#81a1c1]/20' 
+    nodeBadge.textContent = isRemote ? 'REMOTE' : 'LOCAL';
+    nodeBadge.className = isRemote
+      ? 'badge badge-xs py-2 px-2 font-mono font-bold bg-[#81a1c1] text-[#2e3440] border-none shadow-sm shadow-[#81a1c1]/20'
       : 'badge badge-xs py-2 px-2 font-mono font-bold bg-[#a3be8c] text-[#2e3440] border-none shadow-sm shadow-[#a3be8c]/20';
   }
 
