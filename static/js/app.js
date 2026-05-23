@@ -4792,6 +4792,37 @@ async function triggerManualCompression() {
 // --- INFERENCE BENCHMARKER ---
 
 let benchmarkEventSource = null;
+let currentBenchmarkType = 'standard';
+let currentLbFilter = 'all';
+
+const BENCH_TYPES = ['standard', 'vision', 'embedding', 'longctx', 'reasoning'];
+const BENCH_TYPE_HINTS = {
+  standard:  'Any LLM model — inference speed test',
+  vision:    'Requires multimodal model (e.g. llava, gemma3, minicpm-v)',
+  embedding: 'Requires embedding model (e.g. nomic-embed-text, mxbai-embed)',
+  longctx:   'LLM with large context window recommended (≥8K)',
+  reasoning: 'Any LLM — factual accuracy & math test',
+};
+
+function setBenchmarkType(type) {
+  currentBenchmarkType = type;
+  BENCH_TYPES.forEach(t => {
+    const btn = document.getElementById(`bench-type-${t}`);
+    if (btn) btn.classList.toggle('bench-type-btn-active', t === type);
+  });
+  const hint = document.getElementById('benchmark-type-hint');
+  if (hint) hint.textContent = BENCH_TYPE_HINTS[type] || '';
+}
+
+function setLbFilter(filter) {
+  currentLbFilter = filter;
+  const filters = ['all', ...BENCH_TYPES];
+  filters.forEach(f => {
+    const btn = document.getElementById(`lb-filter-${f}`);
+    if (btn) btn.classList.toggle('bench-type-btn-active', f === filter);
+  });
+  fetchBenchmarks();
+}
 
 function setBenchmarkRunning(isRunning) {
   const runBtn = document.getElementById('run-benchmark-btn');
@@ -4823,14 +4854,14 @@ function startBenchmark() {
   
   setBenchmarkRunning(true);
   if (logContainer) {
-    logContainer.innerHTML = `<div class="text-[#88c0d0] uppercase animate-pulse">Initializing sequential benchmark suite for ${model}...</div>`;
+    logContainer.innerHTML = `<div class="text-[#88c0d0] uppercase animate-pulse">Initializing ${currentBenchmarkType.toUpperCase()} benchmark for ${model}...</div>`;
   }
-  
+
   if (benchmarkEventSource) {
     benchmarkEventSource.close();
   }
-  
-  const url = `/api/benchmarks/run?model=${encodeURIComponent(model)}`;
+
+  const url = `/api/benchmarks/run?model=${encodeURIComponent(model)}&type=${encodeURIComponent(currentBenchmarkType)}`;
   benchmarkEventSource = new EventSource(url);
   
   benchmarkEventSource.addEventListener('status', (e) => {
@@ -4864,7 +4895,20 @@ function startBenchmark() {
       if (logContainer) {
         const div = document.createElement('div');
         div.className = 'text-[#a3be8c] font-bold mt-2 border-t border-[#a3be8c]/20 pt-1';
-        div.textContent = `[COMPLETED] Leaderboard record saved: TTFT = ${res.ttft_ms.toFixed(1)}ms, TPS = ${res.tps.toFixed(1)}`;
+        let extra = {};
+        try { extra = JSON.parse(res.extra_json || '{}'); } catch (_) {}
+        const bType = res.benchmark_type || 'standard';
+        let summary = '';
+        if (bType === 'embedding') {
+          summary = `Chunks/sec = ${(extra.chunks_per_sec || 0).toFixed(1)}`;
+        } else if (bType === 'reasoning') {
+          summary = `Accuracy = ${(extra.accuracy_pct || 0).toFixed(0)}%`;
+        } else if (bType === 'longctx') {
+          summary = `TPS = ${res.tps.toFixed(1)}, Degradation = ${(extra.degradation_pct || 0).toFixed(1)}%`;
+        } else {
+          summary = `TTFT = ${res.ttft_ms.toFixed(1)}ms, TPS = ${res.tps.toFixed(1)}`;
+        }
+        div.textContent = `[COMPLETED] ${bType.toUpperCase()} — ${summary}`;
         logContainer.appendChild(div);
         logContainer.scrollTop = logContainer.scrollHeight;
       }
@@ -4907,41 +4951,57 @@ function cancelBenchmark() {
 async function fetchBenchmarks() {
   const tbody = document.getElementById('benchmark-leaderboard-body');
   if (!tbody) return;
-  
+
   try {
     const response = await fetch('/api/benchmarks');
     if (!response.ok) throw new Error('Failed to fetch benchmark leaderboard');
     const list = await response.json();
-    
-    if (!list || list.length === 0) {
+
+    // Client-side filter by selected type
+    const filtered = (!list || currentLbFilter === 'all')
+      ? list
+      : list.filter(b => (b.benchmark_type || 'standard') === currentLbFilter);
+
+    if (!filtered || filtered.length === 0) {
+      const label = currentLbFilter === 'all' ? '' : ` for type "${currentLbFilter}"`;
       tbody.innerHTML = `
         <tr>
           <td colspan="7" class="text-center py-12 text-[#4c566a] italic">
-            No benchmarking runs recorded. Select a model on the left to begin.
+            No benchmark runs recorded${label}. Select a model on the left to begin.
           </td>
         </tr>
       `;
       return;
     }
 
-    tbody.innerHTML = list.map(b => {
-      const score = b.reasoning_score || 'F';
-      let scoreBadge = '';
-      if (score === 'S') {
-        scoreBadge = 'bg-[#a3be8c]/25 text-[#a3be8c] border-[#a3be8c]';
-      } else if (score === 'A' || score === 'B') {
-        scoreBadge = 'bg-[#88c0d0]/25 text-[#88c0d0] border-[#88c0d0]';
-      } else if (score === 'C') {
-        scoreBadge = 'bg-[#ebcb8b]/25 text-[#ebcb8b] border-[#ebcb8b]';
-      } else if (score === 'F') {
-        scoreBadge = 'bg-[#bf616a]/25 text-[#bf616a] border-[#bf616a]';
-      } else {
-        scoreBadge = 'bg-[#4c566a]/25 text-[#d8dee9] border-[#4c566a]';
-      }
+    // Type badge colour map (Nord palette)
+    const TYPE_BADGE = {
+      standard:  { label: 'STD', cls: 'text-[#88c0d0] border-[#88c0d0]' },
+      vision:    { label: 'VIS', cls: 'text-[#b48ead] border-[#b48ead]' },
+      embedding: { label: 'EMB', cls: 'text-[#ebcb8b] border-[#ebcb8b]' },
+      longctx:   { label: 'CTX', cls: 'text-[#a3be8c] border-[#a3be8c]' },
+      reasoning: { label: 'RSN', cls: 'text-[#d08770] border-[#d08770]' },
+    };
 
-      const noteHtml = b.notes
-        ? `<div class="text-[10px] text-[#4c566a] mt-0.5 max-w-[200px] truncate" title="${escapeHTML(b.notes)}">${escapeHTML(b.notes)}</div>`
-        : '';
+    tbody.innerHTML = filtered.map(b => {
+      const bType = b.benchmark_type || 'standard';
+      const score = b.reasoning_score || 'F';
+
+      // Type badge
+      const tb = TYPE_BADGE[bType] || { label: bType.toUpperCase().slice(0, 3), cls: 'text-[#4c566a] border-[#4c566a]' };
+      const typeBadgeHtml = `<span class="border px-1.5 rounded text-[8px] font-bold font-mono ${tb.cls}">${tb.label}</span>`;
+
+      // Speed score badge
+      let scoreBadge;
+      if      (score === 'S') scoreBadge = 'bg-[#a3be8c]/25 text-[#a3be8c] border-[#a3be8c]';
+      else if (score === 'A' || score === 'B') scoreBadge = 'bg-[#88c0d0]/25 text-[#88c0d0] border-[#88c0d0]';
+      else if (score === 'C') scoreBadge = 'bg-[#ebcb8b]/25 text-[#ebcb8b] border-[#ebcb8b]';
+      else if (score === 'F') scoreBadge = 'bg-[#bf616a]/25 text-[#bf616a] border-[#bf616a]';
+      else                   scoreBadge = 'bg-[#4c566a]/25 text-[#d8dee9] border-[#4c566a]';
+
+      // Parse extra_json
+      let extra = {};
+      try { extra = JSON.parse(b.extra_json || '{}'); } catch (_) {}
 
       // Server display — prefer name, fall back to hostname from URL
       let serverDisplay = b.server_name || '';
@@ -4949,30 +5009,58 @@ async function fetchBenchmarks() {
         try { serverDisplay = new URL(b.server_url).hostname; } catch (_) { serverDisplay = b.server_url; }
       }
 
+      // Type-aware metric cells: TTFT | Metric | Latency
+      let ttftCell, metricCell, latCell;
+      if (bType === 'embedding') {
+        const cps = extra.chunks_per_sec != null ? extra.chunks_per_sec.toFixed(1) : '—';
+        ttftCell   = `<td class="text-center text-[#4c566a]">—</td>`;
+        metricCell = `<td class="text-center font-bold text-[#ebcb8b]">${cps} <span class="text-[9px] text-[#4c566a] font-normal">ch/s</span></td>`;
+        latCell    = `<td class="text-center text-[#4c566a]">—</td>`;
+      } else if (bType === 'reasoning') {
+        const acc = extra.accuracy_pct != null ? extra.accuracy_pct.toFixed(0) + '%' : '—';
+        ttftCell   = `<td class="text-center text-[#4c566a]">—</td>`;
+        metricCell = `<td class="text-center font-bold text-[#a3be8c]">${acc} <span class="text-[9px] text-[#4c566a] font-normal">acc</span></td>`;
+        latCell    = `<td class="text-center">${b.avg_latency_ms.toFixed(0)} ms</td>`;
+      } else if (bType === 'longctx') {
+        const deg = extra.degradation_pct != null ? extra.degradation_pct.toFixed(1) + '%' : '';
+        const degHtml = deg ? ` <span class="text-[9px] text-[#bf616a] font-normal">↓${deg}</span>` : '';
+        ttftCell   = `<td class="text-center">${b.ttft_ms.toFixed(1)} ms</td>`;
+        metricCell = `<td class="text-center font-bold text-[#88c0d0]">${b.tps.toFixed(1)}${degHtml}</td>`;
+        latCell    = `<td class="text-center">${b.avg_latency_ms.toFixed(0)} ms</td>`;
+      } else {
+        // standard / vision
+        ttftCell   = `<td class="text-center">${b.ttft_ms.toFixed(1)} ms</td>`;
+        metricCell = `<td class="text-center font-bold text-[#88c0d0]">${b.tps.toFixed(1)} <span class="text-[9px] text-[#4c566a] font-normal">TPS</span></td>`;
+        latCell    = `<td class="text-center">${b.avg_latency_ms.toFixed(0)} ms</td>`;
+      }
+
+      const noteHtml = b.notes
+        ? `<div class="text-[10px] text-[#4c566a] mt-0.5 max-w-[200px] truncate" title="${escapeHTML(b.notes)}">${escapeHTML(b.notes)}</div>`
+        : '';
+
       return `
         <tr class="hover:bg-[#3b4252]/20 border-b border-[#4c566a]/20 transition-colors">
           <td class="py-3 text-left font-mono">
-            <div class="font-bold text-[#e5e9f0]">${escapeHTML(b.model_name)}</div>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              ${typeBadgeHtml}
+              <span class="font-bold text-[#e5e9f0]">${escapeHTML(b.model_name)}</span>
+            </div>
             ${noteHtml}
           </td>
           <td class="py-3 text-left font-mono text-[11px]">
             <div class="text-[#88c0d0] font-bold">${escapeHTML(serverDisplay || '—')}</div>
-            <div class="text-[9px] text-[#4c566a] truncate max-w-[120px]" title="${escapeHTML(b.server_url)}">${escapeHTML(b.server_url || '')}</div>
+            <div class="text-[9px] text-[#4c566a] truncate max-w-[120px]" title="${escapeHTML(b.server_url || '')}">${escapeHTML(b.server_url || '')}</div>
           </td>
-          <td class="text-center">${b.ttft_ms.toFixed(1)} ms</td>
-          <td class="text-center font-bold text-[#88c0d0]">${b.tps.toFixed(1)}</td>
-          <td class="text-center">${b.avg_latency_ms.toFixed(0)} ms</td>
+          ${ttftCell}
+          ${metricCell}
+          ${latCell}
           <td class="text-center">
-            <span class="border px-2 py-0.5 rounded text-[9px] font-bold ${scoreBadge}">
-              ${escapeHTML(score)}
-            </span>
+            <span class="border px-2 py-0.5 rounded text-[9px] font-bold ${scoreBadge}">${escapeHTML(score)}</span>
           </td>
           <td class="text-right">
             <div class="flex gap-1 justify-end">
-              <button onclick="openScoreModal(${b.id}, '${escapeHTML(score)}', '${escapeHTML(b.notes)}')"
-                      class="btn btn-xs btn-neutral border-[#4c566a] font-tech text-[9px] px-2">
-                RATE
-              </button>
+              <button onclick="openScoreModal(${b.id}, '${escapeHTML(score)}', '${escapeHTML(b.notes || '')}')"
+                      class="btn btn-xs btn-neutral border-[#4c566a] font-tech text-[9px] px-2">RATE</button>
               <button onclick="deleteBenchmark(${b.id})" class="btn btn-xs btn-ghost text-[#bf616a] hover:bg-[#bf616a]/15 p-1">
                 <i class="fa-solid fa-trash-can text-[10px]"></i>
               </button>

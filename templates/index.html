@@ -1118,6 +1118,31 @@
                   <i class="fa-solid fa-vial mr-2"></i>Inference Benchmarker
                 </h2>
                 <div class="space-y-4 flex flex-col">
+                  <!-- Benchmark Type Selector -->
+                  <div class="form-control w-full">
+                    <label class="label py-1">
+                      <span class="label-text text-[11px] font-mono text-[#4c566a] uppercase">Benchmark Type</span>
+                    </label>
+                    <div class="flex flex-wrap gap-1.5">
+                      <button class="bench-type-btn bench-type-btn-active" id="bench-type-standard" onclick="setBenchmarkType('standard')">
+                        <i class="fa-solid fa-gauge-high mr-1"></i>Standard
+                      </button>
+                      <button class="bench-type-btn" id="bench-type-vision" onclick="setBenchmarkType('vision')">
+                        <i class="fa-solid fa-eye mr-1"></i>Vision
+                      </button>
+                      <button class="bench-type-btn" id="bench-type-embedding" onclick="setBenchmarkType('embedding')">
+                        <i class="fa-solid fa-layer-group mr-1"></i>Embed
+                      </button>
+                      <button class="bench-type-btn" id="bench-type-longctx" onclick="setBenchmarkType('longctx')">
+                        <i class="fa-solid fa-scroll mr-1"></i>Long-Ctx
+                      </button>
+                      <button class="bench-type-btn" id="bench-type-reasoning" onclick="setBenchmarkType('reasoning')">
+                        <i class="fa-solid fa-brain mr-1"></i>Reason
+                      </button>
+                    </div>
+                    <span id="benchmark-type-hint" class="text-[9px] font-mono text-[#4c566a] mt-1.5">Any LLM model — inference speed test</span>
+                  </div>
+
                   <div class="form-control w-full">
                     <label class="label py-1">
                       <span class="label-text text-[11px] font-mono text-[#4c566a] uppercase">Select Model to Benchmark</span>
@@ -1151,19 +1176,31 @@
             <!-- Right side: Leaderboard / Results Table (9 cols) -->
             <div class="lg:col-span-9 flex flex-col">
               <div class="tech-panel tech-header-accent rounded-xl flex flex-col p-4">
-                <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] mb-4 pb-2 border-b border-[#4c566a]/40">
-                  <i class="fa-solid fa-trophy mr-2"></i>Inference Speed Leaderboard
-                </h2>
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 pb-2 border-b border-[#4c566a]/40">
+                  <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
+                    <i class="fa-solid fa-trophy mr-2"></i>Benchmark Leaderboard
+                  </h2>
+                  <!-- Leaderboard type filter -->
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="text-[9px] font-mono text-[#4c566a] uppercase mr-0.5">Filter:</span>
+                    <button class="bench-type-btn bench-type-btn-active" id="lb-filter-all" onclick="setLbFilter('all')">ALL</button>
+                    <button class="bench-type-btn" id="lb-filter-standard" onclick="setLbFilter('standard')"><i class="fa-solid fa-gauge-high mr-1"></i>Std</button>
+                    <button class="bench-type-btn" id="lb-filter-vision" onclick="setLbFilter('vision')"><i class="fa-solid fa-eye mr-1"></i>Vis</button>
+                    <button class="bench-type-btn" id="lb-filter-embedding" onclick="setLbFilter('embedding')"><i class="fa-solid fa-layer-group mr-1"></i>Emb</button>
+                    <button class="bench-type-btn" id="lb-filter-longctx" onclick="setLbFilter('longctx')"><i class="fa-solid fa-scroll mr-1"></i>Ctx</button>
+                    <button class="bench-type-btn" id="lb-filter-reasoning" onclick="setLbFilter('reasoning')"><i class="fa-solid fa-brain mr-1"></i>Rsn</button>
+                  </div>
+                </div>
                 <div class="overflow-x-auto">
                   <table class="table table-xs w-full text-xs font-mono text-[#d8dee9] border-collapse">
                     <thead>
                       <tr class="text-[#88c0d0] border-b border-[#4c566a]/40">
                         <th class="bg-transparent text-left py-2 font-tech uppercase">Model</th>
                         <th class="bg-transparent text-left py-2 font-tech uppercase">Server</th>
-                        <th class="bg-transparent text-center py-2 font-tech uppercase">TTFT (Avg)</th>
-                        <th class="bg-transparent text-center py-2 font-tech uppercase">TPS (Avg)</th>
-                        <th class="bg-transparent text-center py-2 font-tech uppercase">Avg Latency</th>
-                        <th class="bg-transparent text-center py-2 font-tech uppercase">Speed</th>
+                        <th class="bg-transparent text-center py-2 font-tech uppercase">TTFT</th>
+                        <th class="bg-transparent text-center py-2 font-tech uppercase">Metric</th>
+                        <th class="bg-transparent text-center py-2 font-tech uppercase">Latency</th>
+                        <th class="bg-transparent text-center py-2 font-tech uppercase">Score</th>
                         <th class="bg-transparent text-right py-2 font-tech uppercase">Actions</th>
                       </tr>
                     </thead>

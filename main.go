@@ -4,8 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"log"
 	"math"
@@ -1999,6 +2003,70 @@ func getBenchmarksHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, benchmarks)
 }
 
+// --- Vision test image (generated once at startup) ---
+
+var visionTestImageBase64 string
+
+func init() {
+	visionTestImageBase64 = generateVisionTestImage()
+}
+
+// generateVisionTestImage builds a 256×256 four-quadrant colour card with a
+// white circle in the centre — enough visual complexity for any vision model.
+func generateVisionTestImage() string {
+	const size = 256
+	half := size / 2
+	img := image.NewRGBA(image.Rect(0, 0, size, size))
+	quads := [4]color.RGBA{
+		{191, 97, 106, 255},  // top-left:     Nord aurora red
+		{163, 190, 140, 255}, // top-right:    Nord aurora green
+		{136, 192, 208, 255}, // bottom-left:  Nord frost blue
+		{235, 203, 139, 255}, // bottom-right: Nord aurora yellow
+	}
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			q := 0
+			if x >= half {
+				q++
+			}
+			if y >= half {
+				q += 2
+			}
+			img.SetRGBA(x, y, quads[q])
+		}
+	}
+	// White circle in centre
+	r2 := (size / 6) * (size / 6)
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			dx, dy := x-half, y-half
+			if dx*dx+dy*dy <= r2 {
+				img.SetRGBA(x, y, color.RGBA{255, 255, 255, 255})
+			}
+		}
+	}
+	var buf bytes.Buffer
+	_ = png.Encode(&buf, img)
+	return base64.StdEncoding.EncodeToString(buf.Bytes())
+}
+
+// --- Reasoning Q&A pairs ---
+
+var reasoningQuestions = []struct{ prompt, answer string }{
+	{"What is 17 multiplied by 23? Reply with only the number, nothing else.", "391"},
+	{"What planet is fourth from the Sun? Reply with only the planet name.", "mars"},
+	{"How many sides does a regular hexagon have? Reply with only the number.", "6"},
+	{"What is the chemical symbol for gold? Reply with only the two letters.", "au"},
+	{"Is 7/8 greater than 5/6? Reply with only yes or no.", "yes"},
+}
+
+// --- Long-context filler ---
+
+// ctxFillerUnit is ~133 tokens per repetition (100 words).
+const ctxFillerUnit = "Artificial intelligence is transforming industries through machine learning, neural networks, and natural language processing systems. Researchers develop new architectures like transformers that process sequential data using attention mechanisms, enabling models to capture long-range dependencies in text. Deep learning models trained on massive datasets can now perform tasks previously thought to require human intelligence, including translation, code generation, and complex reasoning. The rapid advancement of computational resources, particularly GPUs and specialised accelerators, has made training billion-parameter models feasible. Scaling laws suggest that model capability improves predictably with increases in parameters, training data, and compute budget. "
+
+// --- Benchmark runners ---
+
 func runBenchmarkForPrompt(ctx context.Context, client *OllamaClient, model string, prompt string, logFunc func(string)) (float64, float64, float64, error) {
 	req := GenerateRequest{
 		Model:  model,
@@ -2059,12 +2127,341 @@ func runBenchmarkForPrompt(ctx context.Context, client *OllamaClient, model stri
 	return ttftMs, tps, avgLatency, nil
 }
 
+// runVisionBenchmarkPrompt sends a chat message with an embedded image and measures timing.
+func runVisionBenchmarkPrompt(ctx context.Context, client *OllamaClient, model, imageB64, prompt string) (float64, float64, float64, error) {
+	req := ChatRequest{
+		Model:  model,
+		Stream: true,
+		Options: map[string]interface{}{
+			"temperature": 0.0,
+		},
+		Messages: []ChatMessage{
+			{Role: "user", Content: prompt, Images: []string{imageB64}},
+		},
+	}
+
+	start := time.Now()
+	stream, err := client.StreamChat(ctx, req)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	defer stream.Close()
+
+	var firstTokenTime time.Duration
+	var firstTokenReceived bool
+	var tokenCount int
+
+	scanner := newStreamScanner(stream)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var chunk struct {
+			Message struct{ Content string } `json:"message"`
+			Done    bool                     `json:"done"`
+		}
+		if err := json.Unmarshal(line, &chunk); err == nil {
+			if !firstTokenReceived && chunk.Message.Content != "" {
+				firstTokenTime = time.Since(start)
+				firstTokenReceived = true
+			}
+			if chunk.Message.Content != "" {
+				tokenCount++
+			}
+		}
+	}
+
+	totalDuration := time.Since(start)
+	if !firstTokenReceived {
+		return 0, 0, 0, fmt.Errorf("no tokens received — model may not support vision")
+	}
+	genSec := totalDuration.Seconds() - firstTokenTime.Seconds()
+	if genSec <= 0 {
+		genSec = 0.001
+	}
+	return float64(firstTokenTime.Milliseconds()), float64(tokenCount) / genSec, float64(totalDuration.Milliseconds()), nil
+}
+
+// runEmbeddingBenchmarkRun measures embedding throughput: chunks/sec and tokens/sec.
+func runEmbeddingBenchmarkRun(ctx context.Context, client *OllamaClient, model string, logFunc func(string)) (chunksPerSec float64, extraJSON string, err error) {
+	chunks := []string{
+		"The transformer architecture uses self-attention to weigh the importance of different tokens.",
+		"Gradient descent optimises neural network weights by iteratively moving in the loss gradient direction.",
+		"Tokenisation splits raw text into sub-word units that a language model can process.",
+		"Reinforcement learning from human feedback aligns model outputs with human preferences.",
+		"Embedding vectors encode semantic meaning in high-dimensional continuous space.",
+		"Mixture-of-experts models route tokens to specialised sub-networks for efficiency.",
+		"Quantisation reduces model weight precision to decrease memory footprint and increase speed.",
+		"Flash attention rewrites the attention kernel to reduce memory bandwidth usage.",
+		"Chain-of-thought prompting encourages models to reason step-by-step before answering.",
+		"Retrieval-augmented generation grounds model responses in external knowledge sources.",
+		"The attention mechanism computes query, key, and value projections from input embeddings.",
+		"Fine-tuning adapts a pretrained model to a specific downstream task with labelled data.",
+		"Low-rank adaptation inserts small trainable matrices into frozen model layers.",
+		"Speculative decoding uses a smaller draft model to accelerate large model generation.",
+		"Context length determines how many tokens a model can attend to in one inference pass.",
+		"Perplexity measures how well a probability model predicts a sample of text.",
+		"Beam search explores multiple candidate token sequences to find high-likelihood outputs.",
+		"Temperature scaling adjusts the sharpness of the model output probability distribution.",
+		"GGUF is a binary format for storing quantised model weights for CPU and GPU inference.",
+		"Multi-head attention runs several attention operations in parallel then concatenates results.",
+	}
+
+	logFunc(fmt.Sprintf("Embedding %d chunks to measure throughput...", len(chunks)))
+	start := time.Now()
+	embeddings, embedErr := client.GetEmbeddings(model, chunks)
+	elapsed := time.Since(start)
+
+	if embedErr != nil {
+		return 0, "", embedErr
+	}
+	if len(embeddings) == 0 {
+		return 0, "", fmt.Errorf("no embeddings returned")
+	}
+
+	elapsedSec := elapsed.Seconds()
+	if elapsedSec <= 0 {
+		elapsedSec = 0.001
+	}
+	cps := float64(len(embeddings)) / elapsedSec
+
+	// Rough token estimate: avg ~15 tokens per chunk
+	tokensSec := float64(len(chunks)*15) / elapsedSec
+
+	logFunc(fmt.Sprintf("Done: %d chunks in %.2fs → %.1f chunks/s, ~%.0f tokens/s, dim=%d",
+		len(embeddings), elapsedSec, cps, tokensSec, len(embeddings[0])))
+
+	extra, _ := json.Marshal(map[string]interface{}{
+		"chunks":        len(embeddings),
+		"elapsed_ms":    elapsed.Milliseconds(),
+		"chunks_per_sec": math.Round(cps*10) / 10,
+		"tokens_per_sec": math.Round(tokensSec),
+		"dimensions":    len(embeddings[0]),
+	})
+	return cps, string(extra), nil
+}
+
+// runLongCtxBenchmarkRun tests TPS at three increasing context sizes.
+func runLongCtxBenchmarkRun(ctx context.Context, client *OllamaClient, model string, logFunc func(string)) (avgTps, ttft, latency float64, extraJSON string, err error) {
+	type ctxLevel struct {
+		label   string
+		repeats int
+		numCtx  int
+	}
+	levels := []ctxLevel{
+		{"1K", 8, 2048},
+		{"4K", 30, 4096},
+		{"8K", 60, 8192},
+	}
+
+	prompt := "After reading the following passage, state in one sentence what field of technology it primarily discusses.\n\n"
+
+	results := map[string]float64{}
+	var totalTps, totalTtft, totalLatency float64
+	runs := 0
+
+	for _, lvl := range levels {
+		filler := strings.Repeat(ctxFillerUnit, lvl.repeats)
+		fullPrompt := prompt + filler
+
+		logFunc(fmt.Sprintf("Running ~%s context window test (num_ctx=%d)...", lvl.label, lvl.numCtx))
+
+		req := GenerateRequest{
+			Model:  model,
+			Prompt: fullPrompt,
+			Stream: true,
+			Options: map[string]interface{}{
+				"temperature": 0.0,
+				"num_ctx":     lvl.numCtx,
+				"num_predict": 80,
+			},
+		}
+
+		start := time.Now()
+		stream, streamErr := client.StreamGenerate(ctx, req)
+		if streamErr != nil {
+			logFunc(fmt.Sprintf("  %s context failed: %v", lvl.label, streamErr))
+			results[lvl.label] = 0
+			continue
+		}
+
+		var firstTok time.Duration
+		var gotFirst bool
+		var toks int
+
+		scanner := newStreamScanner(stream)
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			if len(line) == 0 {
+				continue
+			}
+			var chunk struct {
+				Response string `json:"response"`
+				Done     bool   `json:"done"`
+			}
+			if json.Unmarshal(line, &chunk) == nil {
+				if !gotFirst && chunk.Response != "" {
+					firstTok = time.Since(start)
+					gotFirst = true
+				}
+				if chunk.Response != "" {
+					toks++
+				}
+			}
+		}
+		stream.Close()
+
+		total := time.Since(start)
+		if !gotFirst || toks == 0 {
+			logFunc(fmt.Sprintf("  %s context: no tokens received", lvl.label))
+			results[lvl.label] = 0
+			continue
+		}
+
+		genSec := total.Seconds() - firstTok.Seconds()
+		if genSec <= 0 {
+			genSec = 0.001
+		}
+		tps := float64(toks) / genSec
+		results[lvl.label] = math.Round(tps*10) / 10
+		logFunc(fmt.Sprintf("  %s context → TTFT: %.0fms, TPS: %.1f", lvl.label, float64(firstTok.Milliseconds()), tps))
+
+		totalTps += tps
+		totalTtft += float64(firstTok.Milliseconds())
+		totalLatency += float64(total.Milliseconds())
+		runs++
+	}
+
+	if runs == 0 {
+		return 0, 0, 0, "", fmt.Errorf("all context-size runs failed")
+	}
+
+	// Degradation: how much TPS dropped from 1K to 8K
+	deg := 0.0
+	if results["1K"] > 0 && results["8K"] > 0 {
+		deg = math.Round((1-(results["8K"]/results["1K"]))*1000) / 10
+	}
+
+	extra, _ := json.Marshal(map[string]interface{}{
+		"tps_1k":          results["1K"],
+		"tps_4k":          results["4K"],
+		"tps_8k":          results["8K"],
+		"degradation_pct": deg,
+	})
+
+	return totalTps / float64(runs), totalTtft / float64(runs), totalLatency / float64(runs), string(extra), nil
+}
+
+// runReasoningBenchmarkRun asks 5 factual questions with known single-token answers.
+func runReasoningBenchmarkRun(ctx context.Context, client *OllamaClient, model string, logFunc func(string)) (correct, total int, avgTtft, avgTps, avgLatency float64, extraJSON string, err error) {
+	type result struct {
+		Q       string  `json:"q"`
+		Want    string  `json:"want"`
+		Got     string  `json:"got"`
+		Correct bool    `json:"correct"`
+		TtftMs  float64 `json:"ttft_ms"`
+	}
+	var results []result
+	var sumTtft, sumTps, sumLatency float64
+
+	for i, qa := range reasoningQuestions {
+		logFunc(fmt.Sprintf("Q%d/5: %s", i+1, qa.prompt))
+
+		req := GenerateRequest{
+			Model:  model,
+			Prompt: qa.prompt,
+			Stream: true,
+			Options: map[string]interface{}{
+				"temperature": 0.0,
+				"num_predict": 20,
+			},
+		}
+
+		start := time.Now()
+		stream, streamErr := client.StreamGenerate(ctx, req)
+		if streamErr != nil {
+			logFunc(fmt.Sprintf("  Failed: %v", streamErr))
+			results = append(results, result{Q: qa.prompt, Want: qa.answer, Got: "ERROR", Correct: false})
+			total++
+			continue
+		}
+
+		var firstTok time.Duration
+		var gotFirst bool
+		var toks int
+		var response strings.Builder
+
+		scanner := newStreamScanner(stream)
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			if len(line) == 0 {
+				continue
+			}
+			var chunk struct {
+				Response string `json:"response"`
+				Done     bool   `json:"done"`
+			}
+			if json.Unmarshal(line, &chunk) == nil {
+				if !gotFirst && chunk.Response != "" {
+					firstTok = time.Since(start)
+					gotFirst = true
+				}
+				if chunk.Response != "" {
+					toks++
+					response.WriteString(chunk.Response)
+				}
+			}
+		}
+		stream.Close()
+
+		dur := time.Since(start)
+		got := strings.TrimSpace(response.String())
+		isCorrect := strings.Contains(strings.ToLower(got), strings.ToLower(qa.answer))
+		if isCorrect {
+			correct++
+		}
+		total++
+
+		logFunc(fmt.Sprintf("  Answer: %q — %s (expected: %q)", got, map[bool]string{true: "✓ CORRECT", false: "✗ WRONG"}[isCorrect], qa.answer))
+
+		genSec := dur.Seconds() - firstTok.Seconds()
+		if genSec <= 0 {
+			genSec = 0.001
+		}
+		tps := float64(toks) / genSec
+		results = append(results, result{
+			Q: qa.prompt, Want: qa.answer, Got: got,
+			Correct: isCorrect, TtftMs: float64(firstTok.Milliseconds()),
+		})
+		sumTtft += float64(firstTok.Milliseconds())
+		sumTps += tps
+		sumLatency += float64(dur.Milliseconds())
+	}
+
+	accuracyPct := 0.0
+	if total > 0 {
+		accuracyPct = math.Round(float64(correct)/float64(total)*1000) / 10
+	}
+
+	extra, _ := json.Marshal(map[string]interface{}{
+		"correct":      correct,
+		"total":        total,
+		"accuracy_pct": accuracyPct,
+		"results":      results,
+	})
+
+	n := float64(len(reasoningQuestions))
+	return correct, total, sumTtft / n, sumTps / n, sumLatency / n, string(extra), nil
+}
+
 func runBenchmarkSSEHandler(c *gin.Context) {
 	model := c.Query("model")
 	if model == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Model parameter is required"})
 		return
 	}
+	benchType := c.DefaultQuery("type", "standard")
 
 	activeSrv, err := GetActiveServer()
 	if err != nil {
@@ -2080,65 +2477,140 @@ func runBenchmarkSSEHandler(c *gin.Context) {
 	client := NewOllamaClient(activeSrv)
 	ctx := c.Request.Context()
 
-	prompts := []string{
-		"Explain the difference between TCP and UDP in one simple sentence.",
-		"Write a short Python function that checks if a string is a palindrome.",
-		"Briefly explain the theory of relativity to a 10-year-old in one paragraph.",
-	}
-
 	c.Stream(func(w io.Writer) bool {
-		c.SSEvent("status", fmt.Sprintf("Initializing benchmark for %s...", model))
+		c.SSEvent("status", fmt.Sprintf("Initializing %s benchmark for %s...", strings.ToUpper(benchType), model))
 
-		var totalTtft, totalTps, totalLatency float64
-		var successfulRuns int
+		var (
+			avgTtft, avgTps, avgLatency float64
+			extraJSON                   string
+			saveErr                     error
+			id                          int64
+		)
 
-		for i, prompt := range prompts {
-			c.SSEvent("status", fmt.Sprintf("Running Prompt %d/3: \"%s\"", i+1, prompt))
+		switch benchType {
 
-			ttft, tps, latency, err := runBenchmarkForPrompt(ctx, client, model, prompt, func(logMsg string) {
-				c.SSEvent("status", logMsg)
+		// ── VISION ──────────────────────────────────────────────────────────
+		case "vision":
+			visionPrompts := []string{
+				"Describe what you see in this image. Be specific about colours, shapes, and layout.",
+				"How many distinct colour regions are visible, and what is in the centre of the image?",
+			}
+			var sumTtft, sumTps, sumLatency float64
+			runs := 0
+			for i, p := range visionPrompts {
+				c.SSEvent("status", fmt.Sprintf("Vision prompt %d/%d...", i+1, len(visionPrompts)))
+				ttft, tps, lat, runErr := runVisionBenchmarkPrompt(ctx, client, model, visionTestImageBase64, p)
+				if runErr != nil {
+					c.SSEvent("error", fmt.Sprintf("Vision prompt %d failed: %v", i+1, runErr))
+					continue
+				}
+				c.SSEvent("status", fmt.Sprintf("  TTFT: %.0fms, TPS: %.1f", ttft, tps))
+				sumTtft += ttft
+				sumTps += tps
+				sumLatency += lat
+				runs++
+			}
+			if runs == 0 {
+				c.SSEvent("error", "Vision benchmark failed — model may not support images.")
+				return false
+			}
+			avgTtft = sumTtft / float64(runs)
+			avgTps = sumTps / float64(runs)
+			avgLatency = sumLatency / float64(runs)
+
+		// ── EMBEDDING ───────────────────────────────────────────────────────
+		case "embedding":
+			var cps float64
+			cps, extraJSON, saveErr = runEmbeddingBenchmarkRun(ctx, client, model, func(msg string) {
+				c.SSEvent("status", msg)
 			})
+			if saveErr != nil {
+				c.SSEvent("error", fmt.Sprintf("Embedding benchmark failed: %v", saveErr))
+				return false
+			}
+			// Store chunks/sec in TPS field; TTFT/latency are not meaningful for batch embedding
+			avgTps = cps
+			avgTtft = 0
+			avgLatency = 0
+			saveErr = nil
 
-			if err != nil {
-				c.SSEvent("error", fmt.Sprintf("Prompt %d failed: %v", i+1, err))
-				continue
+		// ── LONG-CONTEXT ─────────────────────────────────────────────────────
+		case "longctx":
+			var runErr error
+			avgTps, avgTtft, avgLatency, extraJSON, runErr = runLongCtxBenchmarkRun(ctx, client, model, func(msg string) {
+				c.SSEvent("status", msg)
+			})
+			if runErr != nil {
+				c.SSEvent("error", fmt.Sprintf("Long-context benchmark failed: %v", runErr))
+				return false
 			}
 
-			c.SSEvent("status", fmt.Sprintf("Prompt %d finished - TTFT: %.1fms, TPS: %.1f, Latency: %.1fms", i+1, ttft, tps, latency))
-			totalTtft += ttft
-			totalTps += tps
-			totalLatency += latency
-			successfulRuns++
+		// ── REASONING ────────────────────────────────────────────────────────
+		case "reasoning":
+			correct, total, rTtft, rTps, rLat, rExtra, runErr := runReasoningBenchmarkRun(ctx, client, model, func(msg string) {
+				c.SSEvent("status", msg)
+			})
+			if runErr != nil {
+				c.SSEvent("error", fmt.Sprintf("Reasoning benchmark failed: %v", runErr))
+				return false
+			}
+			avgTtft, avgTps, avgLatency, extraJSON = rTtft, rTps, rLat, rExtra
+			c.SSEvent("status", fmt.Sprintf("Result: %d/%d correct (%.0f%%)", correct, total, float64(correct)/float64(total)*100))
+
+		// ── STANDARD (default) ───────────────────────────────────────────────
+		default:
+			benchType = "standard"
+			prompts := []string{
+				"Explain the difference between TCP and UDP in one simple sentence.",
+				"Write a short Python function that checks if a string is a palindrome.",
+				"Briefly explain the theory of relativity to a 10-year-old in one paragraph.",
+			}
+			var sumTtft, sumTps, sumLatency float64
+			runs := 0
+			for i, prompt := range prompts {
+				c.SSEvent("status", fmt.Sprintf("Prompt %d/3: %q", i+1, prompt))
+				ttft, tps, lat, runErr := runBenchmarkForPrompt(ctx, client, model, prompt, func(msg string) {
+					c.SSEvent("status", msg)
+				})
+				if runErr != nil {
+					c.SSEvent("error", fmt.Sprintf("Prompt %d failed: %v", i+1, runErr))
+					continue
+				}
+				c.SSEvent("status", fmt.Sprintf("  TTFT: %.0fms, TPS: %.1f, Latency: %.0fms", ttft, tps, lat))
+				sumTtft += ttft
+				sumTps += tps
+				sumLatency += lat
+				runs++
+			}
+			if runs == 0 {
+				c.SSEvent("error", "Benchmark failed: all prompts failed.")
+				return false
+			}
+			avgTtft = sumTtft / float64(runs)
+			avgTps = sumTps / float64(runs)
+			avgLatency = sumLatency / float64(runs)
 		}
 
-		if successfulRuns == 0 {
-			c.SSEvent("error", "Benchmark failed: all runs failed.")
+		id, saveErr = SaveBenchmark(model, activeSrv.Name, activeSrv.URL, benchType, extraJSON, avgTtft, avgTps, avgLatency)
+		if saveErr != nil {
+			c.SSEvent("error", fmt.Sprintf("Failed to save benchmark: %v", saveErr))
 			return false
 		}
 
-		avgTtft := totalTtft / float64(successfulRuns)
-		avgTps := totalTps / float64(successfulRuns)
-		avgLatency := totalLatency / float64(successfulRuns)
+		c.SSEvent("status", fmt.Sprintf("%s benchmark complete.", strings.ToUpper(benchType)))
 
-		id, err := SaveBenchmark(model, activeSrv.Name, activeSrv.URL, avgTtft, avgTps, avgLatency)
-		if err != nil {
-			c.SSEvent("error", fmt.Sprintf("Failed to save benchmark: %v", err))
-			return false
-		}
-
-		c.SSEvent("status", "Benchmark suite completed successfully.")
-
-		resultPayload := map[string]interface{}{
+		result := map[string]interface{}{
 			"id":             id,
 			"model_name":     model,
 			"server_name":    activeSrv.Name,
 			"server_url":     activeSrv.URL,
+			"benchmark_type": benchType,
+			"extra_json":     extraJSON,
 			"ttft_ms":        avgTtft,
 			"tps":            avgTps,
 			"avg_latency_ms": avgLatency,
 		}
-
-		resBytes, _ := json.Marshal(resultPayload)
+		resBytes, _ := json.Marshal(result)
 		c.SSEvent("done", string(resBytes))
 		return false
 	})

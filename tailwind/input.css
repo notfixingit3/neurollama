@@ -205,6 +205,30 @@
   color: #2e3440;
 }
 
+/* Benchmark type selector buttons (left panel + leaderboard filter bar) */
+.bench-type-btn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-weight: 700;
+  color: #4c566a;
+  border: 1px solid rgba(76, 86, 106, 0.4);
+  transition: color 0.15s, background-color 0.15s, border-color 0.15s;
+  cursor: pointer;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+.bench-type-btn:hover {
+  color: #88c0d0;
+  border-color: rgba(136, 192, 208, 0.4);
+}
+.bench-type-btn-active {
+  background-color: #88c0d0;
+  color: #2e3440;
+  border-color: #88c0d0;
+}
+
 /* Hide scrollbar utility */
 .scrollbar-none::-webkit-scrollbar {
   display: none;
