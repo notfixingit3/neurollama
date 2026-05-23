@@ -5306,6 +5306,11 @@ async function fetchBenchmarks() {
           </td>
           <td class="text-right">
             <div class="flex gap-1 justify-end">
+              <button onclick="retestBenchmark('${escapeHTML(b.model_name)}', '${escapeHTML(bType)}')"
+                      title="Re-run this benchmark"
+                      class="btn btn-xs btn-ghost text-[#88c0d0] hover:bg-[#88c0d0]/15 p-1">
+                <i class="fa-solid fa-rotate-right text-[10px]"></i>
+              </button>
               <button onclick="openScoreModal(${b.id}, '${escapeHTML(score)}', '${escapeHTML(b.notes || '')}')"
                       class="btn btn-xs btn-neutral border-[#4c566a] font-tech text-[9px] px-2">RATE</button>
               <button onclick="deleteBenchmark(${b.id})" class="btn btn-xs btn-ghost text-[#bf616a] hover:bg-[#bf616a]/15 p-1">
@@ -5325,6 +5330,28 @@ async function fetchBenchmarks() {
       </tr>
     `;
   }
+}
+
+function retestBenchmark(modelName, benchType) {
+  // Switch to benchmark workspace
+  switchWorkspace('benchmark');
+
+  // Set the benchmark type buttons + update state
+  setBenchmarkType(benchType || 'standard');
+
+  // After the model select is (re)populated, pick the right model
+  setTimeout(() => {
+    const sel = document.getElementById('benchmark-model-select');
+    if (sel) {
+      // Try exact match first, then prefix match
+      const exact = Array.from(sel.options).find(o => o.value === modelName);
+      const prefix = Array.from(sel.options).find(o => o.value.startsWith(modelName.split(':')[0]));
+      const match = exact || prefix;
+      if (match) {
+        sel.value = match.value;
+      }
+    }
+  }, 50);
 }
 
 function openScoreModal(id, currentScore, currentNotes) {
