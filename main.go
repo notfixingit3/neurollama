@@ -26,7 +26,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const appVersion = "v0.2.2"
+const appVersion = "v0.2.3"
 
 type ServerStatusResponse struct {
 	Server
