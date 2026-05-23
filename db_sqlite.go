@@ -143,7 +143,7 @@ func columnExists(tableName, columnName string) bool {
 	if err != nil {
 		return false
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var cid int
@@ -341,13 +341,13 @@ func seedDefaultPresets() error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // no-op after Commit
 
 	stmt, err := tx.Prepare("INSERT INTO presets (name, content) VALUES (?, ?)")
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	for _, d := range defaults {
 		if _, err := stmt.Exec(d.Name, d.Content); err != nil {
@@ -365,7 +365,7 @@ func GetChats() ([]Chat, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var chats []Chat
 	for rows.Next() {
@@ -416,7 +416,7 @@ func DeleteChat(id int64) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // no-op after Commit
 
 	// Delete messages first (cascade on delete is declared, but it's good to execute explicit deletes for consistency)
 	if _, err := tx.Exec("DELETE FROM messages WHERE chat_id = ?", id); err != nil {
@@ -437,7 +437,7 @@ func GetChatMessages(chatId int64) ([]ChatMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var messages []ChatMessage
 	for rows.Next() {
@@ -476,7 +476,7 @@ func GetPresets() ([]Preset, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var presets []Preset
 	for rows.Next() {
@@ -509,7 +509,7 @@ func GetSettings() (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	settings := make(map[string]string)
 	for rows.Next() {
@@ -534,7 +534,7 @@ func GetSchedulerLogs() ([]SchedulerLog, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var logs []SchedulerLog
 	for rows.Next() {
@@ -564,7 +564,7 @@ func GetBenchmarks() ([]Benchmark, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var list []Benchmark
 	for rows.Next() {
@@ -710,7 +710,7 @@ func GetOptimizerRuns() ([]OptimizerRun, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var list []OptimizerRun
 	for rows.Next() {
@@ -735,7 +735,7 @@ func SaveRAGDocument(name string, embeddingModel string, chunks []RAGChunk) (int
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // no-op after Commit
 
 	res, err := tx.Exec("INSERT INTO rag_documents (name, embedding_model) VALUES (?, ?)", name, embeddingModel)
 	if err != nil {
@@ -780,7 +780,7 @@ func GetRAGDocuments() ([]RAGDocument, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var list []RAGDocument
 	for rows.Next() {
@@ -811,7 +811,7 @@ func GetRAGChunksForModel(embeddingModel string) ([]RAGChunkWithDocInfo, error) 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var list []RAGChunkWithDocInfo
 	for rows.Next() {

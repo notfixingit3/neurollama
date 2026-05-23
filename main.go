@@ -627,7 +627,7 @@ func pullModelSSEHandler(c *gin.Context) {
 	}
 
 	client := NewOllamaClient(activeSrv)
-	var ctx context.Context = c.Request.Context()
+	ctx := c.Request.Context()
 	stream, err := client.StreamPullModel(ctx, name)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
@@ -901,7 +901,7 @@ func chatStreamHandler(c *gin.Context) {
 						contextBuilder.WriteString("Use the following pieces of context to answer the user request. If you don't know the answer, just say you don't know, don't try to make up an answer.\n\n")
 						for idx := 0; idx < topK; idx++ {
 							match := matches[idx]
-							contextBuilder.WriteString(fmt.Sprintf("--- CONTEXT CHUNK #%d (Source: %s) ---\n%s\n\n", idx+1, match.chunk.DocumentName, match.chunk.Content))
+							fmt.Fprintf(&contextBuilder, "--- CONTEXT CHUNK #%d (Source: %s) ---\n%s\n\n", idx+1, match.chunk.DocumentName, match.chunk.Content)
 							ragSources = append(ragSources, gin.H{
 								"document_name": match.chunk.DocumentName,
 								"chunk_index":   match.chunk.ChunkIndex,
@@ -909,7 +909,7 @@ func chatStreamHandler(c *gin.Context) {
 								"content":       match.chunk.Content,
 							})
 						}
-						contextBuilder.WriteString(fmt.Sprintf("User Request: %s", chatReq.Messages[lastUserMsgIdx].Content))
+						fmt.Fprintf(&contextBuilder, "User Request: %s", chatReq.Messages[lastUserMsgIdx].Content)
 						chatReq.Messages[lastUserMsgIdx].Content = contextBuilder.String()
 					}
 				}
@@ -924,7 +924,7 @@ func chatStreamHandler(c *gin.Context) {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -1172,7 +1172,7 @@ func createModelStreamHandler(c *gin.Context) {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -1285,7 +1285,7 @@ func generateStreamHandler(c *gin.Context) {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -1319,10 +1319,7 @@ func getModelCardHandler(c *gin.Context) {
 
 	// 1. Check if Hugging Face model
 	if strings.Contains(name, "hf.co/") || strings.Contains(name, "/") {
-		cleaned := name
-		if strings.HasPrefix(cleaned, "hf.co/") {
-			cleaned = strings.TrimPrefix(cleaned, "hf.co/")
-		}
+		cleaned := strings.TrimPrefix(name, "hf.co/")
 		parts := strings.Split(cleaned, ":")
 		repo := parts[0]
 
@@ -1333,14 +1330,14 @@ func getModelCardHandler(c *gin.Context) {
 			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("Failed to fetch Hugging Face README: %v", err)})
 			return
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != http.StatusOK {
 			// Fallback to master
 			urlFallback := fmt.Sprintf("https://huggingface.co/%s/raw/master/README.md", repo)
 			respFallback, err := httpClient.Get(urlFallback)
 			if err == nil {
-				defer respFallback.Body.Close()
+				defer func() { _ = respFallback.Body.Close() }()
 				if respFallback.StatusCode == http.StatusOK {
 					body, _ := io.ReadAll(respFallback.Body)
 					c.String(http.StatusOK, string(body))
@@ -1371,7 +1368,7 @@ func getModelCardHandler(c *gin.Context) {
 		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("Failed to fetch Ollama Library page: %v", err)})
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		c.JSON(resp.StatusCode, gin.H{"error": fmt.Sprintf("Ollama Library page returned status: %d", resp.StatusCode)})
@@ -1415,7 +1412,10 @@ var (
 
 func isRemoteURL(urlStr string) bool {
 	u := strings.ToLower(urlStr)
-	return !(strings.Contains(u, "localhost") || strings.Contains(u, "127.0.0.1") || strings.Contains(u, "0.0.0.0") || strings.Contains(u, "[::1]"))
+	return !strings.Contains(u, "localhost") &&
+		!strings.Contains(u, "127.0.0.1") &&
+		!strings.Contains(u, "0.0.0.0") &&
+		!strings.Contains(u, "[::1]")
 }
 
 func parsePhysMem(line string) (float64, rune, float64, rune) {
@@ -1586,11 +1586,12 @@ func getHostStats() HostStats {
 					continue
 				}
 				valBytes := val * 1024 // /proc/meminfo is in kB
-				if parts[0] == "MemTotal:" {
+				switch parts[0] {
+				case "MemTotal:":
 					memTotal = valBytes
-				} else if parts[0] == "MemFree:" {
+				case "MemFree:":
 					memFree = valBytes
-				} else if parts[0] == "MemAvailable:" {
+				case "MemAvailable:":
 					memAvailable = valBytes
 				}
 			}
@@ -1935,7 +1936,7 @@ func CompressChatSession(chatID int64, modelName string) (string, error) {
 	var sb strings.Builder
 	sb.WriteString("Summarize the following conversation history briefly. Focus only on key facts, preferences, decisions, and instructions established. Keep the summary concise (under 250 words) and direct. Do not add any introductory or concluding text.\n\nCONVERSATION HISTORY:\n")
 	for _, m := range messages {
-		sb.WriteString(fmt.Sprintf("%s: %s\n", m.Role, m.Content))
+		fmt.Fprintf(&sb, "%s: %s\n", m.Role, m.Content)
 	}
 
 	activeSrv, err := GetActiveServer()
@@ -1962,7 +1963,7 @@ func CompressChatSession(chatID int64, modelName string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to contact Ollama for summary: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
@@ -1985,7 +1986,7 @@ func CompressChatSession(chatID int64, modelName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // no-op after Commit
 
 	_, err = tx.Exec("DELETE FROM messages WHERE chat_id = ?", chatID)
 	if err != nil {
@@ -2121,7 +2122,7 @@ func runBenchmarkForPrompt(ctx context.Context, client *OllamaClient, model stri
 	if err != nil {
 		return 0, 0, 0, err
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	var firstTokenTime time.Duration
 	var firstTokenReceived bool
@@ -2184,7 +2185,7 @@ func runVisionBenchmarkPrompt(ctx context.Context, client *OllamaClient, model, 
 	if err != nil {
 		return 0, 0, 0, err
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	var firstTokenTime time.Duration
 	var firstTokenReceived bool
@@ -2349,7 +2350,9 @@ func runLongCtxBenchmarkRun(ctx context.Context, client *OllamaClient, model str
 				}
 			}
 		}
-		stream.Close()
+		if err := stream.Close(); err != nil {
+			logFunc(fmt.Sprintf("  warning: stream close: %v", err))
+		}
 
 		total := time.Since(start)
 		if !gotFirst || toks == 0 {
@@ -2452,7 +2455,9 @@ func runReasoningBenchmarkRun(ctx context.Context, client *OllamaClient, model s
 				}
 			}
 		}
-		stream.Close()
+		if err := stream.Close(); err != nil {
+			logFunc(fmt.Sprintf("  warning: stream close: %v", err))
+		}
 
 		dur := time.Since(start)
 		got := strings.TrimSpace(response.String())
@@ -2571,7 +2576,6 @@ func runBenchmarkSSEHandler(c *gin.Context) {
 			avgTps = cps
 			avgTtft = 0
 			avgLatency = 0
-			saveErr = nil
 
 		// ── LONG-CONTEXT ─────────────────────────────────────────────────────
 		case "longctx":
@@ -2719,7 +2723,7 @@ func runOptimizerForConfig(ctx context.Context, client *OllamaClient, model stri
 	if err != nil {
 		return 0, 0, 0, "", err
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	var firstTokenTime time.Duration
 	var firstTokenReceived bool

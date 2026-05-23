@@ -118,7 +118,7 @@ func (c *OllamaClient) CheckStatus() (string, time.Duration, error) {
 	if err != nil {
 		return "", 0, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", latency, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
@@ -138,7 +138,7 @@ func (c *OllamaClient) ListModels() ([]OllamaModel, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to Ollama: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
@@ -171,7 +171,7 @@ func (c *OllamaClient) GetModelDetails(name string) (*ShowResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to Ollama: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		// Read error response if any
@@ -208,7 +208,7 @@ func (c *OllamaClient) DeleteModel(name string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Ollama: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
@@ -236,7 +236,7 @@ func (c *OllamaClient) CopyModel(source, destination string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Ollama: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
@@ -272,7 +272,7 @@ func (c *OllamaClient) StreamPullModel(ctx context.Context, name string) (io.Rea
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("failed to pull model, status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
@@ -352,7 +352,7 @@ func (c *OllamaClient) ListActiveModels() ([]ProcessModel, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to Ollama: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
@@ -385,7 +385,7 @@ func (c *OllamaClient) UnloadModel(name string) error {
 	if err != nil {
 		return fmt.Errorf("failed to contact Ollama for unload: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
@@ -416,7 +416,7 @@ func (c *OllamaClient) StreamChat(ctx context.Context, chatReq ChatRequest) (io.
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("chat stream failed, status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
@@ -445,7 +445,7 @@ func (c *OllamaClient) StreamGenerate(ctx context.Context, genReq GenerateReques
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("generate stream failed, status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
@@ -474,7 +474,7 @@ func (c *OllamaClient) StreamCreate(ctx context.Context, createReq CreateRequest
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("model build failed, status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
@@ -506,7 +506,7 @@ func (c *OllamaClient) GetEmbeddings(model string, inputs []string) ([][]float64
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to Ollama: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusOK {
 		var embedResp struct {
