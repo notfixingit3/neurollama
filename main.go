@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"image"
 	"image/color"
@@ -24,6 +25,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+const appVersion = "v0.2.2"
 
 type ServerStatusResponse struct {
 	Server
@@ -79,6 +82,27 @@ func newStreamScanner(reader io.Reader) *bufio.Scanner {
 }
 
 func main() {
+	// CLI flags
+	portFlag := flag.Int("port", 0, "Port to listen on (overrides PORT env var, default 8080)")
+	showVersion := flag.Bool("version", false, "Print version and exit")
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "NEUROLLAMA %s — Ollama node control panel\n\n", appVersion)
+		fmt.Fprintf(os.Stderr, "Usage:\n  neurollama [flags]\n\nFlags:\n")
+		flag.PrintDefaults()
+		fmt.Fprintf(os.Stderr, "\nEnvironment variables:\n")
+		fmt.Fprintf(os.Stderr, "  PORT          Port to listen on (default 8080)\n")
+		fmt.Fprintf(os.Stderr, "  GIN_MODE      Set to 'release' to suppress debug output\n\n")
+		fmt.Fprintf(os.Stderr, "Examples:\n")
+		fmt.Fprintf(os.Stderr, "  neurollama --port 9000\n")
+		fmt.Fprintf(os.Stderr, "  PORT=9000 neurollama\n")
+	}
+	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(appVersion)
+		os.Exit(0)
+	}
+
 	// Load config data
 	if err := LoadConfig(); err != nil {
 		log.Fatalf("Error loading config: %v", err)
@@ -112,6 +136,11 @@ func main() {
 	// Serve static files
 	r.Static("/static", "./static")
 	r.StaticFile("/favicon.ico", "./static/img/favicon.ico")
+
+	// Health check — used by Docker HEALTHCHECK and load balancers
+	r.GET("/healthz", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "version": appVersion})
+	})
 
 	// HTML routes
 	r.GET("/", func(c *gin.Context) {
@@ -188,24 +217,30 @@ func main() {
 		api.GET("/diagnostics", diagnosticsHandler)
 	}
 
-	port, err := resolvePort()
+	port, err := resolvePort(*portFlag)
 	if err != nil {
-		log.Fatalf("Invalid PORT: %v", err)
+		log.Fatalf("Invalid port: %v", err)
 	}
 	addr := fmt.Sprintf(":%d", port)
 
-	log.Printf("NEUROLLAMA is starting on http://localhost%s", addr)
+	log.Printf("NEUROLLAMA %s starting on http://localhost%s", appVersion, addr)
 	if err := r.Run(addr); err != nil {
 		log.Fatalf("Server failed to run: %v", err)
 	}
 }
 
-func resolvePort() (int, error) {
+func resolvePort(flagPort int) (int, error) {
+	// --port flag takes precedence over PORT env var
+	if flagPort != 0 {
+		if flagPort < 1 || flagPort > 65535 {
+			return 0, fmt.Errorf("must be between 1 and 65535")
+		}
+		return flagPort, nil
+	}
 	rawPort := strings.TrimSpace(os.Getenv("PORT"))
 	if rawPort == "" {
 		return 8080, nil
 	}
-
 	port, err := strconv.Atoi(rawPort)
 	if err != nil {
 		return 0, fmt.Errorf("must be a number between 1 and 65535")
