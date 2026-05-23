@@ -1,7 +1,7 @@
 # NEUROLLAMA — Scale & Performance Roadmap
 
 Tracking 16 items across 4 phases. Each phase ships as a patch version bump.
-Current version: **v0.2.6**
+Current version: **v0.2.7**
 
 > **Context:** With 10+ Ollama nodes and 100+ models per node, the current
 > request-time fetching model breaks down. Every page load hits all nodes live,
@@ -116,18 +116,18 @@ Handles 100+ models per node gracefully in the UI.
 
 Fleet-level visibility and cross-node operations.
 
-- [ ] **15. Node health overview panel** (`templates/index.html`, `static/js/app.js`, `main.go`)
+- [x] **15. Node health overview panel** (`templates/index.html`, `static/js/app.js`, `main.go`)
   - New aggregate endpoint `GET /api/nodes/overview` — returns all nodes' cached status,
     loaded model count, VRAM in use, latency, Ollama version in one response
-  - UI: grid/dashboard showing all nodes simultaneously (status, VRAM, loaded models)
-  - Probably a new tab ("FLEET" or "OVERVIEW") or expands the Memory tab
-  - Replaces the current "pick one active node" model with a full-fleet view
+  - New FLEET tab with grid of node cards: status, latency, version, model count, last-seen
+  - SET ACTIVE and ↺ per-card actions; live refresh on nodeStatus SSE events
+  - Reactive: nodeStatus SSE events re-render the fleet grid when the tab is open
 
-- [ ] **16. Cross-node model search UI** (`templates/index.html`, `static/js/app.js`)
+- [x] **16. Cross-node model search UI** (`templates/index.html`, `static/js/app.js`)
   - Search bar in Inventory that hits the Phase 3 search endpoint (item 12)
-  - Results grouped or badged by node
+  - Results badged by node; debounced 300ms input handler
   - Surfaces "which of my nodes has gemma3:27b right now?" queries
-  - Actions (delete, inspect) scoped to the owning node
+  - Actions scoped to owning node: INSPECT (active node), SET ACTIVE (other nodes)
 
 ---
 
@@ -138,5 +138,5 @@ Fleet-level visibility and cross-node operations.
 | v0.2.3  | —     | lint/gosec clean, --help/--version, healthcheck |
 | v0.2.4  | 1     | server-side cache, lazy-load, optimistic render |
 | v0.2.5  | 2     | SSE node events, no-refetch CRUD, stale-while-revalidate |
-| v0.2.6  | 3     | Current: pagination, cross-node search API, last-refreshed indicators |
-| v0.2.7  | 4     | Multi-node: fleet overview, cross-node model search UI |
+| v0.2.6  | 3     | pagination, cross-node search API, last-refreshed indicators |
+| v0.2.7  | 4     | Current: FLEET tab, cross-node model search UI — roadmap complete |

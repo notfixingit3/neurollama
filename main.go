@@ -26,7 +26,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const appVersion = "v0.2.6"
+const appVersion = "v0.2.7"
 
 type ServerStatusResponse struct {
 	Server
@@ -189,6 +189,7 @@ func main() {
 		api.DELETE("/presets/:id", deletePresetHandler)
 
 		// Node management
+		api.GET("/nodes/overview", nodesOverviewHandler)
 		api.POST("/nodes/:id/refresh", refreshNodeHandler)
 
 		// Telemetry & Scheduler endpoints
@@ -2037,6 +2038,50 @@ func telemetryStreamHandler(c *gin.Context) {
 		}
 		return true
 	})
+}
+
+// NodeOverviewEntry is one row in the fleet overview — aggregated from cache only.
+type NodeOverviewEntry struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	URL            string `json:"url"`
+	Status         string `json:"status"`
+	Version        string `json:"version"`
+	LatencyMs      int64  `json:"latency_ms"`
+	ModelCount     int    `json:"model_count"`
+	CacheUpdatedAt int64  `json:"cache_updated_at"` // unix seconds; 0 = not yet polled
+}
+
+// nodesOverviewHandler returns every node's cached status + model count in one call.
+// GET /api/nodes/overview
+func nodesOverviewHandler(c *gin.Context) {
+	srvs := GetServers()
+	entries := make([]NodeOverviewEntry, 0, len(srvs))
+
+	nodeStatusMu.RLock()
+	for _, srv := range srvs {
+		e := NodeOverviewEntry{ID: srv.ID, Name: srv.Name, URL: srv.URL}
+		if se, ok := nodeStatusCache[srv.ID]; ok {
+			e.Status         = se.response.Status
+			e.Version        = se.response.Version
+			e.LatencyMs      = se.response.Latency
+			e.CacheUpdatedAt = se.updatedAt.Unix()
+		} else {
+			e.Status = "unknown"
+		}
+		entries = append(entries, e)
+	}
+	nodeStatusMu.RUnlock()
+
+	nodeModelMu.RLock()
+	for i, e := range entries {
+		if me, ok := nodeModelCache[e.ID]; ok {
+			entries[i].ModelCount = len(me.models)
+		}
+	}
+	nodeModelMu.RUnlock()
+
+	c.JSON(http.StatusOK, entries)
 }
 
 // refreshNodeHandler drops a node's cached status and immediately re-polls,

@@ -21,6 +21,10 @@ let lastModelSyncTs = 0; // unix seconds from API lastUpdated field
 
 // Server last-seen timestamps (ms) — updated on fetchServers and nodeStatus SSE events
 const serverLastSeen = {};
+
+// Cross-node model search
+let crossNodeSearchQuery = '';
+let crossNodeSearchTimer = null;
 let chatMessages = [];
 let isGeneratingChat = false;
 let isBuildingModel = false;
@@ -278,7 +282,7 @@ function switchWorkspace(workspace) {
   }
 
   // Toggle buttons
-  const tabs = ['inventory', 'playground', 'completion', 'builder', 'memory', 'diagnostics', 'benchmark', 'rag', 'settings'];
+  const tabs = ['inventory', 'playground', 'completion', 'builder', 'memory', 'diagnostics', 'benchmark', 'rag', 'settings', 'fleet'];
   tabs.forEach(t => {
     const btn = document.getElementById(`ws-tab-${t}`);
     const panel = document.getElementById(`ws-panel-${t}`);
@@ -337,6 +341,8 @@ function switchWorkspace(workspace) {
   } else if (workspace === 'rag') {
     populateModelDropdowns();
     loadRAGDocuments();
+  } else if (workspace === 'fleet') {
+    fetchFleetOverview();
   }
 }
 
@@ -4660,6 +4666,203 @@ function closeImageLightbox() {
 // TELEMETRY SSE, MODEL UPDATE SCHEDULER & BENCHMARK INFERENCE RUNNER (v0.0.4)
 // ============================================================================
 
+// ── Fleet Overview (Phase 4 — item 15) ───────────────────────────────────────
+
+async function fetchFleetOverview() {
+  const grid    = document.getElementById('fleet-grid');
+  const summary = document.getElementById('fleet-status-summary');
+  if (grid) grid.innerHTML = '<div class="text-center py-8 text-[#4c566a] italic text-xs col-span-full"><i class="fa-solid fa-circle-notch animate-spin mr-2"></i>Querying fleet…</div>';
+
+  try {
+    const resp = await fetch('/api/nodes/overview');
+    if (!resp.ok) throw new Error('Failed to fetch fleet overview');
+    const nodes = await resp.json();
+    renderFleetGrid(nodes);
+  } catch (e) {
+    if (grid) grid.innerHTML = `<div class="text-center py-8 text-[#bf616a]/80 text-xs col-span-full"><i class="fa-solid fa-circle-exclamation mr-1.5"></i>${e.message}</div>`;
+  }
+}
+
+function renderFleetGrid(nodes) {
+  const grid    = document.getElementById('fleet-grid');
+  const summary = document.getElementById('fleet-status-summary');
+  if (!grid) return;
+
+  if (nodes.length === 0) {
+    grid.innerHTML = '<div class="text-center py-8 text-[#4c566a] italic text-xs col-span-full">No nodes configured.</div>';
+    return;
+  }
+
+  const online  = nodes.filter(n => n.status === 'online').length;
+  const offline = nodes.length - online;
+  if (summary) {
+    summary.textContent = `${online} online / ${offline} offline`;
+    summary.className   = offline > 0
+      ? 'text-[9px] font-mono text-[#bf616a]'
+      : 'text-[9px] font-mono text-[#a3be8c]';
+  }
+
+  grid.innerHTML = nodes.map(node => {
+    const isOnline  = node.status === 'online';
+    const dotColor  = isOnline ? 'bg-[#a3be8c] status-glow-online' : 'bg-[#bf616a] status-glow-offline';
+    const border    = isOnline ? 'border-[#4c566a]/50 hover:border-[#88c0d0]/40' : 'border-[#4c566a]/30 opacity-70';
+    const seenAgo   = serverLastSeen[node.id] ? timeAgoShort(serverLastSeen[node.id]) : (node.cache_updated_at ? timeAgoShort(node.cache_updated_at * 1000) : '—');
+    const isActive  = servers.find(s => s.id === node.id)?.isActive;
+
+    return `
+      <div class="tech-panel rounded-xl p-3 border ${border} flex flex-col gap-2 transition-all group relative">
+        <!-- Status + name row -->
+        <div class="flex items-start justify-between gap-2">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="h-2 w-2 rounded-full shrink-0 ${dotColor}"></span>
+            <div class="min-w-0">
+              <p class="font-bold text-xs text-[#e5e9f0] truncate" title="${node.name}">${node.name}</p>
+              <p class="text-[9px] font-mono text-[#4c566a] truncate" title="${node.url}">${node.url}</p>
+            </div>
+          </div>
+          ${isActive ? '<span class="shrink-0 text-[8px] font-mono font-bold text-[#88c0d0] border border-[#88c0d0]/40 rounded px-1 py-0.5">ACTIVE</span>' : ''}
+        </div>
+
+        <!-- Stats row -->
+        <div class="grid grid-cols-2 gap-x-3 gap-y-1 text-[9px] font-mono">
+          <div class="text-[#4c566a]">Status</div>
+          <div class="${isOnline ? 'text-[#a3be8c]' : 'text-[#bf616a]'} font-semibold uppercase">${node.status}</div>
+
+          <div class="text-[#4c566a]">Latency</div>
+          <div class="text-[#d8dee9]">${isOnline ? node.latency_ms + ' ms' : '—'}</div>
+
+          <div class="text-[#4c566a]">Version</div>
+          <div class="text-[#d8dee9] truncate">${node.version || '—'}</div>
+
+          <div class="text-[#4c566a]">Models</div>
+          <div class="text-[#d8dee9]">${node.model_count}</div>
+
+          <div class="text-[#4c566a]">Updated</div>
+          <div class="text-[#4c566a]">${seenAgo}</div>
+        </div>
+
+        <!-- Action row -->
+        <div class="flex items-center gap-1 pt-1 border-t border-[#4c566a]/20">
+          ${!isActive ? `
+            <button onclick="selectServer('${node.id}')" class="btn btn-xs btn-outline btn-info flex-1 font-tech text-[9px] h-6 min-h-0">
+              SET ACTIVE
+            </button>` : `
+            <span class="flex-1 text-[9px] font-mono text-[#88c0d0] text-center">Active node</span>`}
+          <button onclick="refreshNode('${node.id}')" class="btn btn-xs btn-ghost text-[#4c566a] hover:text-[#88c0d0] p-1 h-6 min-h-0" title="Refresh">
+            <i class="fa-solid fa-rotate text-[9px]"></i>
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// ── Cross-node model search (Phase 4 — item 16) ───────────────────────────────
+
+function handleCrossNodeSearch(value) {
+  crossNodeSearchQuery = value.trim();
+  const clearBtn = document.getElementById('cross-node-search-clear');
+  if (clearBtn) clearBtn.classList.toggle('hidden', !crossNodeSearchQuery);
+
+  // Debounce 300ms
+  clearTimeout(crossNodeSearchTimer);
+  if (!crossNodeSearchQuery) {
+    clearCrossNodeSearch(false); // restore normal inventory without clearing the input
+    return;
+  }
+  crossNodeSearchTimer = setTimeout(() => runCrossNodeSearch(crossNodeSearchQuery), 300);
+}
+
+async function runCrossNodeSearch(q) {
+  const statusEl = document.getElementById('cross-node-search-status');
+  if (statusEl) { statusEl.textContent = 'Searching all nodes…'; statusEl.classList.remove('hidden'); }
+
+  try {
+    const resp = await fetch(`/api/models/search?q=${encodeURIComponent(q)}&nodes=all`);
+    if (!resp.ok) throw new Error('Search failed');
+    const data = await resp.json();
+    renderCrossNodeResults(data.results || [], q);
+    if (statusEl) {
+      statusEl.textContent = `${data.total} result${data.total === 1 ? '' : 's'} across all nodes`;
+    }
+  } catch (e) {
+    if (statusEl) { statusEl.textContent = 'Search failed'; statusEl.classList.remove('hidden'); }
+  }
+}
+
+function renderCrossNodeResults(results, q) {
+  const listBody = document.getElementById('models-list-body');
+  const paginationEl = document.getElementById('inventory-pagination');
+  const totalBadge   = document.getElementById('inventory-total-badge');
+
+  // Hide normal pagination in search mode
+  if (paginationEl) { paginationEl.classList.add('hidden'); paginationEl.classList.remove('flex'); }
+  if (totalBadge) { totalBadge.textContent = `(${results.length} across all nodes)`; totalBadge.classList.remove('hidden'); }
+
+  // Detach accordion
+  if (accordionEl && accordionEl.parentNode === listBody) listBody.removeChild(accordionEl);
+
+  if (results.length === 0) {
+    listBody.innerHTML = `<tr><td colspan="5" class="text-center py-8 text-[#4c566a] italic text-xs">No models matching "${q}" found on any node.</td></tr>`;
+    return;
+  }
+
+  listBody.innerHTML = results.map(r => {
+    const sizeFormatted = formatBytes(r.size);
+    const paramSize     = (r.details && r.details.parameter_size) || 'N/A';
+    const isActiveNode  = servers.find(s => s.id === r.node_id)?.isActive;
+    const nodeBadgeColor = isActiveNode ? 'border-[#88c0d0] text-[#88c0d0]' : 'border-[#4c566a] text-[#4c566a]';
+
+    return `
+      <tr class="hover:bg-[#3b4252]/30 border-b border-[#4c566a]/30 transition-colors">
+        <td>
+          <span class="badge badge-outline text-[8px] font-mono font-bold ${nodeBadgeColor} whitespace-nowrap"
+                title="${r.url}">${r.node_name || r.node_id}</span>
+        </td>
+        <td>
+          <span class="font-bold text-[#e5e9f0] text-xs">${r.name}</span>
+          <span class="text-[9px] text-[#4c566a] block">${sizeFormatted} // ${paramSize}</span>
+        </td>
+        <td class="hidden sm:table-cell text-xs">${sizeFormatted}</td>
+        <td class="hidden md:table-cell">
+          <span class="badge badge-outline border-[#4c566a] text-[#81a1c1] text-[9px] font-mono">${paramSize}</span>
+        </td>
+        <td>
+          ${isActiveNode
+            ? `<button onclick="inspectModel('${r.name}')" class="btn btn-xs btn-neutral border-[#4c566a] text-[10px] font-tech">INSPECT</button>`
+            : `<button onclick="selectServer('${r.node_id}')" class="btn btn-xs btn-outline btn-info text-[9px] font-tech">SET ACTIVE</button>`}
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  // Hide select-all checkbox in search mode
+  const cb = document.getElementById('select-all-checkbox');
+  if (cb) cb.parentElement.classList.add('hidden');
+}
+
+function clearCrossNodeSearch(resetInput = true) {
+  crossNodeSearchQuery = '';
+  clearTimeout(crossNodeSearchTimer);
+  if (resetInput) {
+    const input = document.getElementById('cross-node-search');
+    if (input) input.value = '';
+  }
+  const clearBtn = document.getElementById('cross-node-search-clear');
+  if (clearBtn) clearBtn.classList.add('hidden');
+  const statusEl = document.getElementById('cross-node-search-status');
+  if (statusEl) statusEl.classList.add('hidden');
+
+  // Restore select-all checkbox
+  const cb = document.getElementById('select-all-checkbox');
+  if (cb) cb.parentElement.classList.remove('hidden');
+
+  // Re-render normal inventory
+  renderModels();
+}
+
+// ── Telemetry SSE ─────────────────────────────────────────────────────────────
+
 let telemetryEventSource = null;
 let telemetryHistory = [];
 let loadedModels = [];           // module-level mirror of active_models for footer actions
@@ -4683,6 +4886,9 @@ function handleNodeStatusUpdate(updated) {
 
   // Re-render the server list to reflect the new status dot / latency / timestamp.
   renderServers();
+
+  // If the fleet tab is open, refresh the grid to show updated status.
+  if (activeWorkspace === 'fleet') fetchFleetOverview();
 
   // If this is the active server, also refresh the footer status indicator.
   if (servers[idx].isActive) {

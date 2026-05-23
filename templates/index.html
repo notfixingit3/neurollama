@@ -29,7 +29,7 @@
       </div>
       <div>
         <h1 class="text-xl font-bold font-tech tracking-wider text-[#88c0d0] glow-text-blue flex items-center gap-2">
-          NEUROLLAMA <span class="text-xs px-2 py-0.5 bg-[#4c566a] text-[#d8dee9] rounded font-mono">v0.2.6</span>
+          NEUROLLAMA <span class="text-xs px-2 py-0.5 bg-[#4c566a] text-[#d8dee9] rounded font-mono">v0.2.7</span>
         </h1>
         <p class="text-[10px] uppercase font-mono tracking-widest text-[#4c566a] mt-0.5">Control Interface // Epoch 2026</p>
       </div>
@@ -111,6 +111,9 @@
         </button>
         <button id="ws-tab-diagnostics" onclick="switchWorkspace('diagnostics')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
           <i class="fa-solid fa-stethoscope text-[10px]"></i> DIAGNOSTICS
+        </button>
+        <button id="ws-tab-fleet" onclick="switchWorkspace('fleet')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
+          <i class="fa-solid fa-network-wired text-[10px]"></i> FLEET
         </button>
         <button id="ws-tab-settings" onclick="switchWorkspace('settings')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
           <i class="fa-solid fa-gear text-[10px]"></i> SETTINGS
@@ -229,6 +232,20 @@
                     <i class="fa-solid fa-rotate text-[10px]"></i>
                   </button>
                 </div>
+              </div>
+
+              <!-- Cross-node search bar -->
+              <div class="mb-3">
+                <div class="relative">
+                  <input type="text" id="cross-node-search" placeholder="Search across all nodes… (e.g. llama3, gemma)"
+                         oninput="handleCrossNodeSearch(this.value)"
+                         class="input input-sm w-full bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none pr-8" />
+                  <button id="cross-node-search-clear" onclick="clearCrossNodeSearch()" title="Clear search"
+                          class="hidden absolute right-2 top-1/2 -translate-y-1/2 text-[#4c566a] hover:text-[#d8dee9] transition-colors">
+                    <i class="fa-solid fa-xmark text-[11px]"></i>
+                  </button>
+                </div>
+                <div id="cross-node-search-status" class="hidden mt-1 text-[9px] font-mono text-[#4c566a]"></div>
               </div>
 
               <!-- Models List Container -->
@@ -1486,6 +1503,33 @@
                   <i class="fa-solid fa-gear text-2xl mb-2 opacity-30"></i>
                   <p class="text-[10px] font-mono uppercase tracking-wider opacity-50">More settings coming soon</p>
                 </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- PANEL 9: FLEET OVERVIEW -->
+        <div id="ws-panel-fleet" class="ws-panel hidden flex flex-col gap-4">
+
+          <!-- Header -->
+          <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col">
+            <div class="flex items-center justify-between mb-4 pb-2 border-b border-[#4c566a]/40">
+              <div class="flex items-center gap-3">
+                <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
+                  <i class="fa-solid fa-network-wired mr-2"></i>Fleet Overview
+                </h2>
+                <span id="fleet-status-summary" class="text-[9px] font-mono text-[#4c566a]"></span>
+              </div>
+              <button onclick="fetchFleetOverview()" class="btn btn-xs btn-ghost text-[#4c566a] hover:text-[#88c0d0] gap-1 font-tech text-[10px]">
+                <i class="fa-solid fa-rotate text-[10px]"></i> REFRESH
+              </button>
+            </div>
+
+            <!-- Node cards grid -->
+            <div id="fleet-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+              <div class="text-center py-8 text-[#4c566a] italic text-xs col-span-full">
+                Loading fleet data…
               </div>
             </div>
           </div>
