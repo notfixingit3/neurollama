@@ -5644,27 +5644,11 @@ async function fetchBenchmarks() {
     const list = await response.json();
 
     // Client-side filter by selected type
-    const filtered = (!list || currentLbFilter === 'all')
+    const allRuns = (!list || currentLbFilter === 'all')
       ? (list || [])
       : list.filter(b => (b.benchmark_type || 'standard') === currentLbFilter);
 
-    // Client-side sort
-    filtered.sort((a, b) => {
-      let av, bv;
-      switch (lbSortCol) {
-        case 'model_name':    av = (a.model_name || '').toLowerCase();    bv = (b.model_name || '').toLowerCase();    break;
-        case 'server_name':   av = (a.server_name || '').toLowerCase();   bv = (b.server_name || '').toLowerCase();   break;
-        case 'ttft_ms':       av = a.ttft_ms;        bv = b.ttft_ms;       break;
-        case 'tps':           av = a.tps;            bv = b.tps;           break;
-        case 'avg_latency_ms':av = a.avg_latency_ms; bv = b.avg_latency_ms;break;
-        case 'score':         av = SCORE_ORDER[a.reasoning_score] || 0; bv = SCORE_ORDER[b.reasoning_score] || 0; break;
-        default:              av = new Date(a.created_at || 0).getTime(); bv = new Date(b.created_at || 0).getTime();
-      }
-      if (typeof av === 'string') return lbSortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
-      return lbSortDir === 'asc' ? av - bv : bv - av;
-    });
-
-    if (filtered.length === 0) {
+    if (allRuns.length === 0) {
       const label = currentLbFilter === 'all' ? '' : ` for type "${currentLbFilter}"`;
       tbody.innerHTML = `
         <tr>
@@ -5676,6 +5660,37 @@ async function fetchBenchmarks() {
       return;
     }
 
+    // Group by model_name + benchmark_type + server_url
+    const groups = new Map();
+    for (const b of allRuns) {
+      const key = `${b.model_name}|${b.benchmark_type || 'standard'}|${b.server_url || ''}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(b);
+    }
+    // Sort runs within each group newest-first
+    for (const runs of groups.values()) {
+      runs.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+    }
+
+    // Sort groups
+    const groupList = [...groups.values()];
+    groupList.sort((ga, gb) => {
+      const a = ga[0], b = gb[0];
+      const avgTpsOf = arr => arr.reduce((s, r) => s + (r.tps || 0), 0) / arr.length;
+      let av, bv;
+      switch (lbSortCol) {
+        case 'model_name':    av = (a.model_name || '').toLowerCase();    bv = (b.model_name || '').toLowerCase();    break;
+        case 'server_name':   av = (a.server_name || '').toLowerCase();   bv = (b.server_name || '').toLowerCase();   break;
+        case 'tps':           av = avgTpsOf(ga); bv = avgTpsOf(gb); break;
+        case 'ttft_ms':       av = a.ttft_ms;        bv = b.ttft_ms;       break;
+        case 'avg_latency_ms':av = a.avg_latency_ms; bv = b.avg_latency_ms; break;
+        case 'score':         av = SCORE_ORDER[a.reasoning_score] || 0; bv = SCORE_ORDER[b.reasoning_score] || 0; break;
+        default:              av = new Date(a.created_at || 0).getTime(); bv = new Date(b.created_at || 0).getTime();
+      }
+      if (typeof av === 'string') return lbSortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+      return lbSortDir === 'asc' ? av - bv : bv - av;
+    });
+
     // Type badge colour map (Nord palette)
     const TYPE_BADGE = {
       standard:  { label: 'STD', cls: 'text-[#88c0d0] border-[#88c0d0]' },
@@ -5685,97 +5700,212 @@ async function fetchBenchmarks() {
       reasoning: { label: 'RSN', cls: 'text-[#d08770] border-[#d08770]' },
     };
 
-    tbody.innerHTML = filtered.map(b => {
-      const bType = b.benchmark_type || 'standard';
-      const score = b.reasoning_score || 'F';
+    function scoreBadgeClass(score) {
+      if      (score === 'S') return 'bg-[#a3be8c]/25 text-[#a3be8c] border-[#a3be8c]';
+      else if (score === 'A' || score === 'B') return 'bg-[#88c0d0]/25 text-[#88c0d0] border-[#88c0d0]';
+      else if (score === 'C') return 'bg-[#ebcb8b]/25 text-[#ebcb8b] border-[#ebcb8b]';
+      else if (score === 'F') return 'bg-[#bf616a]/25 text-[#bf616a] border-[#bf616a]';
+      else                    return 'bg-[#4c566a]/25 text-[#d8dee9] border-[#4c566a]';
+    }
+
+    // Build metric cells for a single run (or a synthetic avg run)
+    function metricCells(b, bType, rangeData = {}) {
+      let extra = {};
+      try { extra = JSON.parse(b.extra_json || '{}'); } catch (_) {}
+      const { isAvg, minTps, maxTps, minAcc, maxAcc, minCps, maxCps } = rangeData;
+      let ttftCell, metricCell, latCell;
+
+      if (bType === 'embedding') {
+        const cps = extra.chunks_per_sec != null ? extra.chunks_per_sec.toFixed(1) : '—';
+        const rng = (isAvg && minCps != null && maxCps != null && maxCps !== minCps)
+          ? `<span class="text-[9px] text-[#4c566a] font-normal ml-1">±${((maxCps - minCps) / 2).toFixed(1)}</span>` : '';
+        ttftCell   = `<td class="text-center text-[#4c566a]">—</td>`;
+        metricCell = `<td class="text-center font-bold text-[#ebcb8b]">${cps}${rng} <span class="text-[9px] text-[#4c566a] font-normal">ch/s</span></td>`;
+        latCell    = `<td class="text-center text-[#4c566a]">—</td>`;
+      } else if (bType === 'reasoning') {
+        const acc = extra.accuracy_pct != null ? extra.accuracy_pct.toFixed(0) + '%' : '—';
+        const rng = (isAvg && minAcc != null && maxAcc != null && maxAcc !== minAcc)
+          ? `<span class="text-[9px] text-[#4c566a] font-normal ml-1">±${((maxAcc - minAcc) / 2).toFixed(1)}%</span>` : '';
+        ttftCell   = `<td class="text-center text-[#4c566a]">—</td>`;
+        metricCell = `<td class="text-center font-bold text-[#a3be8c]">${acc}${rng} <span class="text-[9px] text-[#4c566a] font-normal">acc</span></td>`;
+        latCell    = `<td class="text-center">${b.avg_latency_ms.toFixed(0)} ms</td>`;
+      } else if (bType === 'longctx') {
+        const deg = extra.degradation_pct != null ? extra.degradation_pct.toFixed(1) + '%' : '';
+        const degHtml = deg ? ` <span class="text-[9px] text-[#bf616a] font-normal">↓${deg}</span>` : '';
+        const rng = (isAvg && minTps != null && maxTps != null && maxTps !== minTps)
+          ? `<span class="text-[9px] text-[#4c566a] font-normal ml-1">±${((maxTps - minTps) / 2).toFixed(1)}</span>` : '';
+        ttftCell   = `<td class="text-center">${b.ttft_ms.toFixed(1)} ms</td>`;
+        metricCell = `<td class="text-center font-bold text-[#88c0d0]">${b.tps.toFixed(1)}${degHtml}${rng}</td>`;
+        latCell    = `<td class="text-center">${b.avg_latency_ms.toFixed(0)} ms</td>`;
+      } else {
+        // standard / vision
+        const rng = (isAvg && minTps != null && maxTps != null && maxTps !== minTps)
+          ? `<span class="text-[9px] text-[#4c566a] font-normal ml-1">±${((maxTps - minTps) / 2).toFixed(1)}</span>` : '';
+        ttftCell   = `<td class="text-center">${b.ttft_ms.toFixed(1)} ms</td>`;
+        metricCell = `<td class="text-center font-bold text-[#88c0d0]">${b.tps.toFixed(1)}${rng} <span class="text-[9px] text-[#4c566a] font-normal">TPS</span></td>`;
+        latCell    = `<td class="text-center">${b.avg_latency_ms.toFixed(0)} ms</td>`;
+      }
+      return { ttftCell, metricCell, latCell };
+    }
+
+    let html = '';
+    let groupIdx = 0;
+
+    for (const runs of groupList) {
+      const latest  = runs[0];
+      const bType   = latest.benchmark_type || 'standard';
+      const gkey    = `grp-${groupIdx++}`;
+      const multiRun = runs.length > 1;
+
+      // Server display
+      let serverDisplay = latest.server_name || '';
+      if (!serverDisplay && latest.server_url) {
+        try { serverDisplay = new URL(latest.server_url).hostname; } catch (_) { serverDisplay = latest.server_url; }
+      }
 
       // Type badge
       const tb = TYPE_BADGE[bType] || { label: bType.toUpperCase().slice(0, 3), cls: 'text-[#4c566a] border-[#4c566a]' };
       const typeBadgeHtml = `<span class="border px-1.5 rounded text-[8px] font-bold font-mono ${tb.cls}">${tb.label}</span>`;
 
-      // Speed score badge
-      let scoreBadge;
-      if      (score === 'S') scoreBadge = 'bg-[#a3be8c]/25 text-[#a3be8c] border-[#a3be8c]';
-      else if (score === 'A' || score === 'B') scoreBadge = 'bg-[#88c0d0]/25 text-[#88c0d0] border-[#88c0d0]';
-      else if (score === 'C') scoreBadge = 'bg-[#ebcb8b]/25 text-[#ebcb8b] border-[#ebcb8b]';
-      else if (score === 'F') scoreBadge = 'bg-[#bf616a]/25 text-[#bf616a] border-[#bf616a]';
-      else                   scoreBadge = 'bg-[#4c566a]/25 text-[#d8dee9] border-[#4c566a]';
-
-      // Parse extra_json
-      let extra = {};
-      try { extra = JSON.parse(b.extra_json || '{}'); } catch (_) {}
-
-      // Server display — prefer name, fall back to hostname from URL
-      let serverDisplay = b.server_name || '';
-      if (!serverDisplay && b.server_url) {
-        try { serverDisplay = new URL(b.server_url).hostname; } catch (_) { serverDisplay = b.server_url; }
+      // Build summary run (avg of group when multi-run)
+      let summaryRun = latest;
+      let rangeData  = {};
+      if (multiRun) {
+        const avgOf  = key => runs.reduce((s, r) => s + (r[key] || 0), 0) / runs.length;
+        const minOf  = key => Math.min(...runs.map(r => r[key] || 0));
+        const maxOf  = key => Math.max(...runs.map(r => r[key] || 0));
+        const extras = runs.map(r => { try { return JSON.parse(r.extra_json || '{}'); } catch (_) { return {}; } });
+        const hasCps = extras.some(e => e.chunks_per_sec != null);
+        const hasAcc = extras.some(e => e.accuracy_pct   != null);
+        const hasDeg = extras.some(e => e.degradation_pct != null);
+        summaryRun = {
+          ...latest,
+          ttft_ms:        avgOf('ttft_ms'),
+          tps:            avgOf('tps'),
+          avg_latency_ms: avgOf('avg_latency_ms'),
+          extra_json: JSON.stringify({
+            ...(hasCps && { chunks_per_sec:   extras.reduce((s, e) => s + (e.chunks_per_sec   || 0), 0) / runs.length }),
+            ...(hasAcc && { accuracy_pct:     extras.reduce((s, e) => s + (e.accuracy_pct     || 0), 0) / runs.length }),
+            ...(hasDeg && { degradation_pct:  extras.reduce((s, e) => s + (e.degradation_pct  || 0), 0) / runs.length }),
+          }),
+        };
+        rangeData = {
+          isAvg: true,
+          minTps: minOf('tps'), maxTps: maxOf('tps'),
+          minAcc: hasAcc ? Math.min(...extras.map(e => e.accuracy_pct    || 0)) : null,
+          maxAcc: hasAcc ? Math.max(...extras.map(e => e.accuracy_pct    || 0)) : null,
+          minCps: hasCps ? Math.min(...extras.map(e => e.chunks_per_sec  || 0)) : null,
+          maxCps: hasCps ? Math.max(...extras.map(e => e.chunks_per_sec  || 0)) : null,
+        };
       }
 
-      // Type-aware metric cells: TTFT | Metric | Latency
-      let ttftCell, metricCell, latCell;
-      if (bType === 'embedding') {
-        const cps = extra.chunks_per_sec != null ? extra.chunks_per_sec.toFixed(1) : '—';
-        ttftCell   = `<td class="text-center text-[#4c566a]">—</td>`;
-        metricCell = `<td class="text-center font-bold text-[#ebcb8b]">${cps} <span class="text-[9px] text-[#4c566a] font-normal">ch/s</span></td>`;
-        latCell    = `<td class="text-center text-[#4c566a]">—</td>`;
-      } else if (bType === 'reasoning') {
-        const acc = extra.accuracy_pct != null ? extra.accuracy_pct.toFixed(0) + '%' : '—';
-        ttftCell   = `<td class="text-center text-[#4c566a]">—</td>`;
-        metricCell = `<td class="text-center font-bold text-[#a3be8c]">${acc} <span class="text-[9px] text-[#4c566a] font-normal">acc</span></td>`;
-        latCell    = `<td class="text-center">${b.avg_latency_ms.toFixed(0)} ms</td>`;
-      } else if (bType === 'longctx') {
-        const deg = extra.degradation_pct != null ? extra.degradation_pct.toFixed(1) + '%' : '';
-        const degHtml = deg ? ` <span class="text-[9px] text-[#bf616a] font-normal">↓${deg}</span>` : '';
-        ttftCell   = `<td class="text-center">${b.ttft_ms.toFixed(1)} ms</td>`;
-        metricCell = `<td class="text-center font-bold text-[#88c0d0]">${b.tps.toFixed(1)}${degHtml}</td>`;
-        latCell    = `<td class="text-center">${b.avg_latency_ms.toFixed(0)} ms</td>`;
-      } else {
-        // standard / vision
-        ttftCell   = `<td class="text-center">${b.ttft_ms.toFixed(1)} ms</td>`;
-        metricCell = `<td class="text-center font-bold text-[#88c0d0]">${b.tps.toFixed(1)} <span class="text-[9px] text-[#4c566a] font-normal">TPS</span></td>`;
-        latCell    = `<td class="text-center">${b.avg_latency_ms.toFixed(0)} ms</td>`;
-      }
+      const { ttftCell, metricCell, latCell } = metricCells(summaryRun, bType, rangeData);
+      const score      = latest.reasoning_score || 'F';
+      const scoreClass = scoreBadgeClass(score);
 
-      const noteHtml = b.notes
-        ? `<div class="text-[10px] text-[#4c566a] mt-0.5 max-w-[200px] truncate" title="${escapeHTML(b.notes)}">${escapeHTML(b.notes)}</div>`
+      // Runs count badge shown next to model name when multi-run
+      const runsBadge = multiRun
+        ? `<span class="ml-1 bg-[#3b4252] border border-[#4c566a] text-[#8fbcbb] text-[8px] font-mono px-1.5 rounded-full">${runs.length}×</span>`
         : '';
 
-      return `
-        <tr class="hover:bg-[#3b4252]/20 border-b border-[#4c566a]/20 transition-colors">
+      // Expand toggle only for multi-run
+      const expandBtn = multiRun
+        ? `<button onclick="event.stopPropagation();toggleBenchGroup('${gkey}')" id="expand-btn-${gkey}"
+                   title="Show individual runs"
+                   class="btn btn-xs btn-ghost text-[#4c566a] hover:text-[#88c0d0] hover:bg-[#88c0d0]/15 p-1">
+             <i id="expand-icon-${gkey}" class="fa-solid fa-chevron-down text-[10px] transition-transform duration-150"></i>
+           </button>`
+        : '';
+
+      // Single-run rows keep their own delete + rate; multi-run uses per-sub-row buttons
+      const singleActions = !multiRun ? `
+              <button onclick="openScoreModal(${latest.id}, '${escapeHTML(score)}', '${escapeHTML(latest.notes || '')}')"
+                      class="btn btn-xs btn-neutral border-[#4c566a] font-tech text-[9px] px-2">RATE</button>
+              <button onclick="deleteBenchmark(${latest.id})" class="btn btn-xs btn-ghost text-[#bf616a] hover:bg-[#bf616a]/15 p-1">
+                <i class="fa-solid fa-trash-can text-[10px]"></i>
+              </button>` : '';
+
+      const noteHtml = (latest.notes && !multiRun)
+        ? `<div class="text-[10px] text-[#4c566a] mt-0.5 max-w-[200px] truncate" title="${escapeHTML(latest.notes)}">${escapeHTML(latest.notes)}</div>`
+        : '';
+
+      html += `
+        <tr class="hover:bg-[#3b4252]/20 border-b border-[#4c566a]/20 transition-colors${multiRun ? ' cursor-pointer' : ''}"
+            ${multiRun ? `onclick="toggleBenchGroup('${gkey}')"` : ''}>
           <td class="py-3 text-left font-mono">
             <div class="flex items-center gap-1.5 flex-wrap">
               ${typeBadgeHtml}
-              <span class="font-bold text-[#e5e9f0]">${escapeHTML(b.model_name)}</span>
+              <span class="font-bold text-[#e5e9f0]">${escapeHTML(latest.model_name)}</span>
+              ${runsBadge}
             </div>
             ${noteHtml}
           </td>
           <td class="py-3 text-left font-mono text-[11px]">
             <div class="text-[#88c0d0] font-bold">${escapeHTML(serverDisplay || '—')}</div>
-            <div class="text-[9px] text-[#4c566a] truncate max-w-[120px]" title="${escapeHTML(b.server_url || '')}">${escapeHTML(b.server_url || '')}</div>
+            <div class="text-[9px] text-[#4c566a] truncate max-w-[120px]" title="${escapeHTML(latest.server_url || '')}">${escapeHTML(latest.server_url || '')}</div>
           </td>
           ${ttftCell}
           ${metricCell}
           ${latCell}
           <td class="text-center">
-            <span class="border px-2 py-0.5 rounded text-[9px] font-bold ${scoreBadge}">${escapeHTML(score)}</span>
+            <span class="border px-2 py-0.5 rounded text-[9px] font-bold ${scoreClass}">${escapeHTML(score)}</span>
           </td>
           <td class="text-right">
-            <div class="flex gap-1 justify-end">
-              <button onclick="retestBenchmark('${escapeHTML(b.model_name)}', '${escapeHTML(bType)}')"
+            <div class="flex gap-1 justify-end" onclick="event.stopPropagation()">
+              <button onclick="retestBenchmark('${escapeHTML(latest.model_name)}', '${escapeHTML(bType)}')"
                       title="Re-run this benchmark"
                       class="btn btn-xs btn-ghost text-[#88c0d0] hover:bg-[#88c0d0]/15 p-1">
                 <i class="fa-solid fa-rotate-right text-[10px]"></i>
               </button>
-              <button onclick="openScoreModal(${b.id}, '${escapeHTML(score)}', '${escapeHTML(b.notes || '')}')"
-                      class="btn btn-xs btn-neutral border-[#4c566a] font-tech text-[9px] px-2">RATE</button>
-              <button onclick="deleteBenchmark(${b.id})" class="btn btn-xs btn-ghost text-[#bf616a] hover:bg-[#bf616a]/15 p-1">
-                <i class="fa-solid fa-trash-can text-[10px]"></i>
-              </button>
+              ${singleActions}
+              ${expandBtn}
             </div>
           </td>
         </tr>
       `;
-    }).join('');
+
+      // Sub-rows for individual runs (multi-run only, hidden by default)
+      if (multiRun) {
+        runs.forEach((run, idx) => {
+          const runScore  = run.reasoning_score || 'F';
+          const runScCls  = scoreBadgeClass(runScore);
+          const { ttftCell: rt, metricCell: rm, latCell: rl } = metricCells(run, bType);
+          const runDate   = run.created_at
+            ? new Date(run.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+            : '—';
+          const newestTag = idx === 0
+            ? `<span class="text-[8px] text-[#a3be8c] font-bold mr-1 uppercase">latest</span>`
+            : '';
+
+          html += `
+            <tr id="sub-${gkey}-${idx}" data-group="${gkey}"
+                class="bench-sub-row bg-[#2e3440]/60 border-b border-[#4c566a]/10 text-[11px] hidden">
+              <td class="py-2 pl-8 font-mono text-[#4c566a]">
+                ${newestTag}${escapeHTML(runDate)}
+              </td>
+              <td class="text-[10px] text-[#4c566a]">run #${run.id}</td>
+              ${rt}
+              ${rm}
+              ${rl}
+              <td class="text-center">
+                <span class="border px-2 py-0.5 rounded text-[9px] font-bold ${runScCls}">${escapeHTML(runScore)}</span>
+              </td>
+              <td class="text-right">
+                <div class="flex gap-1 justify-end">
+                  <button onclick="openScoreModal(${run.id}, '${escapeHTML(runScore)}', '${escapeHTML(run.notes || '')}')"
+                          class="btn btn-xs btn-neutral border-[#4c566a] font-tech text-[9px] px-2">RATE</button>
+                  <button onclick="deleteBenchmark(${run.id})" class="btn btn-xs btn-ghost text-[#bf616a] hover:bg-[#bf616a]/15 p-1">
+                    <i class="fa-solid fa-trash-can text-[10px]"></i>
+                  </button>
+                </div>
+              </td>
+            </tr>
+          `;
+        });
+      }
+    }
+
+    tbody.innerHTML = html;
   } catch (error) {
     tbody.innerHTML = `
       <tr>
@@ -5785,6 +5915,15 @@ async function fetchBenchmarks() {
       </tr>
     `;
   }
+}
+
+// Toggle visibility of individual run sub-rows for a benchmark group
+function toggleBenchGroup(gkey) {
+  const rows = document.querySelectorAll(`[data-group="${gkey}"]`);
+  const icon = document.getElementById(`expand-icon-${gkey}`);
+  const isExpanded = [...rows].some(r => !r.classList.contains('hidden'));
+  rows.forEach(r => r.classList.toggle('hidden', isExpanded));
+  if (icon) icon.style.transform = isExpanded ? '' : 'rotate(180deg)';
 }
 
 function retestBenchmark(modelName, benchType) {

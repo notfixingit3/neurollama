@@ -654,6 +654,25 @@ func SaveBenchmark(modelName, serverName, serverURL, benchmarkType, extraJSON st
 	return res.LastInsertId()
 }
 
+// CullBenchmarks deletes the oldest runs for a given model+server+type combo,
+// keeping only the most recent keepLast rows. Call after SaveBenchmark.
+func CullBenchmarks(modelName, serverURL, benchType string, keepLast int) error {
+	_, err := DB.Exec(`
+		DELETE FROM benchmarks
+		WHERE model_name = ? AND COALESCE(server_url,'') = ? AND COALESCE(benchmark_type,'standard') = ?
+		  AND id NOT IN (
+		    SELECT id FROM benchmarks
+		    WHERE model_name = ? AND COALESCE(server_url,'') = ? AND COALESCE(benchmark_type,'standard') = ?
+		    ORDER BY id DESC
+		    LIMIT ?
+		  )`,
+		modelName, serverURL, benchType,
+		modelName, serverURL, benchType,
+		keepLast,
+	)
+	return err
+}
+
 func UpdateBenchmarkScore(id int64, score, notes string) error {
 	_, err := DB.Exec("UPDATE benchmarks SET reasoning_score = ?, notes = ? WHERE id = ?", score, notes, id)
 	return err

@@ -26,7 +26,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const appVersion = "v0.2.7"
+const appVersion = "v0.2.8"
 
 type ServerStatusResponse struct {
 	Server
@@ -3059,6 +3059,9 @@ func runBenchmarkSSEHandler(c *gin.Context) {
 		if saveErr != nil {
 			c.SSEvent("error", fmt.Sprintf("Failed to save benchmark: %v", saveErr))
 			return false
+		}
+		if cullErr := CullBenchmarks(model, activeSrv.URL, benchType, 3); cullErr != nil {
+			log.Printf("Warning: failed to cull benchmarks: %v", cullErr)
 		}
 
 		c.SSEvent("status", fmt.Sprintf("%s benchmark complete.", strings.ToUpper(benchType)))
