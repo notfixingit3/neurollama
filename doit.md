@@ -1,7 +1,7 @@
 # NEUROLLAMA — Scale & Performance Roadmap
 
 Tracking 16 items across 4 phases. Each phase ships as a patch version bump.
-Current version: **v0.2.3**
+Current version: **v0.2.4**
 
 > **Context:** With 10+ Ollama nodes and 100+ models per node, the current
 > request-time fetching model breaks down. Every page load hits all nodes live,
@@ -14,38 +14,38 @@ Current version: **v0.2.3**
 
 Foundation. Everything in Phase 2–4 builds on the cache established here.
 
-- [ ] **1. Node status background cache** (`main.go`)
+- [x] **1. Node status background cache** (`main.go`)
   - Add `nodeStatusCache map[string]ServerStatusResponse` + `nodeStatusMu sync.RWMutex`
   - One goroutine polls all configured nodes concurrently every 5s
   - `/api/servers` reads from cache — responds in <1ms regardless of node count
   - Cache is pre-warmed at startup before first request is served
 
-- [ ] **2. Model list background cache** (`main.go`)
+- [x] **2. Model list background cache** (`main.go`)
   - Add `nodeModelCache map[string][]Model` + mutex
   - Background goroutine refreshes each node's model list every 60s
   - `/api/models` serves from cache instead of hitting Ollama live
   - Cache entry includes `lastUpdated time.Time` timestamp
 
-- [ ] **3. Cache invalidation hooks** (`main.go`)
+- [x] **3. Cache invalidation hooks** (`main.go`)
   - Pull model → invalidate + immediately re-poll that node's model cache
   - Delete model → same
   - Add node → add to poller, seed cache entry
   - Edit node → update poller target, invalidate cache entry
   - Delete node → remove from poller, drop cache entry
 
-- [ ] **4. Tighter poller timeouts (E)** (`main.go`, `ollama.go`)
+- [x] **4. Tighter poller timeouts (E)** (`main.go`, `ollama.go`)
   - Give `CheckStatus()` calls inside background goroutines a 3s context deadline
   - Give `ListActiveModels()` (telemetry poller) a 3s context deadline
   - Slow/dead node stalls only its own goroutine, never blocks a UI request
   - Keep the existing 10s timeout for user-initiated operations (pull, chat, etc.)
 
-- [ ] **5. Lazy-load model inventory (C)** (`static/js/app.js`)
+- [x] **5. Lazy-load model inventory (C)** (`static/js/app.js`)
   - Remove `fetchModels()` from `init()`
   - Call it only when Inventory tab is first activated (`switchWorkspace('inventory')`)
   - Add a `modelsLoaded` flag so repeat tab visits don't re-fetch unnecessarily
   - All other landing tabs (Playground, Memory, Benchmarks) are unaffected
 
-- [ ] **6. Optimistic server render (A)** (`static/js/app.js`)
+- [x] **6. Optimistic server render (A)** (`static/js/app.js`)
   - Stop `await`-ing `fetchServers()` before anything renders in `init()`
   - Render server configs + last-known status immediately on load
   - Live status updates arrive via SSE nodeStatus events (Phase 2, item 9)
@@ -136,8 +136,8 @@ Fleet-level visibility and cross-node operations.
 
 | Version | Phase | Description |
 |---------|-------|-------------|
-| v0.2.3  | —     | Current: lint/gosec clean, --help/--version, healthcheck |
-| v0.2.4  | 1     | Core performance: server-side cache, lazy-load, optimistic render |
+| v0.2.3  | —     | lint/gosec clean, --help/--version, healthcheck |
+| v0.2.4  | 1     | Current: server-side cache, lazy-load, optimistic render |
 | v0.2.5  | 2     | Real-time push: SSE node events, no browser polling |
 | v0.2.6  | 3     | Scale UX: pagination, cross-node search API, refresh indicators |
 | v0.2.7  | 4     | Multi-node: fleet overview, cross-node model search UI |

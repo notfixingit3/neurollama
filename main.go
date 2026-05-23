@@ -26,7 +26,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const appVersion = "v0.2.3"
+const appVersion = "v0.2.4"
 
 type ServerStatusResponse struct {
 	Server
@@ -124,7 +124,8 @@ func main() {
 		log.Fatalf("Error initializing database: %v", err)
 	}
 
-	// Start background poller and scheduler
+	// Start background pollers and scheduler
+	startNodeCachePoller() // warms node-status and model-list caches before first request
 	startTelemetryPoller()
 	startSchedulerTicker()
 
@@ -251,37 +252,27 @@ func resolvePort(flagPort int) (int, error) {
 	return port, nil
 }
 
-// getServersHandler retrieves all servers and checks their statuses concurrently
+// getServersHandler returns all servers with their cached status — instant read.
 func getServersHandler(c *gin.Context) {
 	srvs := GetServers()
+	responses := make([]ServerStatusResponse, 0, len(srvs))
 
-	var wg sync.WaitGroup
-	responses := make([]ServerStatusResponse, len(srvs))
-
-	for i, srv := range srvs {
-		wg.Add(1)
-		go func(idx int, s Server) {
-			defer wg.Done()
-			client := NewOllamaClient(s)
-			version, latency, err := client.CheckStatus()
-
-			status := "online"
-			if err != nil {
-				status = "offline"
-				version = ""
-				latency = 0
-			}
-
-			responses[idx] = ServerStatusResponse{
-				Server:  RedactServerSecrets(s),
-				Status:  status,
-				Version: version,
-				Latency: latency.Milliseconds(),
-			}
-		}(i, srv)
+	nodeStatusMu.RLock()
+	for _, srv := range srvs {
+		if entry, ok := nodeStatusCache[srv.ID]; ok {
+			responses = append(responses, entry.response)
+		} else {
+			// Cache not yet populated for this node (race at startup); return unknown status.
+			responses = append(responses, ServerStatusResponse{
+				Server:  RedactServerSecrets(srv),
+				Status:  "unknown",
+				Version: "",
+				Latency: 0,
+			})
+		}
 	}
+	nodeStatusMu.RUnlock()
 
-	wg.Wait()
 	c.JSON(http.StatusOK, responses)
 }
 
@@ -305,22 +296,14 @@ func addServerHandler(c *gin.Context) {
 		return
 	}
 
-	// Fetch status immediately to return complete record
-	client := NewOllamaClient(newSrv)
-	version, latency, err := client.CheckStatus()
-	status := "online"
-	if err != nil {
-		status = "offline"
-		version = ""
-		latency = 0
-	}
+	// Fetch status immediately so the new node is in the cache before we respond.
+	pollOneNodeStatus(newSrv)
 
-	c.JSON(http.StatusCreated, ServerStatusResponse{
-		Server:  RedactServerSecrets(newSrv),
-		Status:  status,
-		Version: version,
-		Latency: latency.Milliseconds(),
-	})
+	nodeStatusMu.RLock()
+	resp := nodeStatusCache[newSrv.ID].response
+	nodeStatusMu.RUnlock()
+
+	c.JSON(http.StatusCreated, resp)
 }
 
 func testServerHandler(c *gin.Context) {
@@ -443,34 +426,38 @@ func editServerHandler(c *gin.Context) {
 		return
 	}
 
-	client := NewOllamaClient(updatedSrv)
-	version, latency, err := client.CheckStatus()
-	status := "online"
-	if err != nil {
-		status = "offline"
-		version = ""
-		latency = 0
-	}
+	// Refresh cache for the updated node; invalidate stale model list.
+	invalidateNodeModelCache(updatedSrv.ID)
+	pollOneNodeStatus(updatedSrv)
 
-	c.JSON(http.StatusOK, ServerStatusResponse{
-		Server:  RedactServerSecrets(updatedSrv),
-		Status:  status,
-		Version: version,
-		Latency: latency.Milliseconds(),
-	})
+	nodeStatusMu.RLock()
+	resp := nodeStatusCache[updatedSrv.ID].response
+	nodeStatusMu.RUnlock()
+
+	c.JSON(http.StatusOK, resp)
 }
 
-// deleteServerHandler deletes a server by ID
+// deleteServerHandler deletes a server by ID and removes it from caches.
 func deleteServerHandler(c *gin.Context) {
 	id := c.Param("id")
 	if err := DeleteServer(id); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
+
+	// Drop from both caches.
+	nodeStatusMu.Lock()
+	delete(nodeStatusCache, id)
+	nodeStatusMu.Unlock()
+
+	nodeModelMu.Lock()
+	delete(nodeModelCache, id)
+	nodeModelMu.Unlock()
+
 	c.JSON(http.StatusOK, gin.H{"message": "Server deleted successfully"})
 }
 
-// selectServerHandler switches the active server
+// selectServerHandler switches the active server, returning status from cache.
 func selectServerHandler(c *gin.Context) {
 	id := c.Param("id")
 	srv, err := SetActiveServer(id)
@@ -479,7 +466,17 @@ func selectServerHandler(c *gin.Context) {
 		return
 	}
 
-	client := NewOllamaClient(srv)
+	nodeStatusMu.RLock()
+	entry, ok := nodeStatusCache[id]
+	nodeStatusMu.RUnlock()
+
+	if ok {
+		c.JSON(http.StatusOK, entry.response)
+		return
+	}
+
+	// Cache miss (shouldn't happen after warm-up) — fall back to live check.
+	client := NewPollerClient(srv)
 	version, latency, err := client.CheckStatus()
 	status := "online"
 	if err != nil {
@@ -496,7 +493,8 @@ func selectServerHandler(c *gin.Context) {
 	})
 }
 
-// getModelsHandler lists models on the active Ollama server
+// getModelsHandler returns the model list from the background cache — instant read.
+// Falls back to a live Ollama call only if the cache has never been populated.
 func getModelsHandler(c *gin.Context) {
 	activeSrv, err := GetActiveServer()
 	if err != nil {
@@ -504,6 +502,21 @@ func getModelsHandler(c *gin.Context) {
 		return
 	}
 
+	nodeModelMu.RLock()
+	entry, ok := nodeModelCache[activeSrv.ID]
+	nodeModelMu.RUnlock()
+
+	if ok {
+		c.JSON(http.StatusOK, gin.H{
+			"models":      entry.models,
+			"serverUrl":   activeSrv.URL,
+			"lastUpdated": entry.updatedAt.Unix(),
+			"fromCache":   true,
+		})
+		return
+	}
+
+	// Cache miss — node was just added or poller hasn't run yet; fetch live.
 	client := NewOllamaClient(activeSrv)
 	models, err := client.ListModels()
 	if err != nil {
@@ -514,6 +527,11 @@ func getModelsHandler(c *gin.Context) {
 		})
 		return
 	}
+
+	// Seed the cache so subsequent calls are instant.
+	nodeModelMu.Lock()
+	nodeModelCache[activeSrv.ID] = modelCacheEntry{models: models, updatedAt: time.Now()}
+	nodeModelMu.Unlock()
 
 	c.JSON(http.StatusOK, gin.H{
 		"models":    models,
@@ -571,6 +589,10 @@ func deleteModelsHandler(c *gin.Context) {
 		}
 	}
 
+	if len(successes) > 0 {
+		invalidateNodeModelCache(activeSrv.ID)
+	}
+
 	if len(errors) > 0 {
 		c.JSON(http.StatusMultiStatus, gin.H{
 			"successes": successes,
@@ -609,6 +631,7 @@ func copyModelHandler(c *gin.Context) {
 		return
 	}
 
+	invalidateNodeModelCache(activeSrv.ID)
 	c.JSON(http.StatusOK, gin.H{"message": "Model cloned successfully"})
 }
 
@@ -656,6 +679,7 @@ func pullModelSSEHandler(c *gin.Context) {
 	c.Header("Connection", "keep-alive")
 	c.Header("Transfer-Encoding", "chunked")
 
+	srvID := activeSrv.ID
 	c.Stream(func(w io.Writer) bool {
 		err := ParsePullProgress(stream, func(progress PullProgress) bool {
 			data, err := json.Marshal(progress)
@@ -668,6 +692,7 @@ func pullModelSSEHandler(c *gin.Context) {
 		if err != nil {
 			c.SSEvent("error", err.Error())
 		} else {
+			invalidateNodeModelCache(srvID)
 			c.SSEvent("success", "Model pull completed successfully")
 		}
 		return false
@@ -1159,6 +1184,7 @@ func createModelStreamHandler(c *gin.Context) {
 		return
 	}
 
+	createSrvID := activeSrv.ID
 	client := NewOllamaClient(activeSrv)
 
 	createReq := CreateRequest{
@@ -1191,6 +1217,7 @@ func createModelStreamHandler(c *gin.Context) {
 		if err := scanner.Err(); err != nil {
 			c.SSEvent("error", err.Error())
 		} else {
+			invalidateNodeModelCache(createSrvID)
 			c.SSEvent("done", "stream finished")
 		}
 		return false
@@ -1408,6 +1435,27 @@ type TelemetryPayload struct {
 var (
 	telemetryMutex   sync.Mutex
 	currentTelemetry TelemetryPayload
+)
+
+// ── Node & Model Cache ───────────────────────────────────────────────────────
+// Background goroutines keep these warm so API handlers are instant reads.
+
+type nodeCacheEntry struct {
+	response  ServerStatusResponse
+	updatedAt time.Time
+}
+
+type modelCacheEntry struct {
+	models    []OllamaModel
+	updatedAt time.Time
+}
+
+var (
+	nodeStatusMu    sync.RWMutex
+	nodeStatusCache map[string]nodeCacheEntry // keyed by server ID
+
+	nodeModelMu    sync.RWMutex
+	nodeModelCache map[string]modelCacheEntry // keyed by server ID
 )
 
 func isRemoteURL(urlStr string) bool {
@@ -1646,7 +1694,7 @@ func startTelemetryPoller() {
 			if err == nil {
 				nodeURL = activeSrv.URL
 				isRemote = isRemoteURL(activeSrv.URL)
-				client := NewOllamaClient(activeSrv)
+				client := NewPollerClient(activeSrv) // 3s timeout — telemetry must not block
 				models, err := client.ListActiveModels()
 				if err == nil {
 					activeModels = models
@@ -1663,6 +1711,116 @@ func startTelemetryPoller() {
 				ActiveModels: activeModels,
 			}
 			telemetryMutex.Unlock()
+		}
+	}()
+}
+
+// startNodeCachePoller initialises the status and model caches, pre-warms them
+// immediately, then keeps them fresh on background tickers.
+func startNodeCachePoller() {
+	nodeStatusCache = make(map[string]nodeCacheEntry)
+	nodeModelCache = make(map[string]modelCacheEntry)
+
+	go func() {
+		// Warm-up before the first ticker fires
+		pollAllNodeStatuses()
+		pollAllNodeModels()
+
+		statusTicker := time.NewTicker(5 * time.Second)
+		modelTicker := time.NewTicker(60 * time.Second)
+		defer statusTicker.Stop()
+		defer modelTicker.Stop()
+
+		for {
+			select {
+			case <-statusTicker.C:
+				pollAllNodeStatuses()
+			case <-modelTicker.C:
+				pollAllNodeModels()
+			}
+		}
+	}()
+}
+
+func pollAllNodeStatuses() {
+	srvs := GetServers()
+	var wg sync.WaitGroup
+	for _, srv := range srvs {
+		wg.Add(1)
+		go func(s Server) {
+			defer wg.Done()
+			pollOneNodeStatus(s)
+		}(srv)
+	}
+	wg.Wait()
+}
+
+func pollOneNodeStatus(srv Server) {
+	client := NewPollerClient(srv) // 3s timeout
+	version, latency, err := client.CheckStatus()
+	status := "online"
+	if err != nil {
+		status = "offline"
+		version = ""
+		latency = 0
+	}
+	entry := nodeCacheEntry{
+		response: ServerStatusResponse{
+			Server:  RedactServerSecrets(srv),
+			Status:  status,
+			Version: version,
+			Latency: latency.Milliseconds(),
+		},
+		updatedAt: time.Now(),
+	}
+	nodeStatusMu.Lock()
+	nodeStatusCache[srv.ID] = entry
+	nodeStatusMu.Unlock()
+}
+
+func pollAllNodeModels() {
+	srvs := GetServers()
+	var wg sync.WaitGroup
+	for _, srv := range srvs {
+		// Skip nodes that are known to be offline
+		nodeStatusMu.RLock()
+		entry, ok := nodeStatusCache[srv.ID]
+		nodeStatusMu.RUnlock()
+		if ok && entry.response.Status != "online" {
+			continue
+		}
+		wg.Add(1)
+		go func(s Server) {
+			defer wg.Done()
+			pollOneNodeModels(s)
+		}(srv)
+	}
+	wg.Wait()
+}
+
+func pollOneNodeModels(srv Server) {
+	client := NewOllamaClient(srv) // 10s — listing 100+ models can take a moment
+	models, err := client.ListModels()
+	if err != nil {
+		return // leave existing cache entry intact; poller will retry next cycle
+	}
+	nodeModelMu.Lock()
+	nodeModelCache[srv.ID] = modelCacheEntry{models: models, updatedAt: time.Now()}
+	nodeModelMu.Unlock()
+}
+
+// invalidateNodeModelCache drops a node's model cache entry and triggers an
+// immediate background re-poll so the next /api/models request hits fresh data.
+func invalidateNodeModelCache(serverID string) {
+	nodeModelMu.Lock()
+	delete(nodeModelCache, serverID)
+	nodeModelMu.Unlock()
+	go func() {
+		for _, s := range GetServers() {
+			if s.ID == serverID {
+				pollOneNodeModels(s)
+				return
+			}
 		}
 	}()
 }

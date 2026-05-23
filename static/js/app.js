@@ -12,6 +12,7 @@ let modelCardViewMode = 'safe';
 
 // New State for v0.0.2
 let activeWorkspace = 'inventory';
+let modelsLoaded = false; // lazy-load guard — only fetch on first Inventory tab visit
 let chatMessages = [];
 let isGeneratingChat = false;
 let isBuildingModel = false;
@@ -33,15 +34,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function init() {
   initAccordionRow();
-  await fetchServers();
-  // If we have an active server, fetch its models
-  const activeServer = servers.find(s => s.isActive);
-  if (activeServer && activeServer.status === 'online') {
-    await fetchModels();
-  } else {
-    updateActiveServerUI(activeServer);
-  }
-  // Initialize catalog view
+  // Non-blocking: fire and forget — page renders immediately, server cards and
+  // status dots fill in once the (now-instant) cache read completes.
+  fetchServers();
+  // Initialize catalog view (does not need server data)
   renderCatalog();
 
   // Add system prompt input listener
@@ -288,7 +284,11 @@ function switchWorkspace(workspace) {
   localStorage.setItem('active-workspace', workspace);
 
   // Tab specific actions
-  if (workspace === 'memory') {
+  if (workspace === 'inventory') {
+    if (!modelsLoaded) {
+      fetchModels();
+    }
+  } else if (workspace === 'memory') {
     fetchActiveModels();
   } else if (workspace === 'settings') {
     fetchSchedulerSettings();
@@ -637,10 +637,11 @@ async function selectServer(id) {
   try {
     const response = await fetch(`/api/servers/${id}/select`, { method: 'POST' });
     if (!response.ok) throw new Error('Failed to select server');
-    
+
     const updatedSrv = await response.json();
     showToast(`Switched active node to ${updatedSrv.name}`, 'success');
-    
+
+    modelsLoaded = false; // new server — invalidate lazy-load guard
     await fetchServers();
     
     // Clear selections and inspected model details
@@ -687,6 +688,7 @@ async function handleAddServer(event) {
     document.getElementById('add-server-form').reset();
     toggleAuthFields('add');
     
+    modelsLoaded = false; // new server may become active
     await fetchServers();
     // If we only have 1 server now, it became active automatically. Fetch models.
     if (servers.length === 1 && servers[0].status === 'online') {
@@ -719,6 +721,7 @@ async function handleEditServer(event) {
     showToast(`Node '${name}' updated successfully`, 'success');
     closeEditServerModal();
     
+    modelsLoaded = false; // edited node may be the active one — reload models
     await fetchServers();
     const active = servers.find(s => s.isActive);
     if (active && active.id === id) {
@@ -748,8 +751,9 @@ async function deleteServer(id) {
     showToast(`Node '${srv.name}' removed`, 'warning');
     const wasActive = srv.isActive;
     
+    if (wasActive) modelsLoaded = false; // active server removed — reload for new active
     await fetchServers();
-    
+
     if (wasActive) {
       const newActive = servers.find(s => s.isActive);
       if (newActive && newActive.status === 'online') {
@@ -890,6 +894,7 @@ async function fetchModels() {
     
     const data = await response.json();
     models = data.models || [];
+    modelsLoaded = true;
     renderModels();
   } catch (error) {
     console.error(error);

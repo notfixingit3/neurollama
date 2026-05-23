@@ -110,6 +110,28 @@ func NewOllamaClient(srv Server) *OllamaClient {
 	}
 }
 
+// NewPollerClient creates a short-timeout client (3s) for background health-check
+// goroutines. A slow or dead node stalls only its own goroutine, not the UI.
+// Use NewOllamaClient for user-initiated operations (pull, chat, generate).
+func NewPollerClient(srv Server) *OllamaClient {
+	transport := &authTransport{
+		underlying: http.DefaultTransport,
+		authType:   srv.AuthType,
+		token:      srv.AuthToken,
+		username:   srv.AuthUsername,
+		password:   srv.AuthPassword,
+		headerName: srv.AuthHeaderName,
+		headerVal:  srv.AuthHeaderVal,
+	}
+	return &OllamaClient{
+		BaseURL: srv.URL,
+		HTTPClient: &http.Client{
+			Timeout:   3 * time.Second,
+			Transport: transport,
+		},
+	}
+}
+
 // CheckStatus verifies connection to Ollama and returns version and latency
 func (c *OllamaClient) CheckStatus() (string, time.Duration, error) {
 	start := time.Now()
