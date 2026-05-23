@@ -983,17 +983,19 @@
               <span id="node-badge" class="badge badge-xs py-2 px-2 font-mono font-bold bg-[#bf616a] text-[#d8dee9] border-none ml-auto shrink-0">DISCONNECTED</span>
             </div>
 
-            <!-- Chart left, 2×2 bars right — inline styles for alignment so compiled CSS isn't a dependency -->
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-5" style="align-items:start">
-              <!-- Live canvas chart — fixed 128px -->
-              <div class="flex flex-col" style="height:128px">
+            <!-- Chart left, 2×2 bars right — pure inline-flex, no Tailwind grid classes needed -->
+            <div style="display:flex;gap:20px;height:128px;overflow:hidden">
+
+              <!-- Canvas column: overflow:hidden clips the canvas if it tries to grow past 128px -->
+              <div style="flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden">
                 <span class="text-[9px] font-mono text-[#4c566a]/70 mb-1">HOST // CPU &amp; MEM</span>
-                <canvas id="telemetry-chart" class="w-full flex-1 rounded bg-[#1a1c23] border border-[#4c566a]/20"></canvas>
+                <!-- min-height:0 lets the canvas shrink in flex even after canvas.height is set by JS -->
+                <canvas id="telemetry-chart" style="min-height:0;flex:1;width:100%" class="rounded bg-[#1a1c23] border border-[#4c566a]/20"></canvas>
               </div>
 
-              <!-- 4 metric bars in a 2×2 grid, vertically centred inside the same 128px -->
-              <div style="height:128px;display:flex;flex-direction:column;justify-content:center">
-                <div class="grid grid-cols-2 gap-x-6 gap-y-3 text-xs font-mono">
+              <!-- Bars column: 2×2 grid, vertically centred -->
+              <div style="flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:12px">
+                <div class="grid grid-cols-2 gap-x-6 text-xs font-mono" style="row-gap:12px">
                   <div>
                     <div class="flex justify-between mb-1">
                       <span id="host-cpu-label" class="text-[#4c566a] text-[10px]">HOST CPU</span>
@@ -1032,6 +1034,7 @@
                   </div>
                 </div>
               </div>
+
             </div>
           </div>
 
