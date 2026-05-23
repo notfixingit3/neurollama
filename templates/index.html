@@ -1472,10 +1472,16 @@
       </span>
     </div>
     <!-- Loaded model indicator -->
-    <div id="global-model-indicator" class="flex items-center gap-1.5 text-[#4c566a]" title="Models currently loaded in VRAM">
-      <i class="fa-solid fa-microchip text-[10px]"></i>
-      <span id="global-model-indicator-name" class="uppercase max-w-[160px] truncate inline-block align-middle">IDLE</span>
-      <span id="global-model-indicator-vram" class="uppercase hidden shrink-0"></span>
+    <div class="flex items-center gap-2">
+      <div id="global-model-indicator" class="flex items-center gap-1.5 text-[#4c566a]" title="Models currently loaded in VRAM">
+        <i class="fa-solid fa-microchip text-[10px]"></i>
+        <span id="global-model-indicator-name" class="uppercase max-w-[180px] truncate inline-block align-middle">IDLE</span>
+        <span id="global-model-indicator-vram" class="uppercase hidden shrink-0"></span>
+      </div>
+      <button id="footer-unload-btn" onclick="footerUnloadModel()" title="Evict model from VRAM"
+              class="hidden text-[#bf616a] hover:text-[#bf616a]/70 transition-colors leading-none">
+        <i class="fa-solid fa-eject text-[10px]"></i>
+      </button>
     </div>
     <div class="flex items-center gap-4">
       <a href="https://github.com/notfixingit3/neurollama" target="_blank" rel="noopener noreferrer" class="hover:text-[#88c0d0] transition-colors flex items-center gap-1.5">

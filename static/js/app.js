@@ -2585,6 +2585,18 @@ async function fetchActiveModels() {
   }
 }
 
+async function footerUnloadModel() {
+  if (!loadedModels || loadedModels.length === 0) return;
+  const names = loadedModels.map(m => m.name);
+  const msg = names.length === 1
+    ? `Evict "${names[0]}" from VRAM?`
+    : `Evict all ${names.length} loaded models from VRAM?`;
+  if (!confirm(msg)) return;
+  for (const name of names) {
+    await unloadModel(name);
+  }
+}
+
 async function unloadModel(name) {
   try {
     const response = await fetch('/api/models/unload', {
@@ -4466,6 +4478,7 @@ function closeImageLightbox() {
 
 let telemetryEventSource = null;
 let telemetryHistory = [];
+let loadedModels = [];           // module-level mirror of active_models for footer actions
 const MAX_TELEMETRY_POINTS = 50;
 
 function startTelemetrySSE() {
@@ -4550,6 +4563,7 @@ function handleTelemetryData(data) {
 
   // Compute Ollama node stats from /api/ps active_models
   const activeModels = data.active_models || [];
+  loadedModels = activeModels;   // keep module-level mirror in sync
   let totalVramBytes = 0, totalSysRamBytes = 0;
   activeModels.forEach(m => {
     totalVramBytes  += m.size_vram || 0;
@@ -4566,6 +4580,9 @@ function handleTelemetryData(data) {
   const configuredVramBytes = (activeSrv?.vramGb || 0) * (1024 ** 3);
   const usedVramGb = totalVramBytes / (1024 ** 3);
 
+  // Detect whether active server is local (app host == Ollama host)
+  const isLocalNode = !activeSrv?.url || /localhost|127\.0\.0\.1/.test(activeSrv.url);
+
   if (ollamaVramText) {
     if (activeModels.length > 0) {
       const usedStr = `${usedVramGb.toFixed(2)} GB`;
@@ -4576,39 +4593,50 @@ function handleTelemetryData(data) {
     }
   }
   if (ollamaSysText) {
-    ollamaSysText.textContent = activeModels.length > 0
-      ? `${(totalSysRamBytes / (1024 ** 3)).toFixed(2)} GB`
-      : '--- (idle)';
+    if (!isLocalNode) {
+      ollamaSysText.textContent = 'Local Ollama only';
+    } else {
+      ollamaSysText.textContent = activeModels.length > 0
+        ? `${(totalSysRamBytes / (1024 ** 3)).toFixed(2)} GB`
+        : '--- (idle)';
+    }
   }
 
   // Bar widths: use configured VRAM as scale if available, else fall back to host RAM total
   const ramTotal  = data.app_host.ram_total || 1;
   const vramScale = configuredVramBytes > 0 ? configuredVramBytes : ramTotal;
   if (ollamaVramBar)  ollamaVramBar.style.width  = `${Math.min(100, (totalVramBytes  / vramScale) * 100)}%`;
-  if (ollamaSysBar)   ollamaSysBar.style.width    = `${Math.min(100, (totalSysRamBytes / ramTotal)  * 100)}%`;
+  if (ollamaSysBar)   ollamaSysBar.style.width    = isLocalNode ? `${Math.min(100, (totalSysRamBytes / ramTotal) * 100)}%` : '0%';
 
-  // ── Global header model-loaded indicator ──────────────────────────────────
+  // ── Footer model-loaded indicator ─────────────────────────────────────────
   const modelIndicator     = document.getElementById('global-model-indicator');
   const modelIndicatorName = document.getElementById('global-model-indicator-name');
   const modelIndicatorVram = document.getElementById('global-model-indicator-vram');
+  const footerUnloadBtn    = document.getElementById('footer-unload-btn');
   if (modelIndicator && modelIndicatorName && modelIndicatorVram) {
     if (activeModels.length === 0) {
       modelIndicator.className = 'flex items-center gap-1.5 text-[#4c566a]';
       modelIndicatorName.textContent = 'IDLE';
       modelIndicatorVram.textContent = '';
       modelIndicatorVram.classList.add('hidden');
+      if (footerUnloadBtn) footerUnloadBtn.classList.add('hidden');
     } else {
       modelIndicator.className = 'flex items-center gap-1.5 text-[#a3be8c]';
       const totalLabel = configuredVramBytes > 0 ? `/${activeSrv.vramGb}G` : '';
       const vramStr    = `· ${usedVramGb.toFixed(1)}G${totalLabel}`;
       if (activeModels.length === 1) {
-        const shortName = (activeModels[0].name || '').split(':')[0].split('/').pop();
-        modelIndicatorName.textContent = shortName;
+        const m        = activeModels[0];
+        const baseName = (m.name || '').split(':')[0].split('/').pop();
+        const params   = m.details?.parameter_size || '';
+        const quant    = m.details?.quantization_level || '';
+        const meta     = [params, quant].filter(Boolean).join(' ');
+        modelIndicatorName.textContent = meta ? `${baseName} ${meta}` : baseName;
       } else {
         modelIndicatorName.textContent = `${activeModels.length} models`;
       }
       modelIndicatorVram.textContent = vramStr;
       modelIndicatorVram.classList.remove('hidden');
+      if (footerUnloadBtn) footerUnloadBtn.classList.remove('hidden');
       // Full names in title for hover tooltip
       modelIndicator.title = activeModels.map(m => m.name).join('\n');
     }
@@ -5341,11 +5369,11 @@ function retestBenchmark(modelName, benchType) {
   // Set the benchmark type buttons + update state
   setBenchmarkType(benchType || 'standard');
 
-  // After the model select is (re)populated, pick the right model
+  // After the model select is (re)populated, pick the right model then auto-start
   setTimeout(() => {
     const sel = document.getElementById('benchmark-model-select');
     if (sel) {
-      // Try exact match first, then prefix match
+      // Try exact match first, then base-name prefix match
       const exact = Array.from(sel.options).find(o => o.value === modelName);
       const prefix = Array.from(sel.options).find(o => o.value.startsWith(modelName.split(':')[0]));
       const match = exact || prefix;
@@ -5353,7 +5381,8 @@ function retestBenchmark(modelName, benchType) {
         sel.value = match.value;
       }
     }
-  }, 50);
+    startBenchmark();
+  }, 100);
 }
 
 function openScoreModal(id, currentScore, currentNotes) {
