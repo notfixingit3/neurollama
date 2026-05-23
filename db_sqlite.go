@@ -90,6 +90,7 @@ type RAGDocument struct {
 	EmbeddingModel string `json:"embedding_model"`
 	ChunkCount     int    `json:"chunk_count"`
 	CreatedAt      string `json:"created_at"`
+	ProbePhrase    string `json:"probe_phrase"` // first ~200 chars of chunk 0 for the TEST button
 }
 
 type RAGChunk struct {
@@ -789,11 +790,16 @@ func SaveRAGDocument(name string, embeddingModel string, chunks []RAGChunk) (int
 }
 
 func GetRAGDocuments() ([]RAGDocument, error) {
+	// Pull the first ~200 chars of chunk 0 per document as a probe phrase for the TEST button.
 	rows, err := DB.Query(`
-		SELECT d.id, d.name, d.embedding_model, 
+		SELECT d.id, d.name, d.embedding_model,
 		       (SELECT COUNT(*) FROM rag_chunks WHERE document_id = d.id) AS chunk_count,
-		       datetime(d.created_at, 'localtime') 
-		FROM rag_documents d 
+		       datetime(d.created_at, 'localtime'),
+		       SUBSTR(COALESCE(
+		           (SELECT content FROM rag_chunks WHERE document_id = d.id ORDER BY chunk_index LIMIT 1),
+		           ''
+		       ), 1, 200) AS probe_phrase
+		FROM rag_documents d
 		ORDER BY d.id DESC
 	`)
 	if err != nil {
@@ -804,7 +810,7 @@ func GetRAGDocuments() ([]RAGDocument, error) {
 	var list []RAGDocument
 	for rows.Next() {
 		var doc RAGDocument
-		if err := rows.Scan(&doc.ID, &doc.Name, &doc.EmbeddingModel, &doc.ChunkCount, &doc.CreatedAt); err != nil {
+		if err := rows.Scan(&doc.ID, &doc.Name, &doc.EmbeddingModel, &doc.ChunkCount, &doc.CreatedAt, &doc.ProbePhrase); err != nil {
 			return nil, err
 		}
 		list = append(list, doc)

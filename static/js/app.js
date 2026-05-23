@@ -6663,18 +6663,30 @@ async function loadRAGDocuments() {
     let html = '';
     docs.forEach(doc => {
       const createdDate = new Date(doc.created_at).toLocaleString();
+      // Escape probe phrase for use in onclick attribute (single-quoted JS string)
+      const probeEscaped = (doc.probe_phrase || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, ' ').trim();
+      const modelEscaped = (doc.embedding_model || '').replace(/'/g, "\\'");
+      const hasProbe = probeEscaped.length > 0;
       html += `
         <tr class="hover:bg-[#3b4252]/20 border-b border-[#4c566a]/20 last:border-none transition-colors">
-          <td class="py-2.5 pl-0 font-bold text-[#d8dee9] max-w-[200px] truncate" title="${escapeHTML(doc.name)}">
+          <td class="py-2.5 pl-0 font-bold text-[#d8dee9] max-w-[180px] truncate" title="${escapeHTML(doc.name)}">
             <i class="fa-regular fa-file-code text-[#88c0d0] mr-1.5"></i>${escapeHTML(doc.name)}
           </td>
           <td class="py-2.5 text-[#4c566a] text-xs font-mono select-all">${escapeHTML(doc.embedding_model)}</td>
           <td class="py-2.5 text-center text-[#88c0d0] font-bold">${doc.chunk_count || 0}</td>
           <td class="py-2.5 text-[#4c566a] text-[10px]">${createdDate}</td>
           <td class="py-2.5 text-center pr-0">
-            <button onclick="deleteRAGDocument(${doc.id}, '${escapeHTML(doc.name)}')" class="btn btn-ghost btn-xs text-[#bf616a] hover:bg-[#bf616a]/15 p-1 h-auto min-h-0">
-              <i class="fa-solid fa-trash-can text-[10px]"></i>
-            </button>
+            <div class="flex items-center justify-center gap-1">
+              ${hasProbe ? `
+              <button onclick="testRAGDocument('${probeEscaped}', '${modelEscaped}')"
+                      title="Auto-test: runs a similarity search using an excerpt from this document to verify retrieval works"
+                      class="btn btn-ghost btn-xs text-[#a3be8c] hover:bg-[#a3be8c]/15 p-1 h-auto min-h-0 font-tech text-[9px]">
+                <i class="fa-solid fa-flask text-[10px]"></i> TEST
+              </button>` : ''}
+              <button onclick="deleteRAGDocument(${doc.id}, '${escapeHTML(doc.name)}')" class="btn btn-ghost btn-xs text-[#bf616a] hover:bg-[#bf616a]/15 p-1 h-auto min-h-0">
+                <i class="fa-solid fa-trash-can text-[10px]"></i>
+              </button>
+            </div>
           </td>
         </tr>
       `;
@@ -6714,9 +6726,33 @@ async function deleteRAGDocument(id, name) {
   }
 }
 
+// Pre-fills the similarity tester with a known phrase from the document and fires the query.
+// The probe phrase is the first ~200 chars of chunk 0, fetched from the server alongside the document list.
+function testRAGDocument(probePhrase, embeddingModel) {
+  const queryInput  = document.getElementById('rag-test-query');
+  const modelSelect = document.getElementById('rag-model-select');
+  if (!queryInput || !modelSelect) return;
+
+  // Set the embedding model to match the document's model
+  if (embeddingModel && modelSelect.querySelector(`option[value="${CSS.escape(embeddingModel)}"]`)) {
+    modelSelect.value = embeddingModel;
+  }
+
+  // Fill the query with the probe phrase
+  queryInput.value = probePhrase;
+
+  // Scroll the similarity tester panel into view and highlight the input briefly
+  queryInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  queryInput.classList.add('border-[#a3be8c]');
+  setTimeout(() => queryInput.classList.remove('border-[#a3be8c]'), 1500);
+
+  // Run the query
+  runRAGSimilarityQuery();
+}
+
 async function runRAGSimilarityQuery() {
-  const queryInput = document.getElementById('rag-test-query');
-  const resultsDiv = document.getElementById('rag-query-results');
+  const queryInput  = document.getElementById('rag-test-query');
+  const resultsDiv  = document.getElementById('rag-query-results');
   const modelSelect = document.getElementById('rag-model-select');
   
   if (!queryInput || !resultsDiv || !modelSelect) return;
