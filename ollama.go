@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -146,6 +148,10 @@ func (c *OllamaClient) ListModels() ([]OllamaModel, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&tagsResp); err != nil {
 		return nil, fmt.Errorf("failed to parse tags response: %w", err)
 	}
+
+	sort.Slice(tagsResp.Models, func(i, j int) bool {
+		return strings.ToLower(tagsResp.Models[i].Name) < strings.ToLower(tagsResp.Models[j].Name)
+	})
 
 	return tagsResp.Models, nil
 }
