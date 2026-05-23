@@ -175,6 +175,19 @@ async function init() {
     });
   }
 
+  // Persist model dropdown selections across page loads
+  [
+    ['chat-model-select',       'neurollama-chat-model'],
+    ['completion-model-select', 'neurollama-completion-model'],
+    ['builder-base-select',     'neurollama-builder-model'],
+    ['benchmark-model-select',  'neurollama-bench-model'],
+    ['optimizer-model-select',  'neurollama-optimizer-model'],
+    ['rag-model-select',        'neurollama-rag-model'],
+  ].forEach(([id, key]) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', () => localStorage.setItem(key, el.value));
+  });
+
   // Initialize RAG drag-and-drop & file input listeners
   const dragZone = document.getElementById('rag-drag-zone');
   const fileInput = document.getElementById('rag-file-input');
@@ -373,34 +386,46 @@ function populateModelDropdowns() {
     if (ragSelect) ragSelect.innerHTML = noModels;
     if (chatRagSelect) chatRagSelect.innerHTML = noModels;
   } else {
-    if (chatSelect) chatSelect.innerHTML = options;
+    if (chatSelect) {
+      const currentSelected = chatSelect.value || localStorage.getItem('neurollama-chat-model') || '';
+      chatSelect.innerHTML = options;
+      if (currentSelected && chatSelect.querySelector(`option[value="${CSS.escape(currentSelected)}"]`)) {
+        chatSelect.value = currentSelected;
+      }
+    }
     if (builderSelect) {
-      const currentSelected = builderSelect.value;
+      const currentSelected = builderSelect.value || localStorage.getItem('neurollama-builder-model') || '';
       builderSelect.innerHTML = '<option value="">-- Select a base model --</option>' + options;
-      if (currentSelected && builderSelect.querySelector(`option[value="${currentSelected}"]`)) {
+      if (currentSelected && builderSelect.querySelector(`option[value="${CSS.escape(currentSelected)}"]`)) {
         builderSelect.value = currentSelected;
       }
     }
     if (benchmarkSelect) populateBenchmarkModelSelect();
-    if (optimizerSelect) optimizerSelect.innerHTML = options;
+    if (optimizerSelect) {
+      const currentSelected = optimizerSelect.value || localStorage.getItem('neurollama-optimizer-model') || '';
+      optimizerSelect.innerHTML = options;
+      if (currentSelected && optimizerSelect.querySelector(`option[value="${CSS.escape(currentSelected)}"]`)) {
+        optimizerSelect.value = currentSelected;
+      }
+    }
     if (ragSelect) {
-      const currentSelected = ragSelect.value;
+      const currentSelected = ragSelect.value || localStorage.getItem('neurollama-rag-model') || '';
       ragSelect.innerHTML = options;
-      if (currentSelected && ragSelect.querySelector(`option[value="${currentSelected}"]`)) {
+      if (currentSelected && ragSelect.querySelector(`option[value="${CSS.escape(currentSelected)}"]`)) {
         ragSelect.value = currentSelected;
       }
     }
     if (chatRagSelect) {
-      const currentSelected = chatRagSelect.value;
+      const currentSelected = chatRagSelect.value || localStorage.getItem('chat-rag-model-select') || '';
       chatRagSelect.innerHTML = options;
-      if (currentSelected && chatRagSelect.querySelector(`option[value="${currentSelected}"]`)) {
+      if (currentSelected && chatRagSelect.querySelector(`option[value="${CSS.escape(currentSelected)}"]`)) {
         chatRagSelect.value = currentSelected;
       }
     }
     if (completionSelect) {
-      const currentSelected = completionSelect.value;
+      const currentSelected = completionSelect.value || localStorage.getItem('neurollama-completion-model') || '';
       completionSelect.innerHTML = options;
-      if (currentSelected && completionSelect.querySelector(`option[value="${currentSelected}"]`)) {
+      if (currentSelected && completionSelect.querySelector(`option[value="${CSS.escape(currentSelected)}"]`)) {
         completionSelect.value = currentSelected;
       }
     }
@@ -5566,10 +5591,14 @@ function populateBenchmarkModelSelect() {
     select.innerHTML = '<option value="">-- No compatible models found --</option>';
     return;
   }
+  const currentSelected = select.value || localStorage.getItem('neurollama-bench-model') || '';
   select.innerHTML = filtered.map(m => {
     const paramSize = (m.details && m.details.parameter_size) || '?';
     return `<option value="${m.name}">${m.name} (${paramSize})</option>`;
   }).join('');
+  if (currentSelected && select.querySelector(`option[value="${CSS.escape(currentSelected)}"]`)) {
+    select.value = currentSelected;
+  }
 }
 
 function setBenchmarkType(type) {
