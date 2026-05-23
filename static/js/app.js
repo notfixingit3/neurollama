@@ -346,7 +346,7 @@ function populateModelDropdowns() {
         builderSelect.value = currentSelected;
       }
     }
-    if (benchmarkSelect) benchmarkSelect.innerHTML = options;
+    if (benchmarkSelect) populateBenchmarkModelSelect();
     if (optimizerSelect) optimizerSelect.innerHTML = options;
     if (ragSelect) {
       const currentSelected = ragSelect.value;
@@ -964,6 +964,13 @@ function renderModels() {
     const rowId = modelRowId(model.name);
     const isOpen = openAccordionModel === model.name;
 
+    // Capability badges
+    const caps = getModelCapabilities(model);
+    const capBadgeHtml = [
+      caps.includes('vision')    ? '<span class="inline-flex items-center gap-0.5 border border-[#b48ead] text-[#b48ead] rounded px-1 text-[8px] font-mono font-bold"><i class="fa-solid fa-eye text-[7px]"></i>VIS</span>' : '',
+      caps.includes('embedding') ? '<span class="inline-flex items-center gap-0.5 border border-[#ebcb8b] text-[#ebcb8b] rounded px-1 text-[8px] font-mono font-bold"><i class="fa-solid fa-layer-group text-[7px]"></i>EMB</span>' : '',
+    ].filter(Boolean).join('');
+
     return `
       <tr id="${rowId}" class="hover:bg-[#3b4252]/30 border-b border-[#4c566a]/30 transition-colors${isOpen ? ' bg-[#3b4252]/20' : ''}">
         <td>
@@ -971,8 +978,9 @@ function renderModels() {
                  class="checkbox checkbox-xs checkbox-primary border-[#4c566a]" />
         </td>
         <td>
-          <div class="font-bold text-[#e5e9f0] cursor-pointer hover:text-[#88c0d0] transition-colors" onclick="inspectModel('${model.name}')">
-            ${model.name}
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <span class="font-bold text-[#e5e9f0] cursor-pointer hover:text-[#88c0d0] transition-colors" onclick="inspectModel('${model.name}')">${model.name}</span>
+            ${capBadgeHtml}
           </div>
           <span class="text-[9px] text-[#4c566a] block sm:hidden">${sizeFormatted} // ${paramSize}</span>
           <span class="text-[9px] text-[#4c566a] block">Modified: ${dateFormatted}</span>
@@ -3153,16 +3161,28 @@ function renderCatalog() {
       return m.name === item.name || nameOnlyLocal === nameOnlyCatalog;
     });
 
+    // Derive capability badges from category + name for catalog items
+    const catalogCaps = getModelCapabilities({ name: item.name, details: {
+      families: item.category === 'Multimodal' ? ['clip'] : []
+    }});
+    const catalogBadges = [
+      catalogCaps.includes('vision')    ? '<span class="inline-flex items-center gap-0.5 border border-[#b48ead] text-[#b48ead] rounded px-1 text-[7px] font-mono font-bold"><i class="fa-solid fa-eye text-[6px]"></i>VIS</span>' : '',
+      catalogCaps.includes('embedding') ? '<span class="inline-flex items-center gap-0.5 border border-[#ebcb8b] text-[#ebcb8b] rounded px-1 text-[7px] font-mono font-bold"><i class="fa-solid fa-layer-group text-[6px]"></i>EMB</span>' : '',
+    ].filter(Boolean).join('');
+
     return `
       <div class="p-2.5 border border-[#4c566a]/30 bg-[#242933]/30 rounded-lg flex flex-col justify-between gap-1.5 hover:border-[#4c566a]/60 transition-colors">
         <div class="flex justify-between items-start gap-1">
           <div class="min-w-0">
-            <span class="font-bold text-[#e5e9f0] block truncate text-xs" title="${item.name}">${item.name}</span>
+            <div class="flex items-center gap-1 flex-wrap">
+              <span class="font-bold text-[#e5e9f0] truncate text-xs" title="${item.name}">${item.name}</span>
+              ${catalogBadges}
+            </div>
             <span class="text-[9px] text-[#4c566a] block truncate">${item.size} // <span class="text-[#81a1c1]">${item.category}</span></span>
           </div>
           <div class="shrink-0">
-            ${isInstalled ? 
-              `<span class="badge bg-[#a3be8c]/15 border-[#a3be8c]/40 text-[#a3be8c] text-[8px] font-mono px-1.5 py-0.5 rounded font-bold uppercase tracking-wider"><i class="fa-solid fa-check mr-0.5"></i>INSTALLED</span>` : 
+            ${isInstalled ?
+              `<span class="badge bg-[#a3be8c]/15 border-[#a3be8c]/40 text-[#a3be8c] text-[8px] font-mono px-1.5 py-0.5 rounded font-bold uppercase tracking-wider"><i class="fa-solid fa-check mr-0.5"></i>INSTALLED</span>` :
               `<button onclick="pullCatalogModel('${item.name}')" class="btn btn-xs btn-outline btn-info font-tech text-[9px] px-2 py-0 h-5 min-h-0 uppercase">PULL</button>`
             }
           </div>
@@ -4789,6 +4809,34 @@ async function triggerManualCompression() {
   }
 }
 
+// --- MODEL CAPABILITY DETECTION ---
+
+/**
+ * Returns array of capability strings for a model object.
+ * Capabilities: 'vision', 'embedding', 'llm'
+ */
+function getModelCapabilities(model) {
+  const caps = [];
+  const families = (model.details && model.details.families) || [];
+  const name = (model.name || '').toLowerCase();
+
+  // Vision: Ollama sets 'clip' family for multimodal models
+  if (families.some(f => f === 'clip') ||
+      /llava|gemma3|minicpm[\-_]v|bakllava|moondream|cogvlm|internvl|vision|qwen.*vl|phi.*vision|pixtral/.test(name)) {
+    caps.push('vision');
+  }
+  // Embedding: Ollama sets 'bert' / 'nomic-bert' families for embedding models
+  if (families.some(f => /bert/.test(f)) ||
+      /embed|nomic|mxbai|bge[-_]|e5[-_]|minilm|all-minilm|gte[-_]/.test(name)) {
+    caps.push('embedding');
+  }
+  // Anything that isn't a pure embedding model can run standard/reasoning/longctx
+  if (!caps.includes('embedding')) {
+    caps.push('llm');
+  }
+  return caps;
+}
+
 // --- INFERENCE BENCHMARKER ---
 
 let benchmarkEventSource = null;
@@ -4804,6 +4852,31 @@ const BENCH_TYPE_HINTS = {
   reasoning: 'Any LLM — factual accuracy & math test',
 };
 
+// Benchmark model select: filtered by capability
+function populateBenchmarkModelSelect() {
+  const select = document.getElementById('benchmark-model-select');
+  if (!select) return;
+
+  let filtered = models;
+  if (currentBenchmarkType === 'vision') {
+    filtered = models.filter(m => getModelCapabilities(m).includes('vision'));
+  } else if (currentBenchmarkType === 'embedding') {
+    filtered = models.filter(m => getModelCapabilities(m).includes('embedding'));
+  } else {
+    // standard / longctx / reasoning — exclude pure embedding models
+    filtered = models.filter(m => getModelCapabilities(m).includes('llm'));
+  }
+
+  if (filtered.length === 0) {
+    select.innerHTML = '<option value="">-- No compatible models found --</option>';
+    return;
+  }
+  select.innerHTML = filtered.map(m => {
+    const paramSize = (m.details && m.details.parameter_size) || '?';
+    return `<option value="${m.name}">${m.name} (${paramSize})</option>`;
+  }).join('');
+}
+
 function setBenchmarkType(type) {
   currentBenchmarkType = type;
   BENCH_TYPES.forEach(t => {
@@ -4812,6 +4885,7 @@ function setBenchmarkType(type) {
   });
   const hint = document.getElementById('benchmark-type-hint');
   if (hint) hint.textContent = BENCH_TYPE_HINTS[type] || '';
+  populateBenchmarkModelSelect();
 }
 
 function setLbFilter(filter) {
@@ -4821,6 +4895,31 @@ function setLbFilter(filter) {
     const btn = document.getElementById(`lb-filter-${f}`);
     if (btn) btn.classList.toggle('bench-type-btn-active', f === filter);
   });
+  fetchBenchmarks();
+}
+
+// Leaderboard sort state
+let lbSortCol = 'created_at';
+let lbSortDir = 'desc';
+const SCORE_ORDER = { S: 5, A: 4, B: 3, C: 2, F: 1 };
+
+function setLbSort(col) {
+  if (lbSortCol === col) {
+    lbSortDir = lbSortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    lbSortCol = col;
+    lbSortDir = (col === 'model_name' || col === 'server_name') ? 'asc' : 'desc';
+  }
+  // Update header sort indicators
+  document.querySelectorAll('[id^="sort-indicator-"]').forEach(el => {
+    el.innerHTML = '<i class="fa-solid fa-sort text-[9px]"></i>';
+    el.className = 'text-[#4c566a]';
+  });
+  const indicator = document.getElementById(`sort-indicator-${col}`);
+  if (indicator) {
+    indicator.innerHTML = `<i class="fa-solid fa-sort-${lbSortDir === 'asc' ? 'up' : 'down'} text-[9px]"></i>`;
+    indicator.className = 'text-[#88c0d0]';
+  }
   fetchBenchmarks();
 }
 
@@ -4959,10 +5058,26 @@ async function fetchBenchmarks() {
 
     // Client-side filter by selected type
     const filtered = (!list || currentLbFilter === 'all')
-      ? list
+      ? (list || [])
       : list.filter(b => (b.benchmark_type || 'standard') === currentLbFilter);
 
-    if (!filtered || filtered.length === 0) {
+    // Client-side sort
+    filtered.sort((a, b) => {
+      let av, bv;
+      switch (lbSortCol) {
+        case 'model_name':    av = (a.model_name || '').toLowerCase();    bv = (b.model_name || '').toLowerCase();    break;
+        case 'server_name':   av = (a.server_name || '').toLowerCase();   bv = (b.server_name || '').toLowerCase();   break;
+        case 'ttft_ms':       av = a.ttft_ms;        bv = b.ttft_ms;       break;
+        case 'tps':           av = a.tps;            bv = b.tps;           break;
+        case 'avg_latency_ms':av = a.avg_latency_ms; bv = b.avg_latency_ms;break;
+        case 'score':         av = SCORE_ORDER[a.reasoning_score] || 0; bv = SCORE_ORDER[b.reasoning_score] || 0; break;
+        default:              av = new Date(a.created_at || 0).getTime(); bv = new Date(b.created_at || 0).getTime();
+      }
+      if (typeof av === 'string') return lbSortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+      return lbSortDir === 'asc' ? av - bv : bv - av;
+    });
+
+    if (filtered.length === 0) {
       const label = currentLbFilter === 'all' ? '' : ` for type "${currentLbFilter}"`;
       tbody.innerHTML = `
         <tr>

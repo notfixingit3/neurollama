@@ -1194,13 +1194,13 @@
                 <div class="overflow-x-auto">
                   <table class="table table-xs w-full text-xs font-mono text-[#d8dee9] border-collapse">
                     <thead>
-                      <tr class="text-[#88c0d0] border-b border-[#4c566a]/40">
-                        <th class="bg-transparent text-left py-2 font-tech uppercase">Model</th>
-                        <th class="bg-transparent text-left py-2 font-tech uppercase">Server</th>
-                        <th class="bg-transparent text-center py-2 font-tech uppercase">TTFT</th>
-                        <th class="bg-transparent text-center py-2 font-tech uppercase">Metric</th>
-                        <th class="bg-transparent text-center py-2 font-tech uppercase">Latency</th>
-                        <th class="bg-transparent text-center py-2 font-tech uppercase">Score</th>
+                      <tr class="text-[#88c0d0] border-b border-[#4c566a]/40 select-none">
+                        <th class="bg-transparent text-left py-2 font-tech uppercase cursor-pointer hover:text-[#d8dee9]" onclick="setLbSort('model_name')">Model <span id="sort-indicator-model_name" class="text-[#4c566a]"><i class="fa-solid fa-sort text-[9px]"></i></span></th>
+                        <th class="bg-transparent text-left py-2 font-tech uppercase cursor-pointer hover:text-[#d8dee9]" onclick="setLbSort('server_name')">Server <span id="sort-indicator-server_name" class="text-[#4c566a]"><i class="fa-solid fa-sort text-[9px]"></i></span></th>
+                        <th class="bg-transparent text-center py-2 font-tech uppercase cursor-pointer hover:text-[#d8dee9]" onclick="setLbSort('ttft_ms')">TTFT <span id="sort-indicator-ttft_ms" class="text-[#4c566a]"><i class="fa-solid fa-sort text-[9px]"></i></span></th>
+                        <th class="bg-transparent text-center py-2 font-tech uppercase cursor-pointer hover:text-[#d8dee9]" onclick="setLbSort('tps')">Metric <span id="sort-indicator-tps" class="text-[#4c566a]"><i class="fa-solid fa-sort text-[9px]"></i></span></th>
+                        <th class="bg-transparent text-center py-2 font-tech uppercase cursor-pointer hover:text-[#d8dee9]" onclick="setLbSort('avg_latency_ms')">Latency <span id="sort-indicator-avg_latency_ms" class="text-[#4c566a]"><i class="fa-solid fa-sort text-[9px]"></i></span></th>
+                        <th class="bg-transparent text-center py-2 font-tech uppercase cursor-pointer hover:text-[#d8dee9]" onclick="setLbSort('score')">Score <span id="sort-indicator-score" class="text-[#4c566a]"><i class="fa-solid fa-sort text-[9px]"></i></span></th>
                         <th class="bg-transparent text-right py-2 font-tech uppercase">Actions</th>
                       </tr>
                     </thead>
