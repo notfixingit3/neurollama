@@ -26,7 +26,7 @@
 
 **NEUROLLAMA** is a lightweight, self-hosted web control panel that provides a beautiful, techy interface to connect, monitor, and query your Ollama instances. Styled using the **Nord Palette** and built with **Go (Gin)** and **Tailwind CSS/daisyUI**, it is designed to look like a futuristic command console from 2026.
 
-With NEUROLLAMA, you can connect to multiple local or remote servers, monitor active VRAM usage, inspect model parameters/configs, build new models using custom Modelfiles, run diagnostics, and chat with models inside a premium Terminal Emulator Playground.
+With NEUROLLAMA, you can connect to multiple local or remote servers, inspect which models are currently loaded in memory, inspect model parameters/configs, build new models using custom Modelfiles, run diagnostics, and chat with models inside a premium Terminal Emulator Playground.
 
 ---
 
@@ -57,7 +57,8 @@ With NEUROLLAMA, you can connect to multiple local or remote servers, monitor ac
   - Automatically compiles a Modelfile from your base model, system prompt, temperature, and custom parameters.
   - Real-time build progress logs stream directly to the UI, with cancellation support.
 - **📼 Memory Telemetry**:
-  - Direct VRAM inspection to view which models are currently active in memory, their sizes, and which processor (GPU vs CPU) they are running on.
+  - View which models Ollama currently has loaded, their sizes, and whether they are mapped to GPU VRAM or system RAM — sourced from Ollama's `/api/ps` endpoint.
+  - ⚠️ **Remote node limitation**: Ollama's API does not expose total VRAM capacity or GPU utilization. For remote servers, loaded model sizes are shown accurately but VRAM percentage bars are not meaningful. The "App Host" CPU/RAM panel always reflects the machine running NEUROLLAMA, not the remote Ollama host.
 - **🩺 Preflight Diagnostics**:
   - Validate SQLite, data directory writability, static assets, active Ollama reachability, model inventory access, settings, and streaming route readiness.
 - **📈 Benchmarks & Optimizer**:
