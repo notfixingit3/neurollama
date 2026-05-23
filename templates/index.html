@@ -969,83 +969,68 @@
         <!-- PANEL 4: MEMORY STATUS -->
         <div id="ws-panel-memory" class="ws-panel hidden flex flex-col gap-6">
 
-          <!-- Row 1: Node Connectivity & Host Stats — full width -->
-          <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col gap-4">
-            <div class="flex flex-wrap items-center gap-2 pb-2 border-b border-[#4c566a]/40">
-              <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] flex-1 min-w-0">
+          <!-- Row 1: Node Connectivity & Host Stats — full width, compact -->
+          <div class="tech-panel tech-header-accent rounded-xl px-4 py-3 flex flex-col gap-2">
+            <!-- Header: title + node info + badge all inline -->
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-1 pb-2 border-b border-[#4c566a]/40">
+              <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] shrink-0">
                 <i class="fa-solid fa-server mr-2"></i>Node Connectivity & Host Stats
               </h2>
-              <span id="node-badge" class="badge badge-xs py-2 px-2 font-mono font-bold bg-[#bf616a] text-[#d8dee9] border-none shrink-0">DISCONNECTED</span>
+              <span class="text-[10px] font-mono text-[#4c566a]">NODE:
+                <span id="telemetry-node-url" class="text-[#88c0d0] font-bold">---</span>
+              </span>
+              <span class="text-[10px] font-mono text-[#4c566a]">TYPE:
+                <span id="telemetry-node-type" class="text-[#88c0d0] font-bold">---</span>
+              </span>
+              <span id="node-badge" class="badge badge-xs py-2 px-2 font-mono font-bold bg-[#bf616a] text-[#d8dee9] border-none ml-auto shrink-0">DISCONNECTED</span>
             </div>
 
-            <!-- Node info row -->
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs font-mono bg-[#2e3440]/60 p-3 rounded-lg border border-[#4c566a]/30">
-              <div>
-                <span class="text-[#4c566a]">ACTIVE NODE:</span>
-                <div id="telemetry-node-url" class="text-[#88c0d0] truncate font-bold">---</div>
-              </div>
-              <div>
-                <span class="text-[#4c566a]">NODE TYPE:</span>
-                <div id="telemetry-node-type" class="text-[#88c0d0] font-bold">---</div>
-              </div>
-            </div>
-
-            <!-- Chart + bars side-by-side at full width -->
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <!-- Live canvas chart -->
-              <div class="flex flex-col min-h-[160px]">
-                <div class="flex items-baseline gap-2 mb-1">
-                  <span class="text-[10px] font-mono text-[#4c566a]">HOST // CPU & MEM</span>
-                  <span class="text-[9px] font-mono text-[#4c566a]/60 italic">this machine, not the Ollama node</span>
-                </div>
+            <!-- Chart + all 4 metric bars in one compact row -->
+            <div class="grid grid-cols-1 lg:grid-cols-[1fr_2fr] gap-4 items-center">
+              <!-- Live canvas chart — fixed short height -->
+              <div class="flex flex-col h-16">
+                <span class="text-[9px] font-mono text-[#4c566a]/70 mb-0.5">HOST // CPU &amp; MEM</span>
                 <canvas id="telemetry-chart" class="w-full flex-1 rounded bg-[#1a1c23] border border-[#4c566a]/20"></canvas>
               </div>
 
-              <!-- Metric bars — 4 columns at full width -->
-              <div class="space-y-3 text-xs font-mono">
-                <div class="text-[9px] uppercase tracking-wider text-[#4c566a] border-b border-[#4c566a]/20 pb-1">This Machine</div>
-                <div class="grid grid-cols-2 gap-4">
-                  <div>
-                    <div class="flex justify-between text-[11px] mb-1">
-                      <span id="host-cpu-label" class="text-[#4c566a]">HOST CPU:</span>
-                      <span id="host-cpu-text" class="text-[#88c0d0]">0.0%</span>
-                    </div>
-                    <div class="w-full bg-[#3b4252] rounded-full h-1.5 overflow-hidden">
-                      <div id="host-cpu-bar" class="bg-[#88c0d0] h-1.5" style="width: 0%"></div>
-                    </div>
+              <!-- 4 metric bars in one row -->
+              <div class="grid grid-cols-2 md:grid-cols-4 gap-x-5 gap-y-2 text-[11px] font-mono">
+                <div>
+                  <div class="flex justify-between mb-0.5">
+                    <span id="host-cpu-label" class="text-[#4c566a] text-[10px]">HOST CPU</span>
+                    <span id="host-cpu-text" class="text-[#88c0d0]">0.0%</span>
                   </div>
-                  <div>
-                    <div class="flex justify-between text-[11px] mb-1">
-                      <span id="host-ram-label" class="text-[#4c566a]">HOST RAM:</span>
-                      <span id="host-ram-text" class="text-[#a3be8c]">0.0 GB / 0.0 GB</span>
-                    </div>
-                    <div class="w-full bg-[#3b4252] rounded-full h-1.5 overflow-hidden">
-                      <div id="host-ram-bar" class="bg-[#a3be8c] h-1.5" style="width: 0%"></div>
-                    </div>
+                  <div class="w-full bg-[#3b4252] rounded-full h-1.5 overflow-hidden">
+                    <div id="host-cpu-bar" class="bg-[#88c0d0] h-1.5" style="width: 0%"></div>
                   </div>
                 </div>
-                <div class="text-[9px] uppercase tracking-wider text-[#4c566a] border-b border-[#4c566a]/20 pb-1">Ollama Node (via /api/ps)</div>
-                <div class="grid grid-cols-2 gap-4">
-                  <div>
-                    <div class="flex justify-between text-[11px] mb-1">
-                      <span class="text-[#4c566a]">GPU VRAM:</span>
-                      <span id="ollama-vram-text" class="text-[#ebcb8b]">---</span>
-                    </div>
-                    <div class="w-full bg-[#3b4252] rounded-full h-1.5 overflow-hidden">
-                      <div id="ollama-vram-bar" class="bg-[#ebcb8b] h-1.5" style="width: 0%"></div>
-                    </div>
+                <div>
+                  <div class="flex justify-between mb-0.5">
+                    <span id="host-ram-label" class="text-[#4c566a] text-[10px]">HOST RAM</span>
+                    <span id="host-ram-text" class="text-[#a3be8c] text-[10px]">0.0 / 0.0 GB</span>
                   </div>
-                  <div>
-                    <div class="flex justify-between text-[11px] mb-1">
-                      <span class="text-[#4c566a]">SYS RAM:</span>
-                      <span id="ollama-sysram-text" class="text-[#b48ead]">---</span>
-                    </div>
-                    <div class="w-full bg-[#3b4252] rounded-full h-1.5 overflow-hidden">
-                      <div id="ollama-sysram-bar" class="bg-[#b48ead] h-1.5" style="width: 0%"></div>
-                    </div>
+                  <div class="w-full bg-[#3b4252] rounded-full h-1.5 overflow-hidden">
+                    <div id="host-ram-bar" class="bg-[#a3be8c] h-1.5" style="width: 0%"></div>
                   </div>
                 </div>
-                <p class="text-[9px] text-[#4c566a]/70 italic">GPU VRAM and SYS RAM reflect loaded model allocations only — total capacity not exposed by Ollama API.</p>
+                <div>
+                  <div class="flex justify-between mb-0.5">
+                    <span class="text-[#4c566a] text-[10px]">GPU VRAM</span>
+                    <span id="ollama-vram-text" class="text-[#ebcb8b]">---</span>
+                  </div>
+                  <div class="w-full bg-[#3b4252] rounded-full h-1.5 overflow-hidden">
+                    <div id="ollama-vram-bar" class="bg-[#ebcb8b] h-1.5" style="width: 0%"></div>
+                  </div>
+                </div>
+                <div>
+                  <div class="flex justify-between mb-0.5">
+                    <span class="text-[#4c566a] text-[10px]">SYS RAM</span>
+                    <span id="ollama-sysram-text" class="text-[#b48ead]">---</span>
+                  </div>
+                  <div class="w-full bg-[#3b4252] rounded-full h-1.5 overflow-hidden">
+                    <div id="ollama-sysram-bar" class="bg-[#b48ead] h-1.5" style="width: 0%"></div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
