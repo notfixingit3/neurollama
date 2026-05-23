@@ -12,6 +12,7 @@ let modelCardViewMode = 'safe';
 
 // New State for v0.0.2
 let activeWorkspace = 'inventory';
+let activeSystemSubtab = 'memory'; // sub-tab active inside the System workspace
 let modelsLoaded = false; // lazy-load guard — only fetch on first Inventory tab visit
 
 // Inventory pagination (client-side)
@@ -276,8 +277,27 @@ async function init() {
     updateInventorySyncBadge();
   }, 30000);
 
-  // Restore active workspace
-  const savedWorkspace = localStorage.getItem('active-workspace') || 'inventory';
+  // Pre-seed models from stale cache so dropdowns are populated on any first-visit workspace.
+  // (The full stale-while-revalidate renderModels() still runs inside switchWorkspace('inventory').)
+  try {
+    const cachedRaw = localStorage.getItem('neurollama-model-cache');
+    if (cachedRaw) {
+      const { models: cachedModels } = JSON.parse(cachedRaw);
+      if (Array.isArray(cachedModels) && cachedModels.length > 0) {
+        models = cachedModels;
+      }
+    }
+  } catch { /* corrupt cache — ignore */ }
+
+  // Restore system sub-tab, then handle legacy workspace values
+  // (old saves of 'memory' / 'diagnostics' / 'settings' redirect to 'system')
+  activeSystemSubtab = localStorage.getItem('neurollama-system-subtab') || 'memory';
+  let savedWorkspace = localStorage.getItem('active-workspace') || 'inventory';
+  const legacySystemTabs = { memory: 'memory', diagnostics: 'diagnostics', settings: 'settings' };
+  if (legacySystemTabs[savedWorkspace]) {
+    activeSystemSubtab = legacySystemTabs[savedWorkspace];
+    savedWorkspace = 'system';
+  }
   switchWorkspace(savedWorkspace);
 }
 
@@ -296,21 +316,19 @@ function switchWorkspace(workspace) {
     return;
   }
 
-  // Toggle buttons
-  const tabs = ['inventory', 'playground', 'completion', 'builder', 'memory', 'diagnostics', 'benchmark', 'rag', 'settings', 'fleet'];
+  // Always hide system sub-panels before switching (prevents bleed when leaving system workspace)
+  ['memory', 'diagnostics', 'settings'].forEach(sp => {
+    const p = document.getElementById(`ws-panel-${sp}`);
+    if (p) p.classList.add('hidden');
+  });
+
+  // Toggle top-level tab buttons and panels
+  const tabs = ['inventory', 'playground', 'completion', 'builder', 'benchmark', 'rag', 'system', 'fleet'];
   tabs.forEach(t => {
     const btn = document.getElementById(`ws-tab-${t}`);
     const panel = document.getElementById(`ws-panel-${t}`);
-    
-    if (btn && panel) {
-      if (t === workspace) {
-        btn.classList.add('tab-active');
-        panel.classList.remove('hidden');
-      } else {
-        btn.classList.remove('tab-active');
-        panel.classList.add('hidden');
-      }
-    }
+    if (btn) btn.classList.toggle('tab-active', t === workspace);
+    if (panel) panel.classList.toggle('hidden', t !== workspace);
   });
 
   activeWorkspace = workspace;
@@ -333,14 +351,8 @@ function switchWorkspace(workspace) {
       // Fetch fresh from server-side cache (instant) then update the table.
       fetchModels();
     }
-  } else if (workspace === 'memory') {
-    fetchActiveModels();
-  } else if (workspace === 'settings') {
-    fetchSchedulerSettings();
-    fetchSchedulerLogs();
-  } else if (workspace === 'diagnostics') {
-    runDiagnostics();
-    renderStreamFailureLog();
+  } else if (workspace === 'system') {
+    switchSystemSubtab(activeSystemSubtab);
   } else if (workspace === 'benchmark') {
     populateModelDropdowns();
     fetchBenchmarks();
@@ -358,6 +370,30 @@ function switchWorkspace(workspace) {
     loadRAGDocuments();
   } else if (workspace === 'fleet') {
     fetchFleetOverview();
+  }
+}
+
+function switchSystemSubtab(subtab) {
+  activeSystemSubtab = subtab;
+  localStorage.setItem('neurollama-system-subtab', subtab);
+
+  // Show/hide sub-panels and toggle active state on sub-tab buttons
+  ['memory', 'diagnostics', 'settings'].forEach(sp => {
+    const panel = document.getElementById(`ws-panel-${sp}`);
+    if (panel) panel.classList.toggle('hidden', sp !== subtab);
+    const btn = document.getElementById(`system-subtab-${sp}`);
+    if (btn) btn.classList.toggle('bench-subtab-active', sp === subtab);
+  });
+
+  // Fire init actions for the newly active sub-tab
+  if (subtab === 'memory') {
+    fetchActiveModels();
+  } else if (subtab === 'settings') {
+    fetchSchedulerSettings();
+    fetchSchedulerLogs();
+  } else if (subtab === 'diagnostics') {
+    runDiagnostics();
+    renderStreamFailureLog();
   }
 }
 
@@ -842,7 +878,7 @@ async function selectServer(id) {
     if (updatedSrv.status === 'online') {
       await fetchModels();
       populateModelDropdowns();
-      if (activeWorkspace === 'memory') fetchActiveModels();
+      if (activeWorkspace === 'system' && activeSystemSubtab === 'memory') fetchActiveModels();
     } else {
       renderModelsEmpty('Selected node is offline');
       populateModelDropdowns();
@@ -1102,6 +1138,8 @@ async function fetchModels() {
     modelsLoaded = true;
     renderModels();
     updateInventorySyncBadge();
+    // Keep all model dropdowns in sync regardless of which workspace is active.
+    populateModelDropdowns();
     // Persist for stale-while-revalidate on next page load.
     try {
       localStorage.setItem('neurollama-model-cache', JSON.stringify({ models, ts: Date.now() }));
@@ -1133,11 +1171,11 @@ function initAccordionRow() {
           </button>
         </div>
         <div class="flex gap-1 bg-[#242933]/60 p-1 border border-[#4c566a]/40 mb-3 rounded-lg">
-          <button id="ws-tab-modelfile" onclick="switchDetailTab('modelfile')" class="detail-tab detail-tab-active">FILE</button>
-          <button id="ws-tab-parameters" onclick="switchDetailTab('parameters')" class="detail-tab">PARAMS</button>
-          <button id="ws-tab-template" onclick="switchDetailTab('template')" class="detail-tab">TEMPLATE</button>
-          <button id="ws-tab-system" onclick="switchDetailTab('system')" class="detail-tab">SYSTEM</button>
-          <button id="ws-tab-card" onclick="switchDetailTab('card')" class="detail-tab">CARD</button>
+          <button id="detail-tab-modelfile" onclick="switchDetailTab('modelfile')" class="detail-tab detail-tab-active">FILE</button>
+          <button id="detail-tab-parameters" onclick="switchDetailTab('parameters')" class="detail-tab">PARAMS</button>
+          <button id="detail-tab-template" onclick="switchDetailTab('template')" class="detail-tab">TEMPLATE</button>
+          <button id="detail-tab-system" onclick="switchDetailTab('system')" class="detail-tab">SYSTEM</button>
+          <button id="detail-tab-card" onclick="switchDetailTab('card')" class="detail-tab">CARD</button>
         </div>
         <div class="overflow-auto max-h-72 bg-[#161820] border border-[#4c566a]/60 rounded-lg p-3 text-[11px] font-mono text-[#d8dee9] relative">
           <button onclick="copyTabContent()" class="btn btn-xs btn-neutral absolute top-2 right-2 border-[#4c566a] hover:bg-[#4c566a]" title="Copy to clipboard">
@@ -1764,7 +1802,7 @@ async function inspectModel(name) {
   activeDetailTab = 'modelfile';
   const tabs = ['modelfile', 'parameters', 'template', 'system', 'card'];
   tabs.forEach(t => {
-    const btn = accordionEl.querySelector(`#ws-tab-${t}`);
+    const btn = accordionEl.querySelector(`#detail-tab-${t}`);
     if (btn) btn.classList.toggle('detail-tab-active', t === 'modelfile');
   });
 
@@ -1805,7 +1843,7 @@ function clearInspectedModel() {
 function switchDetailTab(tabName) {
   const tabs = ['modelfile', 'parameters', 'template', 'system', 'card'];
   tabs.forEach(t => {
-    const btn = document.getElementById(`ws-tab-${t}`);
+    const btn = document.getElementById(`detail-tab-${t}`);
     if (btn) {
       btn.classList.toggle('detail-tab-active', t === tabName);
     }
@@ -5194,8 +5232,8 @@ function handleTelemetryData(data) {
     }
   }
 
-  // Update active models grid and chart if Memory panel is active
-  if (activeWorkspace === 'memory') {
+  // Update active models grid and chart if Memory sub-tab is active
+  if (activeWorkspace === 'system' && activeSystemSubtab === 'memory') {
     updateTelemetryChart(data);
     renderTelemetryModels(data.active_models);
   }
