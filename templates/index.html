@@ -983,50 +983,52 @@
               <span id="node-badge" class="badge badge-xs py-2 px-2 font-mono font-bold bg-[#bf616a] text-[#d8dee9] border-none ml-auto shrink-0">DISCONNECTED</span>
             </div>
 
-            <!-- Chart left, 2×2 bars right — standard 2-column grid -->
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 items-stretch">
-              <!-- Live canvas chart -->
+            <!-- Chart left, 2×2 bars right — inline styles for alignment so compiled CSS isn't a dependency -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-5" style="align-items:start">
+              <!-- Live canvas chart — fixed 128px -->
               <div class="flex flex-col" style="height:128px">
                 <span class="text-[9px] font-mono text-[#4c566a]/70 mb-1">HOST // CPU &amp; MEM</span>
                 <canvas id="telemetry-chart" class="w-full flex-1 rounded bg-[#1a1c23] border border-[#4c566a]/20"></canvas>
               </div>
 
-              <!-- 4 metric bars in a 2×2 grid -->
-              <div class="grid grid-cols-2 gap-x-6 gap-y-4 text-xs font-mono content-center">
-                <div>
-                  <div class="flex justify-between mb-1">
-                    <span id="host-cpu-label" class="text-[#4c566a] text-[10px]">HOST CPU</span>
-                    <span id="host-cpu-text" class="text-[#88c0d0]">0.0%</span>
+              <!-- 4 metric bars in a 2×2 grid, vertically centred inside the same 128px -->
+              <div style="height:128px;display:flex;flex-direction:column;justify-content:center">
+                <div class="grid grid-cols-2 gap-x-6 gap-y-3 text-xs font-mono">
+                  <div>
+                    <div class="flex justify-between mb-1">
+                      <span id="host-cpu-label" class="text-[#4c566a] text-[10px]">HOST CPU</span>
+                      <span id="host-cpu-text" class="text-[#88c0d0]">0.0%</span>
+                    </div>
+                    <div class="w-full bg-[#3b4252] rounded-full h-1.5 overflow-hidden">
+                      <div id="host-cpu-bar" class="bg-[#88c0d0] h-1.5" style="width: 0%"></div>
+                    </div>
                   </div>
-                  <div class="w-full bg-[#3b4252] rounded-full h-1.5 overflow-hidden">
-                    <div id="host-cpu-bar" class="bg-[#88c0d0] h-1.5" style="width: 0%"></div>
+                  <div>
+                    <div class="flex justify-between mb-1">
+                      <span id="host-ram-label" class="text-[#4c566a] text-[10px]">HOST RAM</span>
+                      <span id="host-ram-text" class="text-[#a3be8c] text-[10px]">0.0 / 0.0 GB</span>
+                    </div>
+                    <div class="w-full bg-[#3b4252] rounded-full h-1.5 overflow-hidden">
+                      <div id="host-ram-bar" class="bg-[#a3be8c] h-1.5" style="width: 0%"></div>
+                    </div>
                   </div>
-                </div>
-                <div>
-                  <div class="flex justify-between mb-1">
-                    <span id="host-ram-label" class="text-[#4c566a] text-[10px]">HOST RAM</span>
-                    <span id="host-ram-text" class="text-[#a3be8c] text-[10px]">0.0 / 0.0 GB</span>
+                  <div>
+                    <div class="flex justify-between mb-1">
+                      <span class="text-[#4c566a] text-[10px]">GPU VRAM</span>
+                      <span id="ollama-vram-text" class="text-[#ebcb8b]">---</span>
+                    </div>
+                    <div class="w-full bg-[#3b4252] rounded-full h-1.5 overflow-hidden">
+                      <div id="ollama-vram-bar" class="bg-[#ebcb8b] h-1.5" style="width: 0%"></div>
+                    </div>
                   </div>
-                  <div class="w-full bg-[#3b4252] rounded-full h-1.5 overflow-hidden">
-                    <div id="host-ram-bar" class="bg-[#a3be8c] h-1.5" style="width: 0%"></div>
-                  </div>
-                </div>
-                <div>
-                  <div class="flex justify-between mb-1">
-                    <span class="text-[#4c566a] text-[10px]">GPU VRAM</span>
-                    <span id="ollama-vram-text" class="text-[#ebcb8b]">---</span>
-                  </div>
-                  <div class="w-full bg-[#3b4252] rounded-full h-1.5 overflow-hidden">
-                    <div id="ollama-vram-bar" class="bg-[#ebcb8b] h-1.5" style="width: 0%"></div>
-                  </div>
-                </div>
-                <div>
-                  <div class="flex justify-between mb-1">
-                    <span class="text-[#4c566a] text-[10px]">SYS RAM</span>
-                    <span id="ollama-sysram-text" class="text-[#b48ead]">---</span>
-                  </div>
-                  <div class="w-full bg-[#3b4252] rounded-full h-1.5 overflow-hidden">
-                    <div id="ollama-sysram-bar" class="bg-[#b48ead] h-1.5" style="width: 0%"></div>
+                  <div>
+                    <div class="flex justify-between mb-1">
+                      <span class="text-[#4c566a] text-[10px]">SYS RAM</span>
+                      <span id="ollama-sysram-text" class="text-[#b48ead]">---</span>
+                    </div>
+                    <div class="w-full bg-[#3b4252] rounded-full h-1.5 overflow-hidden">
+                      <div id="ollama-sysram-bar" class="bg-[#b48ead] h-1.5" style="width: 0%"></div>
+                    </div>
                   </div>
                 </div>
               </div>
