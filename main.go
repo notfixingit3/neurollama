@@ -26,7 +26,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const appVersion = "v0.2.5"
+const appVersion = "v0.2.6"
 
 type ServerStatusResponse struct {
 	Server
@@ -164,6 +164,7 @@ func main() {
 
 		// Active Ollama client proxies
 		api.GET("/models", getModelsHandler)
+		api.GET("/models/search", searchModelsHandler)   // GET /api/models/search?q=llama3&nodes=all
 		api.GET("/models/detail", getModelDetailHandler) // GET /api/models/detail?name=llama3
 		api.POST("/models/delete", deleteModelsHandler)  // POST batch delete
 		api.POST("/models/copy", copyModelHandler)       // POST clone model
@@ -496,49 +497,170 @@ func selectServerHandler(c *gin.Context) {
 	})
 }
 
-// getModelsHandler returns the model list from the background cache — instant read.
-// Falls back to a live Ollama call only if the cache has never been populated.
+// getModelsHandler returns the model list from the background cache.
+// Optional query params:
+//   - node=<id>   serve a specific node's cache (default: active server)
+//   - page=N      1-based page number (default 1)
+//   - limit=N     page size 1–200 (default 0 = return all)
 func getModelsHandler(c *gin.Context) {
-	activeSrv, err := GetActiveServer()
-	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "No active Ollama server selected"})
-		return
+	// Resolve which server to serve.
+	var srv Server
+	if nodeID := c.Query("node"); nodeID != "" {
+		found := false
+		for _, s := range GetServers() {
+			if s.ID == nodeID {
+				srv = s
+				found = true
+				break
+			}
+		}
+		if !found {
+			c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
+			return
+		}
+	} else {
+		var err error
+		srv, err = GetActiveServer()
+		if err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "No active Ollama server selected"})
+			return
+		}
 	}
 
+	// Read from cache; fall back to live call on cold-start.
 	nodeModelMu.RLock()
-	entry, ok := nodeModelCache[activeSrv.ID]
+	entry, ok := nodeModelCache[srv.ID]
 	nodeModelMu.RUnlock()
 
+	var allModels []OllamaModel
+	var updatedAt time.Time
+	fromCache := ok
+
 	if ok {
-		c.JSON(http.StatusOK, gin.H{
-			"models":      entry.models,
-			"serverUrl":   activeSrv.URL,
-			"lastUpdated": entry.updatedAt.Unix(),
-			"fromCache":   true,
-		})
-		return
+		allModels = entry.models
+		updatedAt = entry.updatedAt
+	} else {
+		client := NewOllamaClient(srv)
+		live, err := client.ListModels()
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{
+				"error":     fmt.Sprintf("Failed to contact Ollama server (%s)", srv.URL),
+				"details":   err.Error(),
+				"serverUrl": srv.URL,
+			})
+			return
+		}
+		allModels = live
+		updatedAt = time.Now()
+		nodeModelMu.Lock()
+		nodeModelCache[srv.ID] = modelCacheEntry{models: live, updatedAt: updatedAt}
+		nodeModelMu.Unlock()
 	}
 
-	// Cache miss — node was just added or poller hasn't run yet; fetch live.
-	client := NewOllamaClient(activeSrv)
-	models, err := client.ListModels()
-	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{
-			"error":     fmt.Sprintf("Failed to contact active Ollama server (%s)", activeSrv.URL),
-			"details":   err.Error(),
-			"serverUrl": activeSrv.URL,
-		})
-		return
+	total := len(allModels)
+
+	// Parse pagination params.
+	page, limit := 1, 0
+	if p, err := strconv.Atoi(c.Query("page")); err == nil && p > 0 {
+		page = p
+	}
+	if l, err := strconv.Atoi(c.Query("limit")); err == nil && l > 0 {
+		if l > 200 {
+			l = 200
+		}
+		limit = l
 	}
 
-	// Seed the cache so subsequent calls are instant.
-	nodeModelMu.Lock()
-	nodeModelCache[activeSrv.ID] = modelCacheEntry{models: models, updatedAt: time.Now()}
-	nodeModelMu.Unlock()
+	var pageModels []OllamaModel
+	if limit > 0 {
+		start := (page - 1) * limit
+		if start >= total {
+			pageModels = []OllamaModel{}
+		} else {
+			end := start + limit
+			if end > total {
+				end = total
+			}
+			pageModels = allModels[start:end]
+		}
+	} else {
+		pageModels = allModels
+	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"models":    models,
-		"serverUrl": activeSrv.URL,
+		"models":      pageModels,
+		"total":       total,
+		"page":        page,
+		"limit":       limit,
+		"serverUrl":   srv.URL,
+		"lastUpdated": updatedAt.Unix(),
+		"fromCache":   fromCache,
+	})
+}
+
+// ModelSearchResult wraps an OllamaModel with the node it was found on.
+type ModelSearchResult struct {
+	OllamaModel
+	NodeID   string `json:"node_id"`
+	NodeName string `json:"node_name"`
+}
+
+// searchModelsHandler walks every nodeModelCache entry and returns models
+// whose name contains the query string (case-insensitive).
+// GET /api/models/search?q=llama3&nodes=all
+// GET /api/models/search?q=gemma&nodes=id1,id2
+func searchModelsHandler(c *gin.Context) {
+	q := strings.ToLower(strings.TrimSpace(c.Query("q")))
+	if q == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "q parameter is required"})
+		return
+	}
+
+	nodesParam := strings.TrimSpace(c.Query("nodes"))
+	allowedNodes := map[string]bool{}
+	if nodesParam != "" && nodesParam != "all" {
+		for _, id := range strings.Split(nodesParam, ",") {
+			if id = strings.TrimSpace(id); id != "" {
+				allowedNodes[id] = true
+			}
+		}
+	}
+
+	// Build id → name lookup.
+	serverNames := map[string]string{}
+	for _, s := range GetServers() {
+		serverNames[s.ID] = s.Name
+	}
+
+	var results []ModelSearchResult
+	nodeModelMu.RLock()
+	for nodeID, entry := range nodeModelCache {
+		if len(allowedNodes) > 0 && !allowedNodes[nodeID] {
+			continue
+		}
+		for _, m := range entry.models {
+			if strings.Contains(strings.ToLower(m.Name), q) {
+				results = append(results, ModelSearchResult{
+					OllamaModel: m,
+					NodeID:      nodeID,
+					NodeName:    serverNames[nodeID],
+				})
+			}
+		}
+	}
+	nodeModelMu.RUnlock()
+
+	sort.Slice(results, func(i, j int) bool {
+		if results[i].NodeName != results[j].NodeName {
+			return results[i].NodeName < results[j].NodeName
+		}
+		return results[i].Name < results[j].Name
+	})
+
+	c.JSON(http.StatusOK, gin.H{
+		"results": results,
+		"total":   len(results),
+		"query":   q,
 	})
 }
 

@@ -1,7 +1,7 @@
 # NEUROLLAMA — Scale & Performance Roadmap
 
 Tracking 16 items across 4 phases. Each phase ships as a patch version bump.
-Current version: **v0.2.5**
+Current version: **v0.2.6**
 
 > **Context:** With 10+ Ollama nodes and 100+ models per node, the current
 > request-time fetching model breaks down. Every page load hits all nodes live,
@@ -87,26 +87,25 @@ Removes browser polling for node status; everything becomes event-driven.
 
 Handles 100+ models per node gracefully in the UI.
 
-- [ ] **11. Paginated `/api/models` endpoint** (`main.go`)
+- [x] **11. Paginated `/api/models` endpoint** (`main.go`)
   - Add `?page=1&limit=50&node=<serverID>` query params
   - Server slices from the model cache
   - Response includes `{ models: [], total: N, page: N, limit: N }`
   - Default limit 50; max 200
 
-- [ ] **12. Cross-node model search endpoint** (`main.go`)
+- [x] **12. Cross-node model search endpoint** (`main.go`)
   - `GET /api/models/search?q=llama3&nodes=all`
   - Walks all `nodeModelCache` entries server-side
   - Returns matches with `node_id` and `node_name` fields on each model
   - Supports filtering by a comma-separated node ID list
 
-- [ ] **13. Inventory pagination controls** (`templates/index.html`, `static/js/app.js`)
+- [x] **13. Inventory pagination controls** (`templates/index.html`, `static/js/app.js`)
   - Prev / Next page buttons + current page indicator
   - Page size selector (25 / 50 / 100)
   - Total model count displayed in panel header
-  - OR: virtual scroll — renders only visible rows, handles any count without DOM bloat
-    (virtual scroll is more work but better UX; decide when implementing)
+  - Client-side pagination of the full models[] array (dropdowns stay complete)
 
-- [ ] **14. "Last refreshed" indicator + manual refresh button** (`templates/index.html`, `static/js/app.js`)
+- [x] **14. "Last refreshed" indicator + manual refresh button** (`templates/index.html`, `static/js/app.js`)
   - Each node card in the registry sidebar shows "updated Xs ago" from cache timestamp
   - Small refresh icon (↺) beside the timestamp hits the Phase 2 refresh endpoint (item 8)
   - Model inventory panel header also shows "last synced Xs ago" for the active node
@@ -138,6 +137,6 @@ Fleet-level visibility and cross-node operations.
 |---------|-------|-------------|
 | v0.2.3  | —     | lint/gosec clean, --help/--version, healthcheck |
 | v0.2.4  | 1     | server-side cache, lazy-load, optimistic render |
-| v0.2.5  | 2     | Current: SSE node events, no-refetch CRUD, stale-while-revalidate |
-| v0.2.6  | 3     | Scale UX: pagination, cross-node search API, refresh indicators |
+| v0.2.5  | 2     | SSE node events, no-refetch CRUD, stale-while-revalidate |
+| v0.2.6  | 3     | Current: pagination, cross-node search API, last-refreshed indicators |
 | v0.2.7  | 4     | Multi-node: fleet overview, cross-node model search UI |

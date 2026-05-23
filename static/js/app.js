@@ -13,6 +13,14 @@ let modelCardViewMode = 'safe';
 // New State for v0.0.2
 let activeWorkspace = 'inventory';
 let modelsLoaded = false; // lazy-load guard — only fetch on first Inventory tab visit
+
+// Inventory pagination (client-side)
+let inventoryPage = 1;
+let inventoryPageSize = 50;
+let lastModelSyncTs = 0; // unix seconds from API lastUpdated field
+
+// Server last-seen timestamps (ms) — updated on fetchServers and nodeStatus SSE events
+const serverLastSeen = {};
 let chatMessages = [];
 let isGeneratingChat = false;
 let isBuildingModel = false;
@@ -242,6 +250,12 @@ async function init() {
 
   // Start background telemetry stream
   startTelemetrySSE();
+
+  // Tick every 30s to keep "Xs ago" timestamps fresh without extra requests
+  setInterval(() => {
+    if (servers.length > 0) renderServers();
+    updateInventorySyncBadge();
+  }, 30000);
 
   // Restore active workspace
   const savedWorkspace = localStorage.getItem('active-workspace') || 'inventory';
@@ -549,8 +563,11 @@ async function fetchServers() {
     const response = await fetch('/api/servers');
     if (!response.ok) throw new Error('Failed to fetch servers');
     servers = await response.json();
+    // Seed last-seen timestamps for all servers
+    const now = Date.now();
+    servers.forEach(s => { serverLastSeen[s.id] = now; });
     renderServers();
-    
+
     const active = servers.find(s => s.isActive);
     updateActiveServerUI(active);
   } catch (error) {
@@ -608,7 +625,15 @@ function renderServers() {
         </div>
         <div class="flex items-center justify-between text-[9px] font-mono text-[#4c566a]">
           <span>${isOnline ? `Version: ${srv.version}` : 'UNREACHABLE'}</span>
-          <span>${isOnline ? `${srv.latency} ms` : ''}</span>
+          <div class="flex items-center gap-1">
+            <span>${isOnline ? `${srv.latency} ms` : ''}</span>
+            <span class="opacity-60">${serverLastSeen[srv.id] ? timeAgoShort(serverLastSeen[srv.id]) : ''}</span>
+            <button onclick="event.stopPropagation(); refreshNode('${srv.id}')"
+                    class="opacity-0 group-hover:opacity-100 transition-opacity text-[#4c566a] hover:text-[#88c0d0] leading-none"
+                    title="Refresh node status">
+              <i class="fa-solid fa-rotate text-[9px]"></i>
+            </button>
+          </div>
         </div>
       </div>
     `;
@@ -929,8 +954,11 @@ async function fetchModels() {
     
     const data = await response.json();
     models = data.models || [];
+    if (data.lastUpdated) lastModelSyncTs = data.lastUpdated;
+    inventoryPage = 1; // reset to first page on fresh load
     modelsLoaded = true;
     renderModels();
+    updateInventorySyncBadge();
     // Persist for stale-while-revalidate on next page load.
     try {
       localStorage.setItem('neurollama-model-cache', JSON.stringify({ models, ts: Date.now() }));
@@ -982,9 +1010,108 @@ function modelRowId(name) {
   return 'model-row-' + name.replace(/[^a-zA-Z0-9]/g, '-');
 }
 
+// ── Pagination helpers ────────────────────────────────────────────────────────
+
+function renderPagination() {
+  const container = document.getElementById('inventory-pagination');
+  const pageInfo  = document.getElementById('inventory-page-info');
+  const pageInd   = document.getElementById('inventory-page-indicator');
+  const prevBtn   = document.getElementById('inventory-prev-btn');
+  const nextBtn   = document.getElementById('inventory-next-btn');
+  const sizeEl    = document.getElementById('inventory-page-size');
+  if (!container) return;
+
+  const total      = models.length;
+  const totalPages = Math.max(1, Math.ceil(total / inventoryPageSize));
+  const start      = (inventoryPage - 1) * inventoryPageSize + 1;
+  const end        = Math.min(inventoryPage * inventoryPageSize, total);
+
+  if (total <= inventoryPageSize) {
+    container.classList.add('hidden');
+    container.classList.remove('flex');
+    return;
+  }
+
+  container.classList.remove('hidden');
+  container.classList.add('flex');
+  if (pageInfo)  pageInfo.textContent  = `${start}–${end} of ${total}`;
+  if (pageInd)   pageInd.textContent   = `${inventoryPage} / ${totalPages}`;
+  if (prevBtn)   prevBtn.disabled      = inventoryPage <= 1;
+  if (nextBtn)   nextBtn.disabled      = inventoryPage >= totalPages;
+
+  // Keep select element in sync with current page size
+  if (sizeEl) sizeEl.value = String(inventoryPageSize);
+}
+
+function inventoryPrevPage() {
+  if (inventoryPage > 1) { inventoryPage--; renderModels(); }
+}
+function inventoryNextPage() {
+  const totalPages = Math.ceil(models.length / inventoryPageSize);
+  if (inventoryPage < totalPages) { inventoryPage++; renderModels(); }
+}
+function setInventoryPageSize(val) {
+  inventoryPageSize = parseInt(val, 10) || 50;
+  inventoryPage = 1;
+  renderModels();
+}
+
+// ── Inventory sync badge ──────────────────────────────────────────────────────
+
+function updateInventorySyncBadge() {
+  const el = document.getElementById('inventory-last-synced');
+  if (!el) return;
+  if (!lastModelSyncTs) { el.classList.add('hidden'); return; }
+  el.textContent = `synced ${timeAgoShort(lastModelSyncTs * 1000)}`;
+  el.classList.remove('hidden');
+}
+
+// Refresh model list manually (wires the ↺ button in the inventory header).
+function refreshInventory() {
+  modelsLoaded = false;
+  fetchModels();
+}
+
+// ── Server last-seen helpers ──────────────────────────────────────────────────
+
+function timeAgoShort(tsMs) {
+  const sec = Math.floor((Date.now() - tsMs) / 1000);
+  if (sec < 5)   return 'just now';
+  if (sec < 60)  return `${sec}s ago`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+  return `${Math.floor(sec / 3600)}h ago`;
+}
+
+// Refresh a single node via POST /api/nodes/:id/refresh (Phase 2 endpoint).
+async function refreshNode(id) {
+  try {
+    const response = await fetch(`/api/nodes/${id}/refresh`, { method: 'POST' });
+    if (!response.ok) throw new Error('Refresh failed');
+    const updated = await response.json();
+    handleNodeStatusUpdate(updated);
+    serverLastSeen[id] = Date.now();
+    showToast(`Node ${updated.name} refreshed`, 'success');
+  } catch (e) {
+    showToast('Node refresh failed', 'error');
+  }
+}
+
+// ── Model inventory render ────────────────────────────────────────────────────
+
 function renderModels() {
   const listBody = document.getElementById('models-list-body');
-  
+
+  // Update total badge
+  const totalBadge = document.getElementById('inventory-total-badge');
+  if (totalBadge) {
+    if (models.length > 0) {
+      totalBadge.textContent = `(${models.length})`;
+      totalBadge.classList.remove('hidden');
+    } else {
+      totalBadge.classList.add('hidden');
+    }
+  }
+
   if (models.length === 0) {
     listBody.innerHTML = `
       <tr>
@@ -993,15 +1120,22 @@ function renderModels() {
         </td>
       </tr>
     `;
+    renderPagination();
     return;
   }
+
+  // Client-side page slice
+  const totalPages = Math.ceil(models.length / inventoryPageSize);
+  if (inventoryPage > totalPages) inventoryPage = totalPages;
+  const start = (inventoryPage - 1) * inventoryPageSize;
+  const pageModels = models.slice(start, start + inventoryPageSize);
 
   // Detach accordion before wiping innerHTML
   if (accordionEl && accordionEl.parentNode === listBody) {
     listBody.removeChild(accordionEl);
   }
 
-  listBody.innerHTML = models.map(model => {
+  listBody.innerHTML = pageModels.map(model => {
     const isChecked = selectedModels.has(model.name);
     const dateFormatted = new Date(model.modified_at).toLocaleDateString(undefined, {
       month: 'short',
@@ -1072,9 +1206,12 @@ function renderModels() {
     }
   }
 
-  // Re-check select all box if necessary
-  const allChecked = models.length > 0 && models.every(m => selectedModels.has(m.name));
+  // Re-check select all box — reflects the current page only
+  const allChecked = pageModels.length > 0 && pageModels.every(m => selectedModels.has(m.name));
   document.getElementById('select-all-checkbox').checked = allChecked;
+
+  // Render pagination controls
+  renderPagination();
 
   // Update catalog state (installed badges)
   renderCatalog();
@@ -1108,10 +1245,13 @@ function toggleSelectModel(name, checked) {
 }
 
 function toggleSelectAllModels(checkbox) {
+  // Operate on the current page slice only
+  const start = (inventoryPage - 1) * inventoryPageSize;
+  const pageModels = models.slice(start, start + inventoryPageSize);
   if (checkbox.checked) {
-    models.forEach(m => selectedModels.add(m.name));
+    pageModels.forEach(m => selectedModels.add(m.name));
   } else {
-    models.forEach(m => selectedModels.delete(m.name));
+    pageModels.forEach(m => selectedModels.delete(m.name));
   }
   renderModels();
   updateBatchActionsUI();
@@ -4539,8 +4679,9 @@ function handleNodeStatusUpdate(updated) {
     latency: updated.latency,
     version: updated.version,
   };
+  serverLastSeen[updated.id] = Date.now();
 
-  // Re-render the server list to reflect the new status dot / latency.
+  // Re-render the server list to reflect the new status dot / latency / timestamp.
   renderServers();
 
   // If this is the active server, also refresh the footer status indicator.

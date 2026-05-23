@@ -29,7 +29,7 @@
       </div>
       <div>
         <h1 class="text-xl font-bold font-tech tracking-wider text-[#88c0d0] glow-text-blue flex items-center gap-2">
-          NEUROLLAMA <span class="text-xs px-2 py-0.5 bg-[#4c566a] text-[#d8dee9] rounded font-mono">v0.2.5</span>
+          NEUROLLAMA <span class="text-xs px-2 py-0.5 bg-[#4c566a] text-[#d8dee9] rounded font-mono">v0.2.6</span>
         </h1>
         <p class="text-[10px] uppercase font-mono tracking-widest text-[#4c566a] mt-0.5">Control Interface // Epoch 2026</p>
       </div>
@@ -210,13 +210,23 @@
             <!-- Models Registry List panel -->
             <div class="tech-panel tech-header-accent rounded-xl min-h-[220px] flex flex-col p-4">
               <div class="flex justify-between items-center mb-3 pb-2 border-b border-[#4c566a]/40">
-                <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
-                  <i class="fa-solid fa-tags mr-2"></i>Model Inventory
-                </h2>
-                <!-- Batch Actions -->
-                <div id="batch-actions-container" class="hidden">
-                  <button id="batch-delete-btn" onclick="handleBatchDelete()" class="btn btn-xs btn-error gap-1 font-tech">
-                    <i class="fa-solid fa-trash text-[10px]"></i> DELETE_SELECTED (<span id="selected-count">0</span>)
+                <div class="flex items-center gap-2">
+                  <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
+                    <i class="fa-solid fa-tags mr-2"></i>Model Inventory
+                  </h2>
+                  <span id="inventory-total-badge" class="hidden text-[9px] font-mono text-[#4c566a]"></span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <!-- Batch Actions (shown when models are selected) -->
+                  <div id="batch-actions-container" class="hidden">
+                    <button id="batch-delete-btn" onclick="handleBatchDelete()" class="btn btn-xs btn-error gap-1 font-tech">
+                      <i class="fa-solid fa-trash text-[10px]"></i> DELETE_SELECTED (<span id="selected-count">0</span>)
+                    </button>
+                  </div>
+                  <!-- Last synced indicator + manual refresh -->
+                  <span id="inventory-last-synced" class="hidden text-[9px] font-mono text-[#4c566a]"></span>
+                  <button onclick="refreshInventory()" class="btn btn-xs btn-ghost text-[#4c566a] hover:text-[#88c0d0] p-1 min-h-0 h-auto" title="Refresh model list">
+                    <i class="fa-solid fa-rotate text-[10px]"></i>
                   </button>
                 </div>
               </div>
@@ -241,6 +251,30 @@
                     </tr>
                   </tbody>
                 </table>
+              </div>
+
+              <!-- Pagination controls (shown when models > pageSize) -->
+              <div id="inventory-pagination" class="hidden items-center justify-between mt-3 pt-2 border-t border-[#4c566a]/30 text-[10px] font-mono">
+                <div class="flex items-center gap-2 text-[#4c566a]">
+                  <span id="inventory-page-info"></span>
+                  <select id="inventory-page-size" onchange="setInventoryPageSize(this.value)"
+                          class="select select-xs bg-[#2e3440]/60 border-[#4c566a] text-[#d8dee9] text-[10px] font-mono focus:outline-none min-h-0 h-6 py-0">
+                    <option value="25">25 / page</option>
+                    <option value="50" selected>50 / page</option>
+                    <option value="100">100 / page</option>
+                  </select>
+                </div>
+                <div class="flex items-center gap-1">
+                  <button onclick="inventoryPrevPage()" id="inventory-prev-btn"
+                          class="btn btn-xs btn-ghost text-[#4c566a] hover:text-[#88c0d0] p-1 min-h-0 h-6">
+                    <i class="fa-solid fa-chevron-left text-[9px]"></i>
+                  </button>
+                  <span id="inventory-page-indicator" class="px-2 text-[#88c0d0]">1 / 1</span>
+                  <button onclick="inventoryNextPage()" id="inventory-next-btn"
+                          class="btn btn-xs btn-ghost text-[#4c566a] hover:text-[#88c0d0] p-1 min-h-0 h-6">
+                    <i class="fa-solid fa-chevron-right text-[9px]"></i>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
