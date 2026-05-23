@@ -1192,15 +1192,28 @@ async function handleBatchDelete() {
 
 function handlePullModel(event) {
   event.preventDefault();
-  
+
   // Prevent duplicate pulls
   if (currentEventSource) {
     showToast('A model download is already in progress', 'warning');
     return;
   }
 
-  const modelName = document.getElementById('pull-model-name').value.trim();
+  let modelName = document.getElementById('pull-model-name').value.trim();
   if (!modelName) return;
+
+  // Normalize HuggingFace tags
+  if (currentPullSource === 'hf') {
+    if (!modelName.startsWith('hf.co/')) {
+      if (modelName.includes('/')) {
+        modelName = 'hf.co/' + modelName;
+        document.getElementById('pull-model-name').value = modelName;
+      } else {
+        showToast('HuggingFace format: user/repo:quant or hf.co/user/repo:quant', 'warning');
+        return;
+      }
+    }
+  }
 
   const pullBtn = document.getElementById('pull-btn');
   const progressContainer = document.getElementById('pull-progress-container');
@@ -3121,16 +3134,99 @@ async function updateActiveChatConfig() {
 
 // --- REGISTRY CATALOG CONTROLLERS (v0.0.3) ---
 
+// caps: 'vision' | 'embedding' | 'moe' | 'code' | 'reasoning'
+// source: 'ollama' | 'hf'
 const POPULAR_MODELS = [
-  { name: 'llama3:8b', category: 'General', size: '4.7 GB', desc: 'Meta\'s highly capable general purpose instruction tuned model.' },
-  { name: 'deepseek-r1:8b', category: 'Reasoning', size: '4.9 GB', desc: 'First-class reasoning model from DeepSeek optimized with RL.' },
-  { name: 'qwen2.5-coder:7b', category: 'Coding', size: '4.7 GB', desc: 'Alibaba\'s advanced LLM specializing in code generation and reasoning.' },
-  { name: 'mistral:7b', category: 'General', size: '4.1 GB', desc: 'High quality 7B parameter dense model by Mistral AI.' },
-  { name: 'gemma2:2b', category: 'Lightweight', size: '1.6 GB', desc: 'Google\'s highly efficient lightweight model with top-tier performance.' },
-  { name: 'phi3:3.8b', category: 'General', size: '2.2 GB', desc: 'Microsoft\'s lightweight open model with excellent reasoning capabilities.' },
-  { name: 'llava:7b', category: 'Multimodal', size: '4.7 GB', desc: 'Multimodal model combining vision encoder and llama language model.' },
-  { name: 'codegemma:7b', category: 'Coding', size: '4.8 GB', desc: 'Google\'s specialized model for code completion and code generation.' }
+  // ── General ──────────────────────────────────────────────────────────────
+  { name:'llama3.1:8b',      source:'ollama', category:'General',     caps:[],             params:'8B',    ctx:'128K', size:'4.9 GB',  desc:"Meta's flagship instruction model with 128K context window." },
+  { name:'llama3.2:3b',      source:'ollama', category:'General',     caps:[],             params:'3B',    ctx:'128K', size:'2.0 GB',  desc:"Compact Meta model, fast and capable with full 128K context." },
+  { name:'mistral:7b',       source:'ollama', category:'General',     caps:[],             params:'7B',    ctx:'32K',  size:'4.1 GB',  desc:"Mistral AI's reliable dense 7B model, strong across the board." },
+  { name:'qwen2.5:7b',       source:'ollama', category:'General',     caps:[],             params:'7B',    ctx:'128K', size:'4.7 GB',  desc:"Alibaba Qwen 2.5 — strong multilingual, math, and instruction following." },
+  { name:'phi4:14b',         source:'ollama', category:'General',     caps:[],             params:'14B',   ctx:'16K',  size:'8.9 GB',  desc:"Microsoft Phi-4 — punches well above its weight in reasoning benchmarks." },
+  { name:'phi3:3.8b',        source:'ollama', category:'Lightweight', caps:[],             params:'3.8B',  ctx:'128K', size:'2.2 GB',  desc:"Microsoft Phi-3 Mini — excellent reasoning at a tiny footprint." },
+  { name:'gemma2:9b',        source:'ollama', category:'General',     caps:[],             params:'9B',    ctx:'8K',   size:'5.4 GB',  desc:"Google Gemma 2 9B — beats larger models on many benchmarks." },
+  // ── Reasoning ────────────────────────────────────────────────────────────
+  { name:'deepseek-r1:8b',   source:'ollama', category:'Reasoning',   caps:['reasoning'],  params:'8B',    ctx:'128K', size:'4.9 GB',  desc:"DeepSeek R1 8B — RL-tuned for long chain-of-thought reasoning." },
+  { name:'deepseek-r1:14b',  source:'ollama', category:'Reasoning',   caps:['reasoning'],  params:'14B',   ctx:'128K', size:'9.0 GB',  desc:"DeepSeek R1 14B — accuracy-focused reasoning distillate from 671B." },
+  { name:'deepseek-r1:32b',  source:'ollama', category:'Reasoning',   caps:['reasoning'],  params:'32B',   ctx:'128K', size:'20 GB',   desc:"DeepSeek R1 32B — near-frontier reasoning, self-verifying CoT." },
+  { name:'qwq:32b',          source:'ollama', category:'Reasoning',   caps:['reasoning'],  params:'32B',   ctx:'32K',  size:'20 GB',   desc:"Qwen QwQ — deliberate thinker, competitive with o1 on math & science." },
+  // ── Vision ───────────────────────────────────────────────────────────────
+  { name:'gemma3:4b',        source:'ollama', category:'Vision',      caps:['vision'],     params:'4B',    ctx:'128K', size:'3.3 GB',  desc:"Google Gemma 3 multimodal — vision + text at an impressive size." },
+  { name:'gemma3:12b',       source:'ollama', category:'Vision',      caps:['vision'],     params:'12B',   ctx:'128K', size:'8.1 GB',  desc:"Google Gemma 3 12B — strong vision reasoning with wide context." },
+  { name:'llava:7b',         source:'ollama', category:'Vision',      caps:['vision'],     params:'7B',    ctx:'4K',   size:'4.7 GB',  desc:"The original LLaVA — vision encoder fused with Llama language model." },
+  { name:'llava:13b',        source:'ollama', category:'Vision',      caps:['vision'],     params:'13B',   ctx:'4K',   size:'8.0 GB',  desc:"Larger LLaVA for improved visual reasoning tasks." },
+  { name:'minicpm-v:8b',     source:'ollama', category:'Vision',      caps:['vision'],     params:'8B',    ctx:'8K',   size:'5.5 GB',  desc:"MiniCPM-V — efficient vision LLM, great at OCR and image QA." },
+  { name:'moondream:1.8b',   source:'ollama', category:'Vision',      caps:['vision'],     params:'1.8B',  ctx:'2K',   size:'1.1 GB',  desc:"Tiny vision model that runs comfortably on CPU." },
+  // ── Code ─────────────────────────────────────────────────────────────────
+  { name:'qwen2.5-coder:7b', source:'ollama', category:'Code',        caps:['code'],       params:'7B',    ctx:'32K',  size:'4.7 GB',  desc:"Qwen 2.5 Coder 7B — strong fill-in-the-middle and repo-level reasoning." },
+  { name:'qwen2.5-coder:32b',source:'ollama', category:'Code',        caps:['code'],       params:'32B',   ctx:'128K', size:'20 GB',   desc:"Qwen 2.5 Coder 32B — near-GPT-4 coding quality for local use." },
+  { name:'devstral:24b',     source:'ollama', category:'Code',        caps:['code'],       params:'24B',   ctx:'128K', size:'14 GB',   desc:"Mistral Devstral — built for agentic coding tasks, 128K context." },
+  { name:'codellama:7b',     source:'ollama', category:'Code',        caps:['code'],       params:'7B',    ctx:'16K',  size:'3.8 GB',  desc:"Meta's Code Llama 7B — solid code completion and infill model." },
+  { name:'codegemma:7b',     source:'ollama', category:'Code',        caps:['code'],       params:'7B',    ctx:'8K',   size:'4.8 GB',  desc:"Google CodeGemma — specialized for code completion and generation." },
+  // ── Embedding ─────────────────────────────────────────────────────────────
+  { name:'nomic-embed-text', source:'ollama', category:'Embedding',   caps:['embedding'],  params:'137M',  ctx:'8K',   size:'274 MB',  desc:"Nomic AI text embedding — fast, high-quality, 8K context window." },
+  { name:'mxbai-embed-large',source:'ollama', category:'Embedding',   caps:['embedding'],  params:'335M',  ctx:'512',  size:'670 MB',  desc:"mixedbread MTEB SOTA embedding — great for semantic search." },
+  { name:'bge-m3',           source:'ollama', category:'Embedding',   caps:['embedding'],  params:'570M',  ctx:'8K',   size:'1.2 GB',  desc:"BGE-M3 — multilingual, multi-granularity retrieval embedding." },
+  { name:'all-minilm:l6-v2', source:'ollama', category:'Embedding',   caps:['embedding'],  params:'23M',   ctx:'512',  size:'46 MB',   desc:"Tiny sentence transformer, blazing fast for lightweight RAG." },
+  // ── Large / MoE ───────────────────────────────────────────────────────────
+  { name:'mixtral:8x7b',     source:'ollama', category:'Large',       caps:['moe'],        params:'8×7B',  ctx:'32K',  size:'26 GB',   desc:"Mistral MoE — 8 experts, activates 2 per token, efficient and capable." },
+  { name:'llama3.1:70b',     source:'ollama', category:'Large',       caps:[],             params:'70B',   ctx:'128K', size:'40 GB',   desc:"Meta Llama 3.1 70B — near-frontier quality for local deployment." },
+  { name:'llama4:scout',     source:'ollama', category:'Large',       caps:['vision','moe'],params:'109B', ctx:'10M',  size:'67 GB',   desc:"Meta Llama 4 Scout — 17B active params, 10M ctx, vision + MoE." },
+  { name:'gemma3:27b',       source:'ollama', category:'Large',       caps:['vision'],     params:'27B',   ctx:'128K', size:'17 GB',   desc:"Google Gemma 3 27B — top open-weights multimodal model." },
+  // ── Lightweight ────────────────────────────────────────────────────────────
+  { name:'gemma2:2b',        source:'ollama', category:'Lightweight', caps:[],             params:'2B',    ctx:'8K',   size:'1.6 GB',  desc:"Google Gemma 2 2B — surprisingly capable, runs on CPU." },
+  { name:'tinyllama:1.1b',   source:'ollama', category:'Lightweight', caps:[],             params:'1.1B',  ctx:'2K',   size:'638 MB',  desc:"TinyLlama — 1.1B parameters, useful for embedded/edge use." },
+  { name:'phi3.5:3.8b',      source:'ollama', category:'Lightweight', caps:[],             params:'3.8B',  ctx:'128K', size:'2.2 GB',  desc:"Phi-3.5 Mini — updated Phi with strong long-context performance." },
+  // ── HuggingFace GGUF ──────────────────────────────────────────────────────
+  { name:'hf.co/bartowski/Llama-3.1-8B-Instruct-GGUF:Q4_K_M',              source:'hf', category:'General',   caps:[],            params:'8B',  ctx:'128K', size:'~5 GB',  desc:"Bartowski's Llama 3.1 8B GGUF — popular well-quantized community build." },
+  { name:'hf.co/bartowski/gemma-3-27b-it-GGUF:Q4_K_M',                     source:'hf', category:'Vision',    caps:['vision'],    params:'27B', ctx:'128K', size:'~17 GB', desc:"Gemma 3 27B instruction-tuned GGUF with full vision support." },
+  { name:'hf.co/bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF:Q4_K_M',       source:'hf', category:'Reasoning', caps:['reasoning'], params:'14B', ctx:'64K',  size:'~9 GB',  desc:"DeepSeek R1 14B distilled into Qwen — fast reasoning at smaller scale." },
+  { name:'hf.co/bartowski/Mistral-Small-3.1-24B-Instruct-2503-GGUF:Q4_K_M',source:'hf', category:'Vision',    caps:['vision'],    params:'24B', ctx:'128K', size:'~15 GB', desc:"Mistral Small 3.1 24B — strong multilingual vision + text model." },
+  { name:'hf.co/bartowski/Qwen2.5-Coder-32B-Instruct-GGUF:Q4_K_M',         source:'hf', category:'Code',      caps:['code'],      params:'32B', ctx:'128K', size:'~20 GB', desc:"Qwen 2.5 Coder 32B GGUF — best open-source coding model at this weight." },
 ];
+
+// --- MODEL HUB STATE ---
+let currentPullSource = 'ollama';
+let catalogCategoryFilter = 'all';
+
+const CAP_BADGES = {
+  vision:    { label: 'VIS',    cls: 'border-[#b48ead] text-[#b48ead]', icon: 'fa-eye' },
+  embedding: { label: 'EMB',    cls: 'border-[#ebcb8b] text-[#ebcb8b]', icon: 'fa-layer-group' },
+  moe:       { label: 'MoE',    cls: 'border-[#d08770] text-[#d08770]', icon: 'fa-network-wired' },
+  code:      { label: 'CODE',   cls: 'border-[#88c0d0] text-[#88c0d0]', icon: 'fa-code' },
+  reasoning: { label: 'REASON', cls: 'border-[#a3be8c] text-[#a3be8c]', icon: 'fa-brain' },
+};
+
+const SOURCE_BADGE = {
+  ollama: 'bg-[#88c0d0]/15 text-[#88c0d0] border-[#88c0d0]/40',
+  hf:     'bg-[#ebcb8b]/15 text-[#ebcb8b] border-[#ebcb8b]/40',
+};
+
+function setPullSource(source) {
+  currentPullSource = source;
+  ['ollama', 'hf'].forEach(s => {
+    const btn = document.getElementById(`pull-src-${s}`);
+    if (btn) btn.classList.toggle('bench-type-btn-active', s === source);
+  });
+  const input = document.getElementById('pull-model-name');
+  if (input) {
+    input.placeholder = source === 'hf'
+      ? 'e.g. hf.co/bartowski/Llama-3.1-8B-Instruct-GGUF:Q4_K_M'
+      : 'e.g. llama3:8b, mistral, qwen2.5:1.5b';
+    input.value = '';
+  }
+}
+
+function setCatalogCategory(cat) {
+  catalogCategoryFilter = cat;
+  const cats = ['all', 'General', 'Reasoning', 'Vision', 'Code', 'Embedding', 'Large', 'Lightweight'];
+  cats.forEach(c => {
+    const id = c === 'all' ? 'cat-all' : `cat-${c}`;
+    const btn = document.getElementById(id);
+    if (btn) btn.classList.toggle('bench-type-btn-active', c === cat);
+  });
+  renderCatalog();
+}
 
 function renderCatalog() {
   const grid = document.getElementById('catalog-grid');
@@ -3139,55 +3235,69 @@ function renderCatalog() {
   const filterText = document.getElementById('catalog-filter')?.value.toLowerCase().trim() || '';
 
   const filtered = POPULAR_MODELS.filter(item => {
+    if (catalogCategoryFilter !== 'all' && item.category !== catalogCategoryFilter) return false;
+    if (!filterText) return true;
     return item.name.toLowerCase().includes(filterText) ||
            item.category.toLowerCase().includes(filterText) ||
-           item.desc.toLowerCase().includes(filterText);
+           item.desc.toLowerCase().includes(filterText) ||
+           (item.caps || []).some(c => c.includes(filterText));
   });
 
   if (filtered.length === 0) {
-    grid.innerHTML = `
-      <div class="col-span-full text-center py-6 text-[#4c566a] italic text-xs">
-        No matching models found in catalog.
-      </div>
-    `;
+    grid.innerHTML = `<div class="col-span-full text-center py-6 text-[#4c566a] italic text-xs">No matching models found.</div>`;
     return;
   }
 
   grid.innerHTML = filtered.map(item => {
-    // Check if installed locally
+    // Installed check
+    const baseName = item.name.split(':')[0].split('/').pop();
     const isInstalled = models.some(m => {
-      const nameOnlyLocal = m.name.split(':')[0];
-      const nameOnlyCatalog = item.name.split(':')[0];
-      return m.name === item.name || nameOnlyLocal === nameOnlyCatalog;
+      const localBase = m.name.split(':')[0];
+      return m.name === item.name || localBase === baseName || localBase === item.name.split(':')[0];
     });
 
-    // Derive capability badges from category + name for catalog items
-    const catalogCaps = getModelCapabilities({ name: item.name, details: {
-      families: item.category === 'Multimodal' ? ['clip'] : []
-    }});
-    const catalogBadges = [
-      catalogCaps.includes('vision')    ? '<span class="inline-flex items-center gap-0.5 border border-[#b48ead] text-[#b48ead] rounded px-1 text-[7px] font-mono font-bold"><i class="fa-solid fa-eye text-[6px]"></i>VIS</span>' : '',
-      catalogCaps.includes('embedding') ? '<span class="inline-flex items-center gap-0.5 border border-[#ebcb8b] text-[#ebcb8b] rounded px-1 text-[7px] font-mono font-bold"><i class="fa-solid fa-layer-group text-[6px]"></i>EMB</span>' : '',
-    ].filter(Boolean).join('');
+    // Source badge
+    const srcCls = SOURCE_BADGE[item.source] || SOURCE_BADGE.ollama;
+    const srcLabel = item.source === 'hf' ? 'HF' : 'OLLAMA';
+
+    // Display name: for long HF paths, show just the repo+quant
+    let displayName = item.name;
+    if (item.source === 'hf') {
+      const parts = item.name.replace('hf.co/', '').split('/');
+      displayName = parts.length >= 2 ? parts.slice(1).join('/') : item.name;
+    }
+
+    // Capability badges
+    const capBadgesHtml = (item.caps || []).map(cap => {
+      const b = CAP_BADGES[cap];
+      if (!b) return '';
+      return `<span class="inline-flex items-center gap-0.5 border ${b.cls} rounded px-1 text-[7px] font-mono font-bold"><i class="fa-solid ${b.icon} text-[6px]"></i>${b.label}</span>`;
+    }).join('');
+
+    // Params / ctx / size meta line
+    const meta = [item.params && `${item.params}`, item.ctx && `ctx ${item.ctx}`, item.size].filter(Boolean).join(' · ');
 
     return `
-      <div class="p-2.5 border border-[#4c566a]/30 bg-[#242933]/30 rounded-lg flex flex-col justify-between gap-1.5 hover:border-[#4c566a]/60 transition-colors">
+      <div class="p-2.5 border border-[#4c566a]/30 bg-[#242933]/30 rounded-lg flex flex-col justify-between gap-1.5 hover:border-[#4c566a]/60 transition-colors cursor-default">
         <div class="flex justify-between items-start gap-1">
-          <div class="min-w-0">
-            <div class="flex items-center gap-1 flex-wrap">
-              <span class="font-bold text-[#e5e9f0] truncate text-xs" title="${item.name}">${item.name}</span>
-              ${catalogBadges}
+          <div class="min-w-0 flex-1">
+            <div class="flex items-start gap-1 flex-wrap">
+              <span class="font-bold text-[#e5e9f0] text-xs leading-tight break-all" title="${escapeHTML(item.name)}">${escapeHTML(displayName)}</span>
             </div>
-            <span class="text-[9px] text-[#4c566a] block truncate">${item.size} // <span class="text-[#81a1c1]">${item.category}</span></span>
+            <div class="flex items-center gap-1 mt-0.5 flex-wrap">
+              <span class="border ${srcCls} rounded px-1 text-[7px] font-mono font-bold">${srcLabel}</span>
+              ${capBadgesHtml}
+            </div>
+            <span class="text-[9px] text-[#4c566a] block mt-0.5">${escapeHTML(meta)}</span>
           </div>
-          <div class="shrink-0">
-            ${isInstalled ?
-              `<span class="badge bg-[#a3be8c]/15 border-[#a3be8c]/40 text-[#a3be8c] text-[8px] font-mono px-1.5 py-0.5 rounded font-bold uppercase tracking-wider"><i class="fa-solid fa-check mr-0.5"></i>INSTALLED</span>` :
-              `<button onclick="pullCatalogModel('${item.name}')" class="btn btn-xs btn-outline btn-info font-tech text-[9px] px-2 py-0 h-5 min-h-0 uppercase">PULL</button>`
+          <div class="shrink-0 ml-1">
+            ${isInstalled
+              ? `<span class="inline-flex items-center gap-0.5 bg-[#a3be8c]/15 border border-[#a3be8c]/40 text-[#a3be8c] text-[8px] font-mono px-1.5 py-0.5 rounded font-bold"><i class="fa-solid fa-check text-[7px]"></i>OK</span>`
+              : `<button onclick="pullCatalogModel('${escapeHTML(item.name)}', '${item.source}')" class="btn btn-xs btn-outline btn-info font-tech text-[9px] px-2 py-0 h-5 min-h-0 uppercase">PULL</button>`
             }
           </div>
         </div>
-        <p class="text-[10px] text-[#4c566a] leading-tight line-clamp-2">${item.desc}</p>
+        <p class="text-[9px] text-[#4c566a] leading-tight line-clamp-2">${escapeHTML(item.desc)}</p>
       </div>
     `;
   }).join('');
@@ -3197,50 +3307,29 @@ function filterCatalog() {
   renderCatalog();
 }
 
-function pullCatalogModel(name) {
+function pullCatalogModel(name, source) {
+  // Switch source toggle to match the model's origin
+  if (source && source !== currentPullSource) {
+    setPullSource(source);
+  }
+
   const pullInput = document.getElementById('pull-model-name');
   if (!pullInput) return;
 
   pullInput.value = name;
   pullInput.scrollIntoView({ behavior: 'smooth' });
-  
-  // Flash effect on pull form to guide user
+
   const form = document.getElementById('pull-model-form');
   if (form) {
-    form.classList.add('tech-glow-blue');
-    setTimeout(() => form.classList.remove('tech-glow-blue'), 1000);
-    
-    // Submit the form
+    form.classList.add('border-[#88c0d0]');
+    setTimeout(() => form.classList.remove('border-[#88c0d0]'), 800);
     form.dispatchEvent(new Event('submit'));
   }
 }
 
-function handleHfPull(event) {
-  event.preventDefault();
-  let tag = document.getElementById('hf-pull-name').value.trim();
-  if (!tag) return;
-
-  if (!tag.startsWith('hf.co/')) {
-    if (tag.includes('/')) {
-      tag = 'hf.co/' + tag;
-    } else {
-      showToast('Invalid Hugging Face GGUF tag format. Must be user/repo:tag or hf.co/user/repo:tag', 'warning');
-      return;
-    }
-  }
-
-  // Pre-fill main pull form
-  const pullInput = document.getElementById('pull-model-name');
-  if (pullInput) {
-    pullInput.value = tag;
-    document.getElementById('hf-pull-name').value = '';
-    
-    const form = document.getElementById('pull-model-form');
-    if (form) {
-      form.dispatchEvent(new Event('submit'));
-    }
-  }
-}
+// handleHfPull removed — HF pulls now go through the unified Model Hub form.
+// Kept as no-op stub so any stale references don't throw.
+function handleHfPull(event) { if (event) event.preventDefault(); }
 
 // --- COLLAPSIBLE LAYOUT ENGINE ---
 

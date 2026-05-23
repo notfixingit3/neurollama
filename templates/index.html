@@ -120,14 +120,29 @@
         <!-- PANEL 1: INVENTORY & TELEMETRY -->
         <div id="ws-panel-inventory" class="ws-panel flex flex-col gap-6">
           <div class="flex flex-col gap-6">
-            <!-- Pull Model panel -->
+            <!-- Model Hub (unified pull + catalog) -->
             <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col flex-shrink-0">
-              <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] mb-3">
-                <i class="fa-solid fa-cloud-arrow-down mr-2"></i>Interrogate & Pull Model
-              </h2>
-              <form id="pull-model-form" onsubmit="handlePullModel(event)" class="flex gap-2">
+
+              <!-- Header + source toggle -->
+              <div class="flex items-center justify-between mb-3">
+                <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
+                  <i class="fa-solid fa-compass mr-2"></i>Model Hub
+                </h2>
+                <div class="flex gap-1">
+                  <button id="pull-src-ollama" onclick="setPullSource('ollama')" class="bench-type-btn bench-type-btn-active">
+                    <i class="fa-solid fa-box mr-1"></i>Ollama
+                  </button>
+                  <button id="pull-src-hf" onclick="setPullSource('hf')" class="bench-type-btn">
+                    <i class="fa-brands fa-python mr-1"></i>HuggingFace
+                  </button>
+                </div>
+              </div>
+
+              <!-- Pull form -->
+              <form id="pull-model-form" onsubmit="handlePullModel(event)" class="flex gap-2 mb-3">
                 <div class="relative flex-1">
-                  <input type="text" id="pull-model-name" placeholder="e.g. llama3:8b, mistral, qwen2.5:1.5b" required
+                  <input type="text" id="pull-model-name"
+                         placeholder="e.g. llama3:8b, mistral, qwen2.5:1.5b"
                          class="input input-sm w-full bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none" />
                 </div>
                 <button type="submit" id="pull-btn" class="btn btn-sm btn-info font-tech tracking-wider gap-1 text-xs">
@@ -135,8 +150,8 @@
                 </button>
               </form>
 
-              <!-- Pulling Progress Dashboard -->
-              <div id="pull-progress-container" class="hidden mt-4 p-3 bg-[#242933]/80 border border-[#4c566a]/60 rounded-lg font-mono text-xs space-y-2">
+              <!-- Pull progress dashboard -->
+              <div id="pull-progress-container" class="hidden mb-3 p-3 bg-[#242933]/80 border border-[#4c566a]/60 rounded-lg font-mono text-xs space-y-2">
                 <div class="flex justify-between items-center text-[11px]">
                   <span class="text-[#88c0d0] font-semibold flex items-center gap-1.5">
                     <i class="fa-solid fa-circle-notch animate-spin text-[#88c0d0]"></i>
@@ -151,52 +166,40 @@
                   <span id="pull-speed">-- MB/s</span>
                   <span id="pull-bytes">-- MB / -- MB</span>
                 </div>
-                
-                <!-- Live Speed Graph -->
                 <div class="mt-2">
                   <div class="text-[9px] uppercase tracking-wider text-[#4c566a] mb-1">Telemetry // Speed History</div>
                   <canvas id="pull-speed-canvas" class="w-full bg-[#2e3440]/30 border border-[#4c566a]/30 rounded h-16"></canvas>
                 </div>
-
-                <!-- Abort Button -->
                 <div class="flex justify-end mt-2">
                   <button type="button" onclick="abortPullModel()" class="btn btn-xs btn-outline btn-error font-tech text-[9px] px-2.5 h-6 min-h-0 uppercase">
                     <i class="fa-solid fa-circle-stop mr-1"></i> Abort Pull
                   </button>
                 </div>
               </div>
-            </div>
 
-            <!-- Model Registry Explorer -->
-            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col h-[260px] flex-shrink-0 overflow-hidden">
-              <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] mb-3 flex justify-between items-center">
-                <span><i class="fa-solid fa-compass mr-2"></i>Model Registry Explorer</span>
-                <span class="text-[10px] text-[#4c566a] uppercase font-mono">Ollama Library + Hugging Face</span>
-              </h2>
-
-              <!-- Hugging Face pull inline form -->
-              <div class="mb-3">
-                <form id="hf-pull-form" onsubmit="handleHfPull(event)" class="flex gap-2">
-                  <div class="relative flex-1">
-                    <span class="absolute inset-y-0 left-0 flex items-center pl-2.5 text-[#81a1c1] font-mono text-[9px]">HF_TAG:</span>
-                    <input type="text" id="hf-pull-name" placeholder="hf.co/bartowski/Llama-3-8B-Instruct-GGUF:Q4_K_M" required
-                           class="input input-xs w-full pl-16 bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none" />
-                  </div>
-                  <button type="submit" id="hf-pull-btn" class="btn btn-xs btn-info font-tech tracking-wider text-[10px]">
-                    <i class="fa-solid fa-download"></i> HF_PULL
-                  </button>
-                </form>
+              <!-- Catalog: source + category filter row -->
+              <div class="border-t border-[#4c566a]/20 pt-2.5 flex flex-col gap-2">
+                <div class="flex items-center justify-between gap-2 flex-wrap">
+                  <span class="text-[10px] font-tech uppercase text-[#88c0d0]">Popular Models</span>
+                  <input type="text" id="catalog-filter" placeholder="Search catalog..."
+                         oninput="filterCatalog()"
+                         class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-[9px] w-36 focus:border-[#88c0d0] focus:outline-none" />
+                </div>
+                <!-- Category chips -->
+                <div class="flex flex-wrap gap-1 scrollbar-none">
+                  <button class="bench-type-btn bench-type-btn-active" id="cat-all"        onclick="setCatalogCategory('all')">All</button>
+                  <button class="bench-type-btn" id="cat-General"     onclick="setCatalogCategory('General')">General</button>
+                  <button class="bench-type-btn" id="cat-Reasoning"   onclick="setCatalogCategory('Reasoning')">Reasoning</button>
+                  <button class="bench-type-btn" id="cat-Vision"      onclick="setCatalogCategory('Vision')">Vision</button>
+                  <button class="bench-type-btn" id="cat-Code"        onclick="setCatalogCategory('Code')">Code</button>
+                  <button class="bench-type-btn" id="cat-Embedding"   onclick="setCatalogCategory('Embedding')">Embed</button>
+                  <button class="bench-type-btn" id="cat-Large"       onclick="setCatalogCategory('Large')">Large / MoE</button>
+                  <button class="bench-type-btn" id="cat-Lightweight" onclick="setCatalogCategory('Lightweight')">Lightweight</button>
+                </div>
               </div>
 
-              <!-- Popular Models Catalog Header & Filter -->
-              <div class="flex justify-between items-center mb-2 pb-1 border-b border-[#4c566a]/20">
-                <span class="text-[10px] font-tech uppercase text-[#88c0d0]">Popular Models</span>
-                <input type="text" id="catalog-filter" placeholder="Filter catalog..." oninput="filterCatalog()"
-                       class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-[9px] w-36 focus:border-[#88c0d0] focus:outline-none" />
-              </div>
-
-              <!-- Popular Models List Grid (scrollable) -->
-              <div id="catalog-grid" class="overflow-y-auto max-h-32 grid grid-cols-1 sm:grid-cols-2 gap-2 pr-1 text-xs">
+              <!-- Catalog grid (scrollable) -->
+              <div id="catalog-grid" class="overflow-y-auto max-h-64 grid grid-cols-1 sm:grid-cols-2 gap-2 pr-1 text-xs mt-2 scrollbar-none">
                 <!-- Injected via JS -->
               </div>
             </div>
