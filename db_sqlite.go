@@ -789,6 +789,32 @@ func SaveRAGDocument(name string, embeddingModel string, chunks []RAGChunk) (int
 	return docID, nil
 }
 
+// AppendRAGChunks adds more chunks to an already-created document.
+// Used for multi-batch uploads of large documents.
+func AppendRAGChunks(docID int64, chunks []RAGChunk) error {
+	tx, err := DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	for _, chunk := range chunks {
+		embeddingJSON, err := json.Marshal(chunk.Embedding)
+		if err != nil {
+			return fmt.Errorf("failed to marshal embedding: %w", err)
+		}
+		_, err = tx.Exec(`
+			INSERT INTO rag_chunks (document_id, chunk_index, content, embedding)
+			VALUES (?, ?, ?, ?)`,
+			docID, chunk.ChunkIndex, chunk.Content, string(embeddingJSON))
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
 func GetRAGDocuments() ([]RAGDocument, error) {
 	// Pull the first ~200 chars of chunk 0 per document as a probe phrase for the TEST button.
 	rows, err := DB.Query(`

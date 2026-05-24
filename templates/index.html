@@ -13,8 +13,8 @@
   <link rel="stylesheet" href="/static/css/output.css?v=0.0.10">
   <!-- Marked Markdown Parser -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
-  <!-- PDF.js library for client-side PDF parsing -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+  <!-- PDF.js library for client-side PDF parsing (vendored locally — no CDN dependency) -->
+  <script src="/static/js/pdf.min.js"></script>
 </head>
 <body class="bg-[#2e3440] text-[#e5e9f0] h-screen overflow-hidden cyber-grid flex flex-col font-sans">
 
@@ -963,7 +963,7 @@
         <!-- PANEL 4: MEMORY STATUS -->
         <!-- PANEL: SYSTEM (sub-tab bar; sub-panels are ws-panel-memory/settings/diagnostics) -->
         <div id="ws-panel-system" class="ws-panel hidden mb-4">
-          <div class="bg-[#242933]/60 p-1 border border-[#4c566a]/40 flex w-fit shrink-0 gap-1 rounded-xl">
+          <div class="bg-[#242933]/60 p-1 border border-[#4c566a]/40 flex w-fit shrink-0 gap-1 rounded-xl flex-wrap">
             <button id="system-subtab-memory" onclick="switchSystemSubtab('memory')" class="bench-subtab bench-subtab-active">
               <i class="fa-solid fa-memory mr-1.5"></i>MEMORY
             </button>
@@ -973,7 +973,186 @@
             <button id="system-subtab-diagnostics" onclick="switchSystemSubtab('diagnostics')" class="bench-subtab">
               <i class="fa-solid fa-stethoscope mr-1.5"></i>DIAGNOSTICS
             </button>
+            <button id="system-subtab-activity" onclick="switchSystemSubtab('activity')" class="bench-subtab">
+              <i class="fa-solid fa-timeline mr-1.5"></i>ACTIVITY
+            </button>
+            <button id="system-subtab-about" onclick="switchSystemSubtab('about')" class="bench-subtab">
+              <i class="fa-solid fa-circle-info mr-1.5"></i>ABOUT
+            </button>
+            <button id="system-subtab-data" onclick="switchSystemSubtab('data')" class="bench-subtab">
+              <i class="fa-solid fa-database mr-1.5"></i>DATA
+            </button>
           </div>
+        </div>
+
+        <!-- PANEL: ACTIVITY LOG -->
+        <div id="ws-panel-activity" class="ws-panel hidden flex flex-col gap-4">
+          <div class="tech-panel rounded-xl flex flex-col overflow-hidden">
+            <div class="px-4 py-3 border-b border-[#4c566a]/40 flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <i class="fa-solid fa-timeline text-[#88c0d0] text-sm"></i>
+                <h3 class="text-[#88c0d0] font-mono font-bold text-xs tracking-widest">ACTIVITY LOG</h3>
+                <span id="activity-count" class="font-mono text-[10px] text-[#4c566a]"></span>
+              </div>
+              <button onclick="clearActivityDisplay()" class="btn btn-xs font-mono border-[#4c566a] text-[#4c566a] hover:text-[#d8dee9] hover:border-[#d8dee9]">
+                <i class="fa-solid fa-ban mr-1"></i>Clear Display
+              </button>
+            </div>
+            <div id="activity-log-list" class="flex flex-col divide-y divide-[#3b4252]/50 max-h-[520px] overflow-y-auto scrollbar-thin font-mono text-xs">
+              <div class="px-4 py-6 text-center text-[#4c566a] text-[11px]">No activity yet. Events will appear here as you use the app.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PANEL: ABOUT -->
+        <div id="ws-panel-about" class="ws-panel hidden flex flex-col gap-4">
+          <div class="tech-panel rounded-xl px-5 py-4">
+            <div class="flex items-center gap-2 mb-4">
+              <i class="fa-solid fa-circle-info text-[#88c0d0]"></i>
+              <h3 class="text-[#88c0d0] font-mono font-bold text-xs tracking-widest">ABOUT NEUROLLAMA</h3>
+            </div>
+            <div id="about-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3 font-mono text-xs mb-5">
+              <div class="col-span-full text-[#4c566a] animate-pulse">Loading…</div>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <a href="https://github.com/notfixingit3/neurollama" target="_blank" rel="noopener" class="btn btn-xs font-mono border-[#4c566a] text-[#81a1c1] hover:border-[#81a1c1]">
+                <i class="fa-brands fa-github mr-1"></i>GitHub
+              </a>
+              <a href="https://buymeacoffee.com/notfixingit" target="_blank" rel="noopener" class="btn btn-xs font-mono border-[#4c566a] text-[#a3be8c] hover:border-[#a3be8c]">
+                <i class="fa-solid fa-mug-hot mr-1"></i>Buy Me A Coffee
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <!-- PANEL: DATA (cache + backup/restore) -->
+        <div id="ws-panel-data" class="ws-panel hidden flex flex-col gap-4">
+
+          <!-- LOCAL STORAGE -->
+          <div class="tech-panel rounded-xl px-5 py-4">
+            <div class="flex items-center gap-2 mb-3">
+              <i class="fa-solid fa-hard-drive text-[#88c0d0] text-sm"></i>
+              <h3 class="text-[#88c0d0] font-mono font-bold text-xs tracking-widest">LOCAL STORAGE</h3>
+            </div>
+            <div class="flex flex-col divide-y divide-[#3b4252]">
+              <div class="flex items-center justify-between py-3">
+                <div>
+                  <div class="font-mono text-xs text-[#d8dee9]">Model Cache</div>
+                  <div id="cache-model-desc" class="font-mono text-[10px] text-[#4c566a] mt-0.5">Stale-while-revalidate model list</div>
+                </div>
+                <button onclick="clearModelCache()" class="btn btn-xs font-mono border-[#4c566a] text-[#ebcb8b] hover:border-[#ebcb8b]">
+                  <i class="fa-solid fa-eraser mr-1"></i>Clear
+                </button>
+              </div>
+              <div class="flex items-center justify-between py-3">
+                <div>
+                  <div class="font-mono text-xs text-[#d8dee9]">Preferences</div>
+                  <div class="font-mono text-[10px] text-[#4c566a] mt-0.5">Workspace, model selections, sidebar states</div>
+                </div>
+                <button onclick="clearPreferences()" class="btn btn-xs font-mono border-[#4c566a] text-[#ebcb8b] hover:border-[#ebcb8b]">
+                  <i class="fa-solid fa-eraser mr-1"></i>Clear
+                </button>
+              </div>
+              <div class="flex items-center justify-between py-3">
+                <div>
+                  <div class="font-mono text-xs text-[#bf616a]">Wipe All Local Data</div>
+                  <div class="font-mono text-[10px] text-[#4c566a] mt-0.5">Removes all NEUROLLAMA entries from localStorage</div>
+                </div>
+                <button onclick="wipeAllLocalStorage()" class="btn btn-xs font-mono border-[#bf616a] text-[#bf616a] hover:bg-[#bf616a]/10">
+                  <i class="fa-solid fa-trash mr-1"></i>Wipe
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- DATABASE -->
+          <div class="tech-panel rounded-xl px-5 py-4">
+            <div class="flex items-center gap-2 mb-3">
+              <i class="fa-solid fa-database text-[#88c0d0] text-sm"></i>
+              <h3 class="text-[#88c0d0] font-mono font-bold text-xs tracking-widest">DATABASE</h3>
+            </div>
+            <div class="flex flex-col divide-y divide-[#3b4252]">
+              <div class="flex items-center justify-between py-3">
+                <div>
+                  <div class="font-mono text-xs text-[#d8dee9]">Chat History</div>
+                  <div id="db-chat-desc" class="font-mono text-[10px] text-[#4c566a] mt-0.5">All sessions and messages</div>
+                </div>
+                <button onclick="clearAllChats()" class="btn btn-xs font-mono border-[#4c566a] text-[#ebcb8b] hover:border-[#ebcb8b]">
+                  <i class="fa-solid fa-eraser mr-1"></i>Clear
+                </button>
+              </div>
+              <div class="flex items-center justify-between py-3">
+                <div>
+                  <div class="font-mono text-xs text-[#d8dee9]">Benchmark Results</div>
+                  <div id="db-bench-desc" class="font-mono text-[10px] text-[#4c566a] mt-0.5">All benchmark runs and leaderboard data</div>
+                </div>
+                <button onclick="clearAllBenchmarks()" class="btn btn-xs font-mono border-[#4c566a] text-[#ebcb8b] hover:border-[#ebcb8b]">
+                  <i class="fa-solid fa-eraser mr-1"></i>Clear
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- BACKUP & RESTORE -->
+          <div class="tech-panel rounded-xl px-5 py-4">
+            <div class="flex items-center gap-2 mb-3">
+              <i class="fa-solid fa-floppy-disk text-[#88c0d0] text-sm"></i>
+              <h3 class="text-[#88c0d0] font-mono font-bold text-xs tracking-widest">BACKUP &amp; RESTORE</h3>
+            </div>
+            <div class="flex flex-col divide-y divide-[#3b4252]">
+              <div class="flex items-center justify-between py-3">
+                <div>
+                  <div class="font-mono text-xs text-[#d8dee9]">Export Database</div>
+                  <div class="font-mono text-[10px] text-[#4c566a] mt-0.5">Download a complete snapshot of neurollama.db</div>
+                </div>
+                <button onclick="downloadBackup()" class="btn btn-xs font-mono border-[#4c566a] text-[#a3be8c] hover:border-[#a3be8c]">
+                  <i class="fa-solid fa-download mr-1"></i>Download
+                </button>
+              </div>
+              <div class="py-3">
+                <div class="font-mono text-xs text-[#d8dee9] mb-1">Restore Database</div>
+                <div class="font-mono text-[10px] text-[#4c566a] mb-3">Upload a previously exported <code class="text-[#88c0d0]">.db</code> file. The app must be restarted to apply the restore.</div>
+                <div class="flex items-center gap-2 flex-wrap">
+                  <input type="file" id="restore-file-input" accept=".db" class="file-input file-input-xs font-mono border-[#4c566a] bg-[#2e3440] max-w-xs" />
+                  <button onclick="uploadRestore()" class="btn btn-xs font-mono border-[#4c566a] text-[#81a1c1] hover:border-[#81a1c1]">
+                    <i class="fa-solid fa-upload mr-1"></i>Restore
+                  </button>
+                </div>
+                <div id="restore-status" class="hidden mt-2 font-mono text-[10px]"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- PRESETS -->
+          <div class="tech-panel rounded-xl px-5 py-4">
+            <div class="flex items-center gap-2 mb-3">
+              <i class="fa-solid fa-scroll text-[#88c0d0] text-sm"></i>
+              <h3 class="text-[#88c0d0] font-mono font-bold text-xs tracking-widest">SYSTEM PROMPT PRESETS</h3>
+            </div>
+            <div class="flex flex-col divide-y divide-[#3b4252]">
+              <div class="flex items-center justify-between py-3">
+                <div>
+                  <div class="font-mono text-xs text-[#d8dee9]">Export Presets</div>
+                  <div class="font-mono text-[10px] text-[#4c566a] mt-0.5">Download all system prompt presets as a JSON file</div>
+                </div>
+                <button onclick="downloadPresets()" class="btn btn-xs font-mono border-[#4c566a] text-[#a3be8c] hover:border-[#a3be8c]">
+                  <i class="fa-solid fa-download mr-1"></i>Export
+                </button>
+              </div>
+              <div class="py-3">
+                <div class="font-mono text-xs text-[#d8dee9] mb-1">Import Presets</div>
+                <div class="font-mono text-[10px] text-[#4c566a] mb-3">Upload a previously exported <code class="text-[#88c0d0]">.json</code> presets file to add them to your library.</div>
+                <div class="flex items-center gap-2 flex-wrap">
+                  <input type="file" id="preset-import-input" accept=".json" class="file-input file-input-xs font-mono border-[#4c566a] bg-[#2e3440] max-w-xs" />
+                  <button onclick="uploadImportPresets()" class="btn btn-xs font-mono border-[#4c566a] text-[#81a1c1] hover:border-[#81a1c1]">
+                    <i class="fa-solid fa-upload mr-1"></i>Import
+                  </button>
+                </div>
+                <div id="preset-import-status" class="hidden mt-2 font-mono text-[10px]"></div>
+              </div>
+            </div>
+          </div>
+
         </div>
 
         <div id="ws-panel-memory" class="ws-panel hidden flex flex-col gap-6">
@@ -1203,21 +1382,29 @@
             <!-- Right side: Leaderboard / Results Table (9 cols) -->
             <div class="lg:col-span-9 flex flex-col">
               <div class="tech-panel tech-header-accent rounded-xl flex flex-col p-4">
-                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 pb-2 border-b border-[#4c566a]/40">
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3 pb-2 border-b border-[#4c566a]/40">
                   <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
                     <i class="fa-solid fa-trophy mr-2"></i>Benchmark Leaderboard
                   </h2>
-                  <!-- Leaderboard type filter -->
-                  <div class="flex items-center gap-1.5 flex-wrap">
-                    <span class="text-[9px] font-mono text-[#4c566a] uppercase mr-0.5">Filter:</span>
-                    <button class="bench-type-btn bench-type-btn-active" id="lb-filter-all" onclick="setLbFilter('all')">ALL</button>
-                    <button class="bench-type-btn" id="lb-filter-standard" onclick="setLbFilter('standard')"><i class="fa-solid fa-gauge-high mr-1"></i>Std</button>
-                    <button class="bench-type-btn" id="lb-filter-vision" onclick="setLbFilter('vision')"><i class="fa-solid fa-eye mr-1"></i>Vis</button>
-                    <button class="bench-type-btn" id="lb-filter-embedding" onclick="setLbFilter('embedding')"><i class="fa-solid fa-layer-group mr-1"></i>Emb</button>
-                    <button class="bench-type-btn" id="lb-filter-longctx" onclick="setLbFilter('longctx')"><i class="fa-solid fa-scroll mr-1"></i>Ctx</button>
-                    <button class="bench-type-btn" id="lb-filter-reasoning" onclick="setLbFilter('reasoning')"><i class="fa-solid fa-brain mr-1"></i>Rsn</button>
+                  <!-- Leaderboard type filter + CSV export -->
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <div class="flex items-center gap-1.5 flex-wrap">
+                      <span class="text-[9px] font-mono text-[#4c566a] uppercase mr-0.5">Filter:</span>
+                      <button class="bench-type-btn bench-type-btn-active" id="lb-filter-all" onclick="setLbFilter('all')">ALL</button>
+                      <button class="bench-type-btn" id="lb-filter-standard" onclick="setLbFilter('standard')"><i class="fa-solid fa-gauge-high mr-1"></i>Std</button>
+                      <button class="bench-type-btn" id="lb-filter-vision" onclick="setLbFilter('vision')"><i class="fa-solid fa-eye mr-1"></i>Vis</button>
+                      <button class="bench-type-btn" id="lb-filter-embedding" onclick="setLbFilter('embedding')"><i class="fa-solid fa-layer-group mr-1"></i>Emb</button>
+                      <button class="bench-type-btn" id="lb-filter-longctx" onclick="setLbFilter('longctx')"><i class="fa-solid fa-scroll mr-1"></i>Ctx</button>
+                      <button class="bench-type-btn" id="lb-filter-reasoning" onclick="setLbFilter('reasoning')"><i class="fa-solid fa-brain mr-1"></i>Rsn</button>
+                    </div>
+                    <button onclick="exportBenchmarksCSV()" title="Export filtered leaderboard as CSV"
+                      class="btn btn-xs btn-neutral border-[#4c566a] font-tech text-[9px] px-2 gap-1">
+                      <i class="fa-solid fa-file-csv text-[10px]"></i>CSV
+                    </button>
                   </div>
                 </div>
+                <!-- Stats bar: run count, model count, best performer -->
+                <div id="lb-stats-bar" class="flex items-center gap-1 text-[10px] font-mono mb-3 min-h-[18px] text-[#4c566a]"></div>
                 <div class="overflow-x-auto">
                   <table class="table table-xs w-full text-xs font-mono text-[#d8dee9] border-collapse">
                     <thead>

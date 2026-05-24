@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,6 +28,11 @@ import (
 )
 
 const appVersion = "v0.2.10"
+
+var (
+	appStartTime = time.Now()
+	activeDBPath = "data/neurollama.db"
+)
 
 type ServerStatusResponse struct {
 	Server
@@ -120,6 +126,19 @@ func main() {
 			}
 		}
 	}
+	activeDBPath = dbPath
+
+	// Apply any pending database restore before opening the DB
+	pendingRestorePath := dbPath + ".pending"
+	if _, err := os.Stat(pendingRestorePath); err == nil {
+		log.Println("Applying pending database restore...")
+		if err := os.Rename(pendingRestorePath, dbPath); err != nil {
+			log.Printf("Warning: failed to apply pending restore: %v", err)
+		} else {
+			log.Println("Database restore applied successfully.")
+		}
+	}
+
 	if err := InitDB(dbPath); err != nil {
 		log.Fatalf("Error initializing database: %v", err)
 	}
@@ -216,11 +235,22 @@ func main() {
 		// Document RAG Panel Endpoints
 		api.GET("/rag/documents", getRAGDocumentsHandler)
 		api.POST("/rag/documents", uploadRAGDocumentHandler)
+		api.POST("/rag/documents/:id/chunks", appendRAGChunksHandler)
 		api.DELETE("/rag/documents/:id", deleteRAGDocumentHandler)
 		api.POST("/rag/query", queryRAGSimilarityHandler)
 
 		// Diagnostics
 		api.GET("/diagnostics", diagnosticsHandler)
+
+		// System — About, bulk-delete, backup/restore, activity, presets
+		api.GET("/about", aboutHandler)
+		api.DELETE("/chats", deleteAllChatsHandler)
+		api.DELETE("/benchmarks", deleteAllBenchmarksHandler)
+		api.GET("/backup", backupDBHandler)
+		api.POST("/restore", restoreDBHandler)
+		api.GET("/activity", activityLogHandler)
+		api.GET("/presets/export", exportPresetsHandler)
+		api.POST("/presets/import", importPresetsHandler)
 	}
 
 	port, err := resolvePort(*portFlag)
@@ -308,6 +338,7 @@ func addServerHandler(c *gin.Context) {
 	resp := nodeStatusCache[newSrv.ID].response
 	nodeStatusMu.RUnlock()
 
+	LogActivity("node", fmt.Sprintf("Node registered: %s (%s)", req.Name, req.URL))
 	c.JSON(http.StatusCreated, resp)
 }
 
@@ -459,6 +490,7 @@ func deleteServerHandler(c *gin.Context) {
 	delete(nodeModelCache, id)
 	nodeModelMu.Unlock()
 
+	LogActivity("node", fmt.Sprintf("Node removed: %s", id))
 	c.JSON(http.StatusOK, gin.H{"message": "Server deleted successfully"})
 }
 
@@ -475,6 +507,7 @@ func selectServerHandler(c *gin.Context) {
 	entry, ok := nodeStatusCache[id]
 	nodeStatusMu.RUnlock()
 
+	LogActivity("node", fmt.Sprintf("Active node switched to: %s", srv.Name))
 	if ok {
 		c.JSON(http.StatusOK, entry.response)
 		return
@@ -717,6 +750,7 @@ func deleteModelsHandler(c *gin.Context) {
 
 	if len(successes) > 0 {
 		invalidateNodeModelCache(activeSrv.ID)
+		LogActivity("model", fmt.Sprintf("Deleted %d model(s): %s", len(successes), strings.Join(successes, ", ")))
 	}
 
 	if len(errors) > 0 {
@@ -758,6 +792,7 @@ func copyModelHandler(c *gin.Context) {
 	}
 
 	invalidateNodeModelCache(activeSrv.ID)
+	LogActivity("model", fmt.Sprintf("Model cloned: %s → %s", req.Source, req.Destination))
 	c.JSON(http.StatusOK, gin.H{"message": "Model cloned successfully"})
 }
 
@@ -806,6 +841,7 @@ func pullModelSSEHandler(c *gin.Context) {
 	c.Header("Transfer-Encoding", "chunked")
 
 	srvID := activeSrv.ID
+	LogActivity("pull", fmt.Sprintf("Pull started: %s", name))
 	c.Stream(func(w io.Writer) bool {
 		err := ParsePullProgress(stream, func(progress PullProgress) bool {
 			data, err := json.Marshal(progress)
@@ -816,9 +852,11 @@ func pullModelSSEHandler(c *gin.Context) {
 			return false
 		})
 		if err != nil {
+			LogActivity("pull", fmt.Sprintf("Pull failed: %s — %s", name, err.Error()))
 			c.SSEvent("error", err.Error())
 		} else {
 			invalidateNodeModelCache(srvID)
+			LogActivity("pull", fmt.Sprintf("Pull completed: %s", name))
 			c.SSEvent("success", "Model pull completed successfully")
 		}
 		return false
@@ -867,6 +905,7 @@ func unloadModelHandler(c *gin.Context) {
 		return
 	}
 
+	LogActivity("model", fmt.Sprintf("Model ejected from VRAM: %s", req.Name))
 	c.JSON(http.StatusOK, gin.H{"message": "Model unloaded successfully"})
 }
 
@@ -1292,6 +1331,61 @@ func deletePresetHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Preset deleted successfully"})
 }
 
+type ExportPreset struct {
+	Name    string `json:"name"`
+	Content string `json:"content"`
+}
+
+func exportPresetsHandler(c *gin.Context) {
+	presets, err := GetPresets()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	exported := make([]ExportPreset, len(presets))
+	for i, p := range presets {
+		exported[i] = ExportPreset{Name: p.Name, Content: p.Content}
+	}
+	filename := fmt.Sprintf("neurollama-presets-%s.json", time.Now().Format("20060102"))
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	c.Header("Content-Type", "application/json")
+	LogActivity("system", fmt.Sprintf("Presets exported: %d presets", len(exported)))
+	c.JSON(http.StatusOK, exported)
+}
+
+func importPresetsHandler(c *gin.Context) {
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No file uploaded"})
+		return
+	}
+	src, err := file.Open()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to open uploaded file"})
+		return
+	}
+	defer src.Close()
+
+	var presets []ExportPreset
+	if err := json.NewDecoder(src).Decode(&presets); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON: " + err.Error()})
+		return
+	}
+
+	imported := 0
+	for _, p := range presets {
+		if p.Name == "" || p.Content == "" {
+			continue
+		}
+		if _, err := CreatePreset(p.Name, p.Content); err != nil {
+			continue
+		}
+		imported++
+	}
+	LogActivity("system", fmt.Sprintf("Presets imported: %d presets from %s", imported, file.Filename))
+	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Imported %d preset(s).", imported), "count": imported})
+}
+
 type CreateStreamRequest struct {
 	Name      string `json:"name" binding:"required"`
 	Modelfile string `json:"modelfile" binding:"required"`
@@ -1311,6 +1405,7 @@ func createModelStreamHandler(c *gin.Context) {
 	}
 
 	createSrvID := activeSrv.ID
+	LogActivity("build", fmt.Sprintf("Build started: %s", req.Name))
 	client := NewOllamaClient(activeSrv)
 
 	createReq := CreateRequest{
@@ -1341,9 +1436,11 @@ func createModelStreamHandler(c *gin.Context) {
 			c.SSEvent("message", string(line))
 		}
 		if err := scanner.Err(); err != nil {
+			LogActivity("build", fmt.Sprintf("Build failed: %s — %s", req.Name, err.Error()))
 			c.SSEvent("error", err.Error())
 		} else {
 			invalidateNodeModelCache(createSrvID)
+			LogActivity("build", fmt.Sprintf("Build completed: %s", req.Name))
 			c.SSEvent("done", "stream finished")
 		}
 		return false
@@ -1565,6 +1662,45 @@ var (
 
 // ── Node & Model Cache ───────────────────────────────────────────────────────
 // Background goroutines keep these warm so API handlers are instant reads.
+
+// ── Activity Log ─────────────────────────────────────────────────────────────
+
+type ActivityEntry struct {
+	Time     string `json:"time"`
+	Category string `json:"category"` // pull | build | model | node | benchmark | system
+	Message  string `json:"message"`
+}
+
+var (
+	activityMu      sync.Mutex
+	activityBuf     []ActivityEntry
+	activityMaxSize = 300
+)
+
+// LogActivity appends an event to the in-memory ring buffer.
+func LogActivity(category, message string) {
+	activityMu.Lock()
+	defer activityMu.Unlock()
+	activityBuf = append(activityBuf, ActivityEntry{
+		Time:     time.Now().Format("15:04:05"),
+		Category: category,
+		Message:  message,
+	})
+	if len(activityBuf) > activityMaxSize {
+		activityBuf = activityBuf[len(activityBuf)-activityMaxSize:]
+	}
+}
+
+func activityLogHandler(c *gin.Context) {
+	activityMu.Lock()
+	// Return a reversed copy (newest first) without holding the lock during JSON encode.
+	reversed := make([]ActivityEntry, len(activityBuf))
+	for i, e := range activityBuf {
+		reversed[len(activityBuf)-1-i] = e
+	}
+	activityMu.Unlock()
+	c.JSON(http.StatusOK, reversed)
+}
 
 type nodeCacheEntry struct {
 	response  ServerStatusResponse
@@ -2939,6 +3075,7 @@ func runBenchmarkSSEHandler(c *gin.Context) {
 	c.Header("Connection", "keep-alive")
 	c.Header("Transfer-Encoding", "chunked")
 
+	LogActivity("benchmark", fmt.Sprintf("Benchmark started: %s [%s]", model, strings.ToUpper(benchType)))
 	client := NewOllamaClient(activeSrv)
 	ctx := c.Request.Context()
 
@@ -3332,8 +3469,15 @@ func uploadRAGDocumentHandler(c *gin.Context) {
 		return
 	}
 
+	const maxRAGChunksPerRequest = 500
+	const ragEmbedBatchSize      = 50
+
 	if len(req.Chunks) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "No document chunks provided"})
+		return
+	}
+	if len(req.Chunks) > maxRAGChunksPerRequest {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Too many chunks per request (%d). Maximum per request is %d.", len(req.Chunks), maxRAGChunksPerRequest)})
 		return
 	}
 
@@ -3351,11 +3495,20 @@ func uploadRAGDocumentHandler(c *gin.Context) {
 		texts[i] = ch.Content
 	}
 
-	// Fetch embeddings from Ollama in one batch
-	embeddings, err := client.GetEmbeddings(req.EmbeddingModel, texts)
-	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("Failed to generate embeddings from Ollama: %v", err)})
-		return
+	// Fetch embeddings in batches of ragEmbedBatchSize to avoid overwhelming Ollama
+	// with one massive request and to bound peak GPU memory usage.
+	var embeddings [][]float64
+	for start := 0; start < len(texts); start += ragEmbedBatchSize {
+		end := start + ragEmbedBatchSize
+		if end > len(texts) {
+			end = len(texts)
+		}
+		batch, err := client.GetEmbeddings(req.EmbeddingModel, texts[start:end])
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("Embedding batch %d–%d failed: %v", start+1, end, err)})
+			return
+		}
+		embeddings = append(embeddings, batch...)
 	}
 
 	if len(embeddings) != len(req.Chunks) {
@@ -3381,6 +3534,92 @@ func uploadRAGDocumentHandler(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":     "Document uploaded and indexed successfully",
+		"document_id": docID,
+		"chunks":      len(chunksToSave),
+	})
+}
+
+// appendRAGChunksHandler embeds and appends chunks to an existing document.
+// Called for batches 2..N during a large-document upload from the client.
+func appendRAGChunksHandler(c *gin.Context) {
+	idStr := c.Param("id")
+	var docID int64
+	if _, err := fmt.Sscanf(idStr, "%d", &docID); err != nil || docID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid document ID"})
+		return
+	}
+
+	var req struct {
+		EmbeddingModel string `json:"embedding_model" binding:"required"`
+		Chunks         []struct {
+			ChunkIndex int    `json:"chunk_index"`
+			Content    string `json:"content" binding:"required"`
+		} `json:"chunks" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	const maxRAGChunksPerRequest = 500
+	const ragEmbedBatchSize      = 50
+
+	if len(req.Chunks) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No chunks provided"})
+		return
+	}
+	if len(req.Chunks) > maxRAGChunksPerRequest {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Too many chunks per request (%d). Maximum is %d.", len(req.Chunks), maxRAGChunksPerRequest)})
+		return
+	}
+
+	activeSrv, err := GetActiveServer()
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "No active Ollama server selected"})
+		return
+	}
+	client := NewOllamaClient(activeSrv)
+
+	texts := make([]string, len(req.Chunks))
+	for i, ch := range req.Chunks {
+		texts[i] = ch.Content
+	}
+
+	var embeddings [][]float64
+	for start := 0; start < len(texts); start += ragEmbedBatchSize {
+		end := start + ragEmbedBatchSize
+		if end > len(texts) {
+			end = len(texts)
+		}
+		batch, err := client.GetEmbeddings(req.EmbeddingModel, texts[start:end])
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("Embedding batch %d–%d failed: %v", start+1, end, err)})
+			return
+		}
+		embeddings = append(embeddings, batch...)
+	}
+
+	if len(embeddings) != len(req.Chunks) {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Embedding count mismatch"})
+		return
+	}
+
+	var chunksToSave []RAGChunk
+	for i, ch := range req.Chunks {
+		chunksToSave = append(chunksToSave, RAGChunk{
+			ChunkIndex: ch.ChunkIndex,
+			Content:    ch.Content,
+			Embedding:  embeddings[i],
+		})
+	}
+
+	if err := AppendRAGChunks(docID, chunksToSave); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":     "Chunks appended successfully",
 		"document_id": docID,
 		"chunks":      len(chunksToSave),
 	})
@@ -3491,4 +3730,126 @@ func cosineSimilarity(a, b []float64) float64 {
 		return 0.0
 	}
 	return dotProduct / (math.Sqrt(normA) * math.Sqrt(normB))
+}
+
+// ── System — About / Data Management / Backup-Restore ───────────────────────
+
+func aboutHandler(c *gin.Context) {
+	uptime := time.Since(appStartTime)
+	h := int(uptime.Hours())
+	m := int(uptime.Minutes()) % 60
+	s := int(uptime.Seconds()) % 60
+	uptimeStr := fmt.Sprintf("%dh %dm %ds", h, m, s)
+
+	var chatCount, benchCount int
+	if DB != nil {
+		_ = DB.QueryRow("SELECT COUNT(*) FROM chats").Scan(&chatCount)
+		_ = DB.QueryRow("SELECT COUNT(*) FROM benchmarks").Scan(&benchCount)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"version":    appVersion,
+		"goVersion":  runtime.Version(),
+		"uptime":     uptimeStr,
+		"startTime":  appStartTime.Format("2006-01-02 15:04:05"),
+		"dbPath":     activeDBPath,
+		"chatCount":  chatCount,
+		"benchCount": benchCount,
+	})
+}
+
+func deleteAllChatsHandler(c *gin.Context) {
+	tx, err := DB.Begin()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec("DELETE FROM messages"); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if _, err := tx.Exec("DELETE FROM chats"); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	LogActivity("system", "All chat history cleared")
+	c.JSON(http.StatusOK, gin.H{"message": "All chat history deleted."})
+}
+
+func deleteAllBenchmarksHandler(c *gin.Context) {
+	if _, err := DB.Exec("DELETE FROM benchmarks"); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	LogActivity("system", "All benchmark results cleared")
+	c.JSON(http.StatusOK, gin.H{"message": "All benchmark results deleted."})
+}
+
+func backupDBHandler(c *gin.Context) {
+	tmpPath := activeDBPath + ".backup.tmp"
+	// VACUUM INTO creates a consistent, defragmented copy without locking the live DB
+	if _, err := DB.Exec("VACUUM INTO ?", tmpPath); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Backup failed: " + err.Error()})
+		return
+	}
+	defer os.Remove(tmpPath)
+	filename := fmt.Sprintf("neurollama-backup-%s.db", time.Now().Format("20060102-150405"))
+	LogActivity("system", fmt.Sprintf("Database backup downloaded: %s", filename))
+	c.FileAttachment(tmpPath, filename)
+}
+
+func restoreDBHandler(c *gin.Context) {
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No file uploaded"})
+		return
+	}
+
+	src, err := file.Open()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to open uploaded file"})
+		return
+	}
+	defer src.Close()
+
+	// Validate SQLite magic bytes ("SQLite format 3\x00")
+	header := make([]byte, 16)
+	if _, err := io.ReadFull(src, header); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid file: cannot read header"})
+		return
+	}
+	if string(header) != "SQLite format 3\x00" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Not a valid SQLite database file"})
+		return
+	}
+	if _, err := src.(io.Seeker).Seek(0, io.SeekStart); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process uploaded file"})
+		return
+	}
+
+	// Write to pending path — applied on next startup
+	pendingPath := activeDBPath + ".pending"
+	dst, err := os.Create(pendingPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save restore file"})
+		return
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, src); err != nil {
+		os.Remove(pendingPath)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to write restore file"})
+		return
+	}
+
+	LogActivity("system", fmt.Sprintf("Database restore staged: %s (restart required)", file.Filename))
+	c.JSON(http.StatusOK, gin.H{
+		"message":         "Restore file saved. Restart NEUROLLAMA to apply.",
+		"restartRequired": true,
+	})
 }

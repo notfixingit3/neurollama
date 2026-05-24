@@ -268,6 +268,10 @@ async function init() {
     });
   }
 
+  // Wire up prompt history navigation (↑/↓) on chat and completion inputs
+  initPromptHistory('chat-input-text');
+  initPromptHistory('completion-prompt-text');
+
   // Start background telemetry stream
   startTelemetrySSE();
 
@@ -317,7 +321,8 @@ function switchWorkspace(workspace) {
   }
 
   // Always hide system sub-panels before switching (prevents bleed when leaving system workspace)
-  ['memory', 'diagnostics', 'settings'].forEach(sp => {
+  stopActivityPoll();
+  ['memory', 'diagnostics', 'settings', 'activity', 'about', 'data'].forEach(sp => {
     const p = document.getElementById(`ws-panel-${sp}`);
     if (p) p.classList.add('hidden');
   });
@@ -355,6 +360,7 @@ function switchWorkspace(workspace) {
     switchSystemSubtab(activeSystemSubtab);
   } else if (workspace === 'benchmark') {
     populateModelDropdowns();
+    restoreLbFilterUI();
     fetchBenchmarks();
   } else if (workspace === 'playground') {
     populateModelDropdowns();
@@ -378,7 +384,7 @@ function switchSystemSubtab(subtab) {
   localStorage.setItem('neurollama-system-subtab', subtab);
 
   // Show/hide sub-panels and toggle active state on sub-tab buttons
-  ['memory', 'diagnostics', 'settings'].forEach(sp => {
+  ['memory', 'diagnostics', 'settings', 'activity', 'about', 'data'].forEach(sp => {
     const panel = document.getElementById(`ws-panel-${sp}`);
     if (panel) panel.classList.toggle('hidden', sp !== subtab);
     const btn = document.getElementById(`system-subtab-${sp}`);
@@ -394,7 +400,367 @@ function switchSystemSubtab(subtab) {
   } else if (subtab === 'diagnostics') {
     runDiagnostics();
     renderStreamFailureLog();
+  } else if (subtab === 'activity') {
+    startActivityPoll();
+  } else if (subtab === 'about') {
+    stopActivityPoll();
+    fetchAbout();
+  } else if (subtab === 'data') {
+    stopActivityPoll();
+    refreshDataPanel();
+  } else {
+    stopActivityPoll();
   }
+}
+
+// ── System: About ────────────────────────────────────────────────────────────
+
+async function fetchAbout() {
+  const grid = document.getElementById('about-grid');
+  if (!grid) return;
+  grid.innerHTML = '<div class="col-span-full text-[#4c566a] animate-pulse font-mono text-xs">Loading…</div>';
+  try {
+    const res = await fetch('/api/about');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const d = await res.json();
+    const row = (label, value) =>
+      `<div class="flex flex-col gap-0.5">
+         <div class="text-[#4c566a] text-[10px] tracking-wider uppercase">${label}</div>
+         <div class="text-[#d8dee9]">${value}</div>
+       </div>`;
+    grid.innerHTML =
+      row('Version', d.version) +
+      row('Go Runtime', d.goVersion) +
+      row('Uptime', d.uptime) +
+      row('Started', d.startTime) +
+      row('Database', `<span class="text-[#81a1c1]">${d.dbPath}</span>`) +
+      row('Chat Sessions', d.chatCount) +
+      row('Benchmark Runs', d.benchCount);
+    // Keep Data panel counters in sync if they're visible
+    _updateDataPanelCounts(d.chatCount, d.benchCount);
+  } catch (e) {
+    grid.innerHTML = `<div class="col-span-full text-[#bf616a] font-mono text-xs">Failed to load app info: ${e.message}</div>`;
+  }
+}
+
+// ── System: Data Management ──────────────────────────────────────────────────
+
+function _updateDataPanelCounts(chatCount, benchCount) {
+  const chatDesc = document.getElementById('db-chat-desc');
+  if (chatDesc && chatCount !== undefined)
+    chatDesc.textContent = `${chatCount} session${chatCount !== 1 ? 's' : ''}`;
+  const benchDesc = document.getElementById('db-bench-desc');
+  if (benchDesc && benchCount !== undefined)
+    benchDesc.textContent = `${benchCount} run${benchCount !== 1 ? 's' : ''}`;
+}
+
+function refreshDataPanel() {
+  // Update model cache description from localStorage
+  const cacheDesc = document.getElementById('cache-model-desc');
+  if (cacheDesc) {
+    try {
+      const raw = localStorage.getItem('neurollama-model-cache');
+      if (raw) {
+        const { models: m, ts } = JSON.parse(raw);
+        const ageMins = Math.round((Date.now() - ts) / 60000);
+        cacheDesc.textContent = `${m.length} model${m.length !== 1 ? 's' : ''} · cached ${ageMins}m ago`;
+      } else {
+        cacheDesc.textContent = 'No cache present';
+      }
+    } catch {
+      cacheDesc.textContent = 'Cache unreadable';
+    }
+  }
+  // Fetch live counts from API (also populates About grid if open)
+  fetchAbout();
+}
+
+function clearModelCache() {
+  localStorage.removeItem('neurollama-model-cache');
+  showToast('Model cache cleared.', 'success');
+  refreshDataPanel();
+}
+
+function clearPreferences() {
+  [
+    'neurollama-chat-model', 'neurollama-completion-model', 'neurollama-builder-model',
+    'neurollama-bench-model', 'neurollama-optimizer-model', 'neurollama-rag-model',
+    'neurollama-system-subtab', 'active-workspace',
+    'sidebar-nodes-collapsed', 'sidebar-history-collapsed', 'sidebar-config-collapsed',
+    'neurollama-bench-subtab',
+  ].forEach(k => localStorage.removeItem(k));
+  showToast('Preferences cleared. Refresh to apply.', 'success');
+}
+
+function wipeAllLocalStorage() {
+  if (!confirm('Clear ALL NEUROLLAMA local data from this browser? This cannot be undone.')) return;
+  Object.keys(localStorage)
+    .filter(k => k.startsWith('neurollama-') || k === 'active-workspace' || k.startsWith('sidebar-'))
+    .forEach(k => localStorage.removeItem(k));
+  showToast('All local data wiped. Reloading…', 'warning');
+  setTimeout(() => location.reload(), 1200);
+}
+
+async function clearAllChats() {
+  if (!confirm('Delete ALL chat history? This cannot be undone.')) return;
+  try {
+    const res = await fetch('/api/chats', { method: 'DELETE' });
+    if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+    showToast('All chat history deleted.', 'success');
+    fetchSavedChats(); // refresh sidebar history list
+    refreshDataPanel();
+  } catch (e) {
+    showToast('Failed to delete chats: ' + e.message, 'error');
+  }
+}
+
+async function clearAllBenchmarks() {
+  if (!confirm('Delete ALL benchmark results? This cannot be undone.')) return;
+  try {
+    const res = await fetch('/api/benchmarks', { method: 'DELETE' });
+    if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+    showToast('All benchmark results deleted.', 'success');
+    fetchBenchmarks(); // refresh leaderboard
+    refreshDataPanel();
+  } catch (e) {
+    showToast('Failed to delete benchmarks: ' + e.message, 'error');
+  }
+}
+
+// ── System: Backup & Restore ─────────────────────────────────────────────────
+
+function downloadBackup() {
+  window.location.href = '/api/backup';
+}
+
+async function uploadRestore() {
+  const input = document.getElementById('restore-file-input');
+  const statusEl = document.getElementById('restore-status');
+  if (!input || !input.files.length) {
+    showToast('Select a .db file first.', 'warning');
+    return;
+  }
+  const file = input.files[0];
+  if (!confirm(`Restore from "${file.name}"?\n\nThe application must be restarted to apply the restore. Current data will be replaced.`)) return;
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  if (statusEl) {
+    statusEl.className = 'mt-2 font-mono text-[10px] text-[#ebcb8b]';
+    statusEl.textContent = 'Uploading…';
+  }
+
+  try {
+    const res = await fetch('/api/restore', { method: 'POST', body: formData });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || 'Upload failed');
+    if (statusEl) {
+      statusEl.className = 'mt-2 font-mono text-[10px] text-[#a3be8c]';
+      statusEl.textContent = '✓ ' + d.message;
+    }
+    showToast('Restore pending — restart NEUROLLAMA to apply.', 'success');
+  } catch (e) {
+    if (statusEl) {
+      statusEl.className = 'mt-2 font-mono text-[10px] text-[#bf616a]';
+      statusEl.textContent = '✗ ' + e.message;
+    }
+    showToast('Restore failed: ' + e.message, 'error');
+  }
+}
+
+// ── Activity Log ─────────────────────────────────────────────────────────────
+
+let activityPollInterval = null;
+
+const ACTIVITY_CATEGORY_STYLE = {
+  pull:      { bg: 'bg-[#88c0d0]/15', text: 'text-[#88c0d0]',  label: 'PULL'      },
+  build:     { bg: 'bg-[#a3be8c]/15', text: 'text-[#a3be8c]',  label: 'BUILD'     },
+  model:     { bg: 'bg-[#81a1c1]/15', text: 'text-[#81a1c1]',  label: 'MODEL'     },
+  node:      { bg: 'bg-[#b48ead]/15', text: 'text-[#b48ead]',  label: 'NODE'      },
+  benchmark: { bg: 'bg-[#ebcb8b]/15', text: 'text-[#ebcb8b]',  label: 'BENCH'     },
+  system:    { bg: 'bg-[#4c566a]/30', text: 'text-[#d8dee9]',   label: 'SYSTEM'    },
+};
+
+function startActivityPoll() {
+  fetchActivity();
+  if (!activityPollInterval) {
+    activityPollInterval = setInterval(fetchActivity, 5000);
+  }
+}
+
+function stopActivityPoll() {
+  if (activityPollInterval) {
+    clearInterval(activityPollInterval);
+    activityPollInterval = null;
+  }
+}
+
+async function fetchActivity() {
+  try {
+    const res = await fetch('/api/activity');
+    if (!res.ok) return;
+    const entries = await res.json();
+    renderActivityLog(entries);
+  } catch { /* silent — poll will retry */ }
+}
+
+function renderActivityLog(entries) {
+  const list = document.getElementById('activity-log-list');
+  const countEl = document.getElementById('activity-count');
+  if (!list) return;
+
+  if (countEl) countEl.textContent = entries.length ? `(${entries.length})` : '';
+
+  if (!entries.length) {
+    list.innerHTML = '<div class="px-4 py-6 text-center text-[#4c566a] text-[11px]">No activity yet. Events will appear here as you use the app.</div>';
+    return;
+  }
+
+  list.innerHTML = entries.map(e => {
+    const style = ACTIVITY_CATEGORY_STYLE[e.category] || ACTIVITY_CATEGORY_STYLE.system;
+    return `
+      <div class="flex items-start gap-3 px-4 py-2.5 hover:bg-[#2e3440]/40 transition-colors">
+        <span class="font-mono text-[10px] text-[#4c566a] shrink-0 pt-px w-16">${e.time}</span>
+        <span class="shrink-0 inline-block px-1.5 py-0.5 rounded text-[9px] font-mono font-bold tracking-wider ${style.bg} ${style.text}">${style.label}</span>
+        <span class="font-mono text-[11px] text-[#d8dee9] leading-relaxed">${escapeHTML(e.message)}</span>
+      </div>`;
+  }).join('');
+}
+
+function clearActivityDisplay() {
+  const list = document.getElementById('activity-log-list');
+  const countEl = document.getElementById('activity-count');
+  if (list) list.innerHTML = '<div class="px-4 py-6 text-center text-[#4c566a] text-[11px]">Display cleared. New events will appear as they occur.</div>';
+  if (countEl) countEl.textContent = '';
+  stopActivityPoll();
+}
+
+// ── Prompt History (↑/↓ navigation) ─────────────────────────────────────────
+
+let promptHistory = JSON.parse(localStorage.getItem('neurollama-prompt-history') || '[]');
+let promptHistoryIndex = -1;
+let promptDraft = '';
+
+function addToPromptHistory(text) {
+  if (!text.trim()) return;
+  promptHistory = promptHistory.filter(p => p !== text);
+  promptHistory.unshift(text);
+  if (promptHistory.length > 50) promptHistory = promptHistory.slice(0, 50);
+  localStorage.setItem('neurollama-prompt-history', JSON.stringify(promptHistory));
+  promptHistoryIndex = -1;
+  promptDraft = '';
+}
+
+function initPromptHistory(inputId) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowUp' && !e.shiftKey) {
+      const canEnter = input.value.trim() === '' || (input.selectionStart === 0 && input.selectionEnd === 0);
+      if (promptHistoryIndex === -1 && !canEnter) return;
+      e.preventDefault();
+      if (promptHistoryIndex === -1) {
+        promptDraft = input.value;
+        if (!promptHistory.length) return;
+        promptHistoryIndex = 0;
+      } else if (promptHistoryIndex < promptHistory.length - 1) {
+        promptHistoryIndex++;
+      }
+      input.value = promptHistory[promptHistoryIndex];
+      input.setSelectionRange(0, 0);
+    } else if (e.key === 'ArrowDown' && !e.shiftKey && promptHistoryIndex !== -1) {
+      e.preventDefault();
+      if (promptHistoryIndex > 0) {
+        promptHistoryIndex--;
+        input.value = promptHistory[promptHistoryIndex];
+      } else {
+        promptHistoryIndex = -1;
+        input.value = promptDraft;
+      }
+      input.setSelectionRange(input.value.length, input.value.length);
+    }
+  });
+
+  // Typing while navigating exits history mode (but keeps text)
+  input.addEventListener('input', () => {
+    if (promptHistoryIndex !== -1) promptHistoryIndex = -1;
+  });
+}
+
+// ── Preset Import/Export ─────────────────────────────────────────────────────
+
+function downloadPresets() {
+  window.location.href = '/api/presets/export';
+}
+
+async function uploadImportPresets() {
+  const input = document.getElementById('preset-import-input');
+  const statusEl = document.getElementById('preset-import-status');
+  if (!input || !input.files.length) {
+    showToast('Select a .json presets file first.', 'warning');
+    return;
+  }
+  const file = input.files[0];
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  if (statusEl) {
+    statusEl.className = 'mt-2 font-mono text-[10px] text-[#ebcb8b]';
+    statusEl.textContent = 'Importing…';
+  }
+
+  try {
+    const res = await fetch('/api/presets/import', { method: 'POST', body: formData });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || 'Import failed');
+    if (statusEl) {
+      statusEl.className = 'mt-2 font-mono text-[10px] text-[#a3be8c]';
+      statusEl.textContent = `✓ ${d.message}`;
+    }
+    showToast(d.message, 'success');
+    fetchPresets(); // refresh the preset dropdown in playground
+    input.value = '';
+  } catch (e) {
+    if (statusEl) {
+      statusEl.className = 'mt-2 font-mono text-[10px] text-[#bf616a]';
+      statusEl.textContent = '✗ ' + e.message;
+    }
+    showToast('Import failed: ' + e.message, 'error');
+  }
+}
+
+// ── Copy Response Button ──────────────────────────────────────────────────────
+
+async function copyMessageToClipboard(index) {
+  const msg = (typeof chatMessages !== 'undefined') ? chatMessages[index] : null;
+  if (!msg) return;
+  // Strip <think>…</think> blocks for a clean copy of the actual response
+  let text = msg.content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // Fallback for non-secure contexts
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  }
+
+  // Visual feedback on the button
+  const btn = document.getElementById(`copy-msg-${index}`);
+  if (btn) {
+    btn.innerHTML = '<i class="fa-solid fa-check text-[#a3be8c]"></i>';
+    setTimeout(() => { btn.innerHTML = '<i class="fa-regular fa-copy"></i>'; }, 2000);
+  }
+  showToast('Copied to clipboard.', 'success');
 }
 
 function populateModelDropdowns() {
@@ -1969,7 +2335,7 @@ function renderChatHistory() {
   }
 
   let html = '';
-  chatMessages.forEach(msg => {
+  chatMessages.forEach((msg, msgIndex) => {
     if (msg.role === 'system') {
       html += `
         <div class="chat chat-start animate-fade-in w-full">
@@ -2042,7 +2408,14 @@ function renderChatHistory() {
               <i class="fa-solid fa-terminal text-[#88c0d0] text-xs"></i>
             </div>
           </div>
-          <div class="chat-header text-[10px] text-[#4c566a] mb-1">${modelName.toUpperCase()}</div>
+          <div class="chat-header text-[10px] text-[#4c566a] mb-1 flex items-center gap-2">
+            <span>${modelName.toUpperCase()}</span>
+            <button id="copy-msg-${msgIndex}" onclick="copyMessageToClipboard(${msgIndex})"
+              title="Copy response"
+              class="ml-1 opacity-30 hover:opacity-100 transition-opacity text-[#88c0d0] cursor-pointer text-[10px]">
+              <i class="fa-regular fa-copy"></i>
+            </button>
+          </div>
           <div class="chat-bubble bg-[#242933] border border-[#4c566a]/50 text-[#e5e9f0] leading-relaxed max-w-[85%] whitespace-pre-wrap">${ragHTML}${formattedContent}</div>
         </div>
       `;
@@ -2165,6 +2538,7 @@ async function sendChatMessage() {
 
   const promptText = document.getElementById('chat-input-text').value.trim();
   if (!promptText) return;
+  addToPromptHistory(promptText);
 
   if (!activeChatId) {
     const newId = await startNewChatSession(false);
@@ -4631,6 +5005,7 @@ async function generateCompletion() {
     showToast('Please enter a completion prompt', 'warning');
     return;
   }
+  addToPromptHistory(prompt);
 
   const sysPrompt = document.getElementById('completion-system-prompt').value;
   const temp = parseFloat(document.getElementById('completion-temp').value);
@@ -5598,8 +5973,9 @@ function getModelCapabilities(model) {
 // --- INFERENCE BENCHMARKER ---
 
 let benchmarkEventSource = null;
+let benchmarkStartTime   = null;
 let currentBenchmarkType = 'standard';
-let currentLbFilter = 'all';
+let currentLbFilter      = 'all';
 
 const BENCH_TYPES = ['standard', 'vision', 'embedding', 'longctx', 'reasoning'];
 const BENCH_TYPE_HINTS = {
@@ -5609,6 +5985,180 @@ const BENCH_TYPE_HINTS = {
   longctx:   'LLM with large context window recommended (≥8K)',
   reasoning: 'Any LLM — factual accuracy & math test',
 };
+
+// Compute letter score from raw benchmark metrics (S/A/B/C/F)
+function autoScore(bType, tps, extra) {
+  if (bType === 'embedding') {
+    const cps = extra.chunks_per_sec || 0;
+    if (cps >= 500) return 'S';
+    if (cps >= 200) return 'A';
+    if (cps >= 50)  return 'B';
+    if (cps >= 10)  return 'C';
+    return 'F';
+  }
+  if (bType === 'reasoning') {
+    const acc = extra.accuracy_pct || 0;
+    if (acc >= 90) return 'S';
+    if (acc >= 75) return 'A';
+    if (acc >= 55) return 'B';
+    if (acc >= 35) return 'C';
+    return 'F';
+  }
+  // standard / vision / longctx — TPS-based
+  if (tps >= 80) return 'S';
+  if (tps >= 50) return 'A';
+  if (tps >= 25) return 'B';
+  if (tps >= 8)  return 'C';
+  return 'F';
+}
+
+// Highlight benchmark log lines with semantic, line-type-aware formatting.
+// Matches against raw text for type detection; applies spans to HTML-escaped output.
+function highlightBenchLog(rawText) {
+  const s = escapeHTML(rawText);
+  const t = rawText.replace(/^\s+/, ''); // trimmed raw, for type detection
+  const lead = rawText.length - t.length; // number of leading spaces
+
+  // Inline colour helpers — all accept already-safe HTML fragments
+  const D  = x => `<span class="text-[#4c566a]">${x}</span>`;          // dim grey
+  const W  = x => `<span class="text-[#d8dee9]">${x}</span>`;          // white-ish neutral
+  const Cy = x => `<span class="text-[#88c0d0] font-bold">${x}</span>`; // cyan bold   (TTFT)
+  const Gr = x => `<span class="text-[#a3be8c] font-bold">${x}</span>`; // green bold  (TPS)
+  const Ye = x => `<span class="text-[#ebcb8b] font-bold">${x}</span>`; // yellow bold (ch/s)
+  const Or = x => `<span class="text-[#d08770] font-bold">${x}</span>`; // orange bold (%, acc)
+  const Re = x => `<span class="text-[#bf616a] font-bold">${x}</span>`; // red bold    (WRONG)
+  const Pu = x => `<span class="text-[#b48ead] font-bold">${x}</span>`; // purple      (vision)
+  const Bl = x => `<span class="text-[#81a1c1] font-bold">${x}</span>`; // soft-blue   (ctx)
+  const q  = escapeHTML;                                                 // shorthand
+
+  // ── 1. "Initializing TYPE benchmark for model..." ─────────────────────────
+  {
+    const m = t.match(/^Initializing\s+(\S+)\s+benchmark\s+for\s+(.+?)\.{0,3}$/i);
+    if (m) {
+      return D('Initializing ') + Bl(q(m[1])) + D(' benchmark for ') + W(q(m[2])) + D('...');
+    }
+  }
+
+  // ── 2. "TYPE benchmark complete." ────────────────────────────────────────
+  {
+    const m = t.match(/^(\S+)\s+benchmark\s+complete\.$/i);
+    if (m) {
+      return D(Bl(q(m[1])) + D(' benchmark complete.'));
+    }
+  }
+
+  // ── 3. 'Prompt 1/3: "text"' (standard) ───────────────────────────────────
+  {
+    const m = t.match(/^(Prompt\s+\d+\/\d+):\s*(.*)$/i);
+    if (m) {
+      return Bl(q(m[1])) + D(': ') + D(q(m[2]));
+    }
+  }
+
+  // ── 4. "Vision prompt 1/2..." (vision) ───────────────────────────────────
+  {
+    const m = t.match(/^(Vision\s+prompt\s+\d+\/\d+)\.{0,3}$/i);
+    if (m) {
+      return Pu(q(m[1])) + D('...');
+    }
+  }
+
+  // ── 5. "Q1/5: text" (reasoning) ──────────────────────────────────────────
+  {
+    const m = t.match(/^(Q\d+\/\d+):\s*(.+)$/i);
+    if (m) {
+      return Or(q(m[1])) + D(': ') + W(q(m[2]));
+    }
+  }
+
+  // ── 6. "Running ~4K context window test (num_ctx=4096)..." (longctx) ─────
+  {
+    const m = t.match(/^Running\s+~([\w.]+)\s+context\s+window\s+test\s+\(num_ctx=(\d+)\)\.{0,3}$/i);
+    if (m) {
+      return D('Running ~') + Bl(q(m[1])) + D(' context window test ') + D('(') + D('num_ctx=') + `<span class="text-[#88c0d0]">${q(m[2])}</span>` + D(')...');
+    }
+  }
+
+  // ── 7. "Embedding N chunks to measure throughput..." (embedding) ──────────
+  {
+    const m = t.match(/^Embedding\s+(\d+)\s+chunks\s+to\s+measure\s+throughput\.{0,3}$/i);
+    if (m) {
+      return D('Embedding ') + Ye(q(m[1])) + D(' chunks to measure throughput...');
+    }
+  }
+
+  // ── 8. "Done: N chunks in Xs → Y ch/s, ~Z tokens/s, dim=D" (embedding) ───
+  {
+    const m = t.match(/^Done:\s+(\d+)\s+chunks\s+in\s+([\d.]+)s\s+[→]\s+([\d.]+)\s+chunks\/s,\s+~(\d+)\s+tokens\/s,\s+dim=(\d+)$/i);
+    if (m) {
+      return Gr('Done:') + ' ' +
+             Ye(q(m[1])) + D(' chunks in ') + `<span class="text-[#88c0d0]">${q(m[2])}</span>` + D('s') +
+             D(' → ') + Ye(q(m[3])) + D(' ch/s') +
+             D('  ·  ~') + `<span class="text-[#a3be8c]">${q(m[4])}</span>` + D(' tok/s') +
+             D('  ·  dim=') + D(q(m[5]));
+    }
+  }
+
+  // ── 9. "  TTFT: 123ms, TPS: 45.2[, Latency: 234ms]" (standard/vision) ────
+  {
+    const m = t.match(/^TTFT:\s*([\d.]+)ms,\s*TPS:\s*([\d.]+)(?:,\s*Latency:\s*([\d.]+)ms)?$/i);
+    if (m) {
+      let out = D('TTFT: ') + Cy(q(m[1])) + D('ms') +
+                D('  ·  TPS: ') + Gr(q(m[2]));
+      if (m[3]) out += D('  ·  Latency: ') + `<span class="text-[#81a1c1]">${q(m[3])}</span>` + D('ms');
+      return (lead ? D('  ') : '') + out;
+    }
+  }
+
+  // ── 10. "  4K context → TTFT: 123ms, TPS: 45.2" (longctx result) ─────────
+  {
+    const m = t.match(/^([\w.]+)\s+context\s+[→]\s+TTFT:\s*([\d.]+)ms,\s*TPS:\s*([\d.]+)$/i);
+    if (m) {
+      return (lead ? D('  ') : '') +
+             Bl(q(m[1])) + D(' context → ') +
+             D('TTFT: ') + Cy(q(m[2])) + D('ms') +
+             D('  ·  TPS: ') + Gr(q(m[3]));
+    }
+  }
+
+  // ── 11. "  Answer: "X" — ✓ CORRECT / ✗ WRONG  (expected: "Y")" ───────────
+  {
+    if (/\bAnswer:/i.test(t)) {
+      let out = s;
+      out = out.replace(/(Answer:)/i,    (_, m) => D(m));
+      out = out.replace(/(✓\s*CORRECT)/g, (_, m) => Gr(m));
+      out = out.replace(/(✗\s*WRONG)/g,   (_, m) => Re(m));
+      out = out.replace(/(\(expected:)/gi, (_, m) => D(m));
+      return out;
+    }
+  }
+
+  // ── 12. "Result: N/M correct (P%)" (reasoning) ────────────────────────────
+  {
+    const m = t.match(/^Result:\s*(\d+)\/(\d+)\s+correct\s+\(([\d.]+)%\)$/i);
+    if (m) {
+      const pass = parseFloat(m[3]) >= 55;
+      const frac = q(m[1]) + '/' + q(m[2]);
+      return Or('Result:') + ' ' + (pass ? Gr(frac) : Ye(frac)) + D(' correct ') +
+             D('(') + (pass ? Gr(q(m[3]) + '%') : Ye(q(m[3]) + '%')) + D(')');
+    }
+  }
+
+  // ── 13. Warning / error sub-lines ─────────────────────────────────────────
+  {
+    if (/(?:failed:|warning:|no tokens received)/i.test(t)) {
+      return `<span class="text-[#ebcb8b]">  ⚠ ${q(t)}</span>`;
+    }
+  }
+
+  // ── 14. Fallback: generic metric highlights on neutral grey ───────────────
+  let out = s;
+  out = out.replace(/\b(\d+\.?\d*)\s+(TPS)\b/g,            (_, n) => Gr(n) + D(' TPS'));
+  out = out.replace(/\b(\d+\.?\d*)\s+(ch\/s|chunks\/s)\b/g, (_, n) => Ye(n) + D(' ch/s'));
+  out = out.replace(/\b(\d+\.?\d*)(%)\b/g,                   (_, n) => Or(n) + D('%'));
+  out = out.replace(/\b(\d+\.?\d*)\s*(ms)\b/g,               (_, n) => Cy(n) + D(' ms'));
+  return W(out);
+}
 
 // Benchmark model select: filtered by capability
 function populateBenchmarkModelSelect() {
@@ -5652,6 +6202,7 @@ function setBenchmarkType(type) {
 
 function setLbFilter(filter) {
   currentLbFilter = filter;
+  localStorage.setItem('neurollama-bench-filter', filter);
   const filters = ['all', ...BENCH_TYPES];
   filters.forEach(f => {
     const btn = document.getElementById(`lb-filter-${f}`);
@@ -5660,9 +6211,30 @@ function setLbFilter(filter) {
   fetchBenchmarks();
 }
 
-// Leaderboard sort state
-let lbSortCol = 'created_at';
-let lbSortDir = 'desc';
+function restoreLbFilterUI() {
+  // Restore filter button state
+  const savedFilter = localStorage.getItem('neurollama-bench-filter') || 'all';
+  currentLbFilter = savedFilter;
+  const filters = ['all', ...BENCH_TYPES];
+  filters.forEach(f => {
+    const btn = document.getElementById(`lb-filter-${f}`);
+    if (btn) btn.classList.toggle('bench-type-btn-active', f === savedFilter);
+  });
+  // Restore sort indicator
+  document.querySelectorAll('[id^="sort-indicator-"]').forEach(el => {
+    el.innerHTML = '<i class="fa-solid fa-sort text-[9px]"></i>';
+    el.className = 'text-[#4c566a]';
+  });
+  const indicator = document.getElementById(`sort-indicator-${lbSortCol}`);
+  if (indicator) {
+    indicator.innerHTML = `<i class="fa-solid fa-sort-${lbSortDir === 'asc' ? 'up' : 'down'} text-[9px]"></i>`;
+    indicator.className = 'text-[#88c0d0]';
+  }
+}
+
+// Leaderboard sort state — persisted in localStorage
+let lbSortCol = localStorage.getItem('neurollama-bench-sort-col') || 'created_at';
+let lbSortDir = localStorage.getItem('neurollama-bench-sort-dir') || 'desc';
 const SCORE_ORDER = { S: 5, A: 4, B: 3, C: 2, F: 1 };
 
 function setLbSort(col) {
@@ -5672,6 +6244,8 @@ function setLbSort(col) {
     lbSortCol = col;
     lbSortDir = (col === 'model_name' || col === 'server_name') ? 'asc' : 'desc';
   }
+  localStorage.setItem('neurollama-bench-sort-col', lbSortCol);
+  localStorage.setItem('neurollama-bench-sort-dir', lbSortDir);
   // Update header sort indicators
   document.querySelectorAll('[id^="sort-indicator-"]').forEach(el => {
     el.innerHTML = '<i class="fa-solid fa-sort text-[9px]"></i>';
@@ -5714,8 +6288,10 @@ function startBenchmark() {
   const logContainer = document.getElementById('benchmark-log');
   
   setBenchmarkRunning(true);
+  benchmarkStartTime = Date.now();
   if (logContainer) {
-    logContainer.innerHTML = `<div class="text-[#88c0d0] uppercase animate-pulse">Initializing ${currentBenchmarkType.toUpperCase()} benchmark for ${model}...</div>`;
+    // Show a connecting placeholder — the server's first SSEvent will be the real "Initializing…" line
+    logContainer.innerHTML = `<div class="text-[#4c566a] italic text-[10px] animate-pulse">▌ Connecting to benchmark stream...</div>`;
   }
 
   if (benchmarkEventSource) {
@@ -5724,12 +6300,12 @@ function startBenchmark() {
 
   const url = `/api/benchmarks/run?model=${encodeURIComponent(model)}&type=${encodeURIComponent(currentBenchmarkType)}`;
   benchmarkEventSource = new EventSource(url);
-  
+
   benchmarkEventSource.addEventListener('status', (e) => {
     if (logContainer) {
       const div = document.createElement('div');
       div.className = 'py-0.5 border-b border-[#4c566a]/10 last:border-none';
-      div.textContent = e.data;
+      div.innerHTML = highlightBenchLog(e.data);
       logContainer.appendChild(div);
       logContainer.scrollTop = logContainer.scrollHeight;
     }
@@ -5738,14 +6314,15 @@ function startBenchmark() {
   benchmarkEventSource.addEventListener('error', (e) => {
     if (logContainer) {
       const div = document.createElement('div');
-      div.className = 'text-[#bf616a] font-bold mt-1';
-      div.textContent = `[ERROR] ${e.data || 'Failed to complete benchmark runs.'}`;
+      div.className = 'mt-1';
+      div.innerHTML = `<span class="text-[#bf616a] font-bold">[ERROR]</span> <span class="text-[#bf616a]">${escapeHTML(e.data || 'Failed to complete benchmark runs.')}</span>`;
       logContainer.appendChild(div);
       logContainer.scrollTop = logContainer.scrollHeight;
     }
     benchmarkEventSource.close();
     benchmarkEventSource = null;
     setBenchmarkRunning(false);
+    benchmarkStartTime = null;
     recordStreamFailure('benchmark', e.data || 'Failed to complete benchmark runs.', { model, node: activeServerLabel() });
     showToast('Benchmark run failed', 'error');
   });
@@ -5753,26 +6330,56 @@ function startBenchmark() {
   benchmarkEventSource.addEventListener('done', (e) => {
     try {
       const res = JSON.parse(e.data);
+      let extra = {};
+      try { extra = JSON.parse(res.extra_json || '{}'); } catch (_) {}
+      const bType = res.benchmark_type || 'standard';
+
+      // Compute elapsed duration
+      const elapsedSec = benchmarkStartTime ? Math.round((Date.now() - benchmarkStartTime) / 1000) : null;
+      const durationStr = elapsedSec != null
+        ? (elapsedSec >= 60 ? `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s` : `${elapsedSec}s`)
+        : '';
+
       if (logContainer) {
+        // Separator line
+        const sep = document.createElement('div');
+        sep.className = 'my-2 border-t border-[#a3be8c]/20';
+        logContainer.appendChild(sep);
+
+        // Result summary
         const div = document.createElement('div');
-        div.className = 'text-[#a3be8c] font-bold mt-2 border-t border-[#a3be8c]/20 pt-1';
-        let extra = {};
-        try { extra = JSON.parse(res.extra_json || '{}'); } catch (_) {}
-        const bType = res.benchmark_type || 'standard';
-        let summary = '';
+        div.className = 'flex items-center gap-2 flex-wrap';
+        let metricHtml = '';
         if (bType === 'embedding') {
-          summary = `Chunks/sec = ${(extra.chunks_per_sec || 0).toFixed(1)}`;
+          metricHtml = `<span class="text-[#4c566a]">ch/s</span> <span class="text-[#ebcb8b] font-bold text-sm">${(extra.chunks_per_sec || 0).toFixed(1)}</span>`;
         } else if (bType === 'reasoning') {
-          summary = `Accuracy = ${(extra.accuracy_pct || 0).toFixed(0)}%`;
+          metricHtml = `<span class="text-[#4c566a]">acc</span> <span class="text-[#d08770] font-bold text-sm">${(extra.accuracy_pct || 0).toFixed(0)}%</span>`;
         } else if (bType === 'longctx') {
-          summary = `TPS = ${res.tps.toFixed(1)}, Degradation = ${(extra.degradation_pct || 0).toFixed(1)}%`;
+          metricHtml = `<span class="text-[#4c566a]">TPS</span> <span class="text-[#a3be8c] font-bold text-sm">${res.tps.toFixed(1)}</span>` +
+            (extra.degradation_pct != null ? ` <span class="text-[#4c566a]">·</span> <span class="text-[#d08770] text-[10px]">↓${extra.degradation_pct.toFixed(1)}% deg</span>` : '');
         } else {
-          summary = `TTFT = ${res.ttft_ms.toFixed(1)}ms, TPS = ${res.tps.toFixed(1)}`;
+          metricHtml = `<span class="text-[#4c566a]">TPS</span> <span class="text-[#a3be8c] font-bold text-sm">${res.tps.toFixed(1)}</span>` +
+            `<span class="text-[#4c566a]">·</span> <span class="text-[#4c566a]">TTFT</span> <span class="text-[#88c0d0] font-bold">${res.ttft_ms.toFixed(0)}ms</span>`;
         }
-        div.textContent = `[COMPLETED] ${bType.toUpperCase()} — ${summary}`;
+        const computed = autoScore(bType, res.tps || 0, extra);
+        const GRADE_CLS = { S:'text-[#a3be8c]', A:'text-[#88c0d0]', B:'text-[#8fbcbb]', C:'text-[#ebcb8b]', F:'text-[#bf616a]' };
+        const gradeHtml = `<span class="border border-[#4c566a]/50 px-1.5 py-0.5 rounded text-[9px] font-bold ${GRADE_CLS[computed] || 'text-[#d8dee9]'}" title="Auto-scored">${computed}</span>`;
+        const durHtml = durationStr ? `<span class="text-[#4c566a] text-[10px]">· ${escapeHTML(durationStr)}</span>` : '';
+        div.innerHTML = `<span class="text-[#a3be8c] font-bold text-[10px] uppercase tracking-widest">✓ Complete</span> ${metricHtml} ${gradeHtml} ${durHtml}`;
         logContainer.appendChild(div);
         logContainer.scrollTop = logContainer.scrollHeight;
       }
+
+      // Auto-score and persist immediately (grade was also displayed in the log banner above)
+      const autoGrade = autoScore(bType, res.tps || 0, extra);
+      if (res.id) {
+        fetch(`/api/benchmarks/${res.id}/score`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ score: autoGrade, notes: 'auto' })
+        }).catch(() => {});
+      }
+
       showToast('Benchmark completed and saved to leaderboard!', 'success');
       fetchBenchmarks();
     } catch (err) {
@@ -5781,6 +6388,7 @@ function startBenchmark() {
       benchmarkEventSource.close();
       benchmarkEventSource = null;
       setBenchmarkRunning(false);
+      benchmarkStartTime = null;
     }
   });
   
@@ -5797,12 +6405,13 @@ function cancelBenchmark() {
   if (!benchmarkEventSource) return;
   benchmarkEventSource.close();
   benchmarkEventSource = null;
-  const logContainer = document.getElementById('benchmark-log');
   setBenchmarkRunning(false);
+  benchmarkStartTime = null;
+  const logContainer = document.getElementById('benchmark-log');
   if (logContainer) {
     const div = document.createElement('div');
-    div.className = 'text-[#ebcb8b] font-bold mt-1';
-    div.textContent = '[CANCELLED] Benchmark stream stopped by user.';
+    div.className = 'mt-1';
+    div.innerHTML = '<span class="text-[#ebcb8b] font-bold">[CANCELLED]</span> <span class="text-[#ebcb8b]">Benchmark stream stopped by user.</span>';
     logContainer.appendChild(div);
     logContainer.scrollTop = logContainer.scrollHeight;
   }
@@ -5832,6 +6441,8 @@ async function fetchBenchmarks() {
           </td>
         </tr>
       `;
+      const statsBar = document.getElementById('lb-stats-bar');
+      if (statsBar) statsBar.innerHTML = '';
       return;
     }
 
@@ -5865,6 +6476,95 @@ async function fetchBenchmarks() {
       if (typeof av === 'string') return lbSortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
       return lbSortDir === 'asc' ? av - bv : bv - av;
     });
+
+    // Stats bar — per-type bests + score distribution
+    {
+      const statsBar = document.getElementById('lb-stats-bar');
+      if (statsBar && allRuns.length > 0) {
+        const totalRuns    = allRuns.length;
+        const uniqueModels = new Set(allRuns.map(b => b.model_name)).size;
+
+        // Per-type colour config (border variants confirmed in compiled CSS)
+        const TYPE_META = {
+          standard:  { short:'STD', cls:'text-[#88c0d0]', border:'border-[#88c0d0]/40' },
+          vision:    { short:'VIS', cls:'text-[#b48ead]', border:'border-[#b48ead]'     },
+          embedding: { short:'EMB', cls:'text-[#ebcb8b]', border:'border-[#ebcb8b]/40' },
+          longctx:   { short:'CTX', cls:'text-[#a3be8c]', border:'border-[#a3be8c]/40' },
+          reasoning: { short:'RSN', cls:'text-[#d08770]', border:'border-[#d08770]'     },
+        };
+
+        // Find best group per type (compare within each type, not across types)
+        const typeBests = new Map(); // type → { model, label, meta }
+        for (const runs of groupList) {
+          const bType  = runs[0].benchmark_type || 'standard';
+          const extras = runs.map(r => { try { return JSON.parse(r.extra_json || '{}'); } catch (_) { return {}; } });
+          let metric, label;
+          if (bType === 'embedding') {
+            metric = extras.reduce((s, e) => s + (e.chunks_per_sec || 0), 0) / runs.length;
+            label  = `${metric.toFixed(1)} ch/s`;
+          } else if (bType === 'reasoning') {
+            metric = extras.reduce((s, e) => s + (e.accuracy_pct || 0), 0) / runs.length;
+            label  = `${metric.toFixed(0)}%`;
+          } else {
+            metric = runs.reduce((s, r) => s + (r.tps || 0), 0) / runs.length;
+            label  = `${metric.toFixed(1)} TPS`;
+          }
+          const prev = typeBests.get(bType);
+          if (!prev || metric > prev.metric) {
+            typeBests.set(bType, { metric, label, model: runs[0].model_name, meta: TYPE_META[bType] || { short: bType.slice(0,3).toUpperCase(), cls:'text-[#4c566a]', border:'border-[#4c566a]' } });
+          }
+        }
+
+        // Score distribution — per group, using auto-score for pending rows
+        const scoreDist = { S: 0, A: 0, B: 0, C: 0, F: 0 };
+        for (const runs of groupList) {
+          const latest = runs[0];
+          const bType  = latest.benchmark_type || 'standard';
+          const rawSc  = latest.reasoning_score;
+          let sc;
+          if (!rawSc || rawSc === 'Pending') {
+            const extras = runs.map(r => { try { return JSON.parse(r.extra_json || '{}'); } catch (_) { return {}; } });
+            const avgTps = runs.reduce((s, r) => s + (r.tps || 0), 0) / runs.length;
+            const avgEx  = {
+              chunks_per_sec: extras.reduce((s, e) => s + (e.chunks_per_sec || 0), 0) / runs.length,
+              accuracy_pct:   extras.reduce((s, e) => s + (e.accuracy_pct   || 0), 0) / runs.length,
+            };
+            sc = autoScore(bType, avgTps, avgEx);
+          } else {
+            sc = rawSc;
+          }
+          if (sc in scoreDist) scoreDist[sc]++;
+        }
+
+        const SCORE_BADGE = {
+          S: 'text-[#a3be8c]', A: 'text-[#88c0d0]',
+          B: 'text-[#8fbcbb]', C: 'text-[#ebcb8b]', F: 'text-[#bf616a]',
+        };
+        const distParts = Object.entries(scoreDist)
+          .filter(([, n]) => n > 0)
+          .map(([sc, n]) => `<span class="${SCORE_BADGE[sc] || ''} font-mono">${sc}:${n}</span>`)
+          .join('<span class="text-[#4c566a]/30 mx-0.5">·</span>');
+
+        // Build per-type best chips
+        const bestChips = [...typeBests.entries()].map(([, info]) => `
+          <span class="text-[#4c566a] mx-1">·</span>
+          <span class="border ${info.meta.border} ${info.meta.cls} text-[8px] font-mono px-1 py-0.5 rounded mr-1">${info.meta.short}</span><span class="text-[#e5e9f0] font-semibold truncate max-w-[120px]" style="display:inline-block;vertical-align:middle;" title="${escapeHTML(info.model)}">${escapeHTML(info.model.split(':')[0])}</span><span class="${info.meta.cls} ml-1 font-bold">${escapeHTML(info.label)}</span>
+        `).join('');
+
+        const distHtml = distParts
+          ? `<span class="text-[#4c566a] mx-1">·</span><span class="flex items-center gap-1">${distParts}</span>`
+          : '';
+
+        statsBar.innerHTML = `
+          <i class="fa-solid fa-chart-line text-[#4c566a] mr-1.5 text-[9px]"></i>
+          <span class="text-[#4c566a]">${totalRuns} run${totalRuns !== 1 ? 's' : ''}</span>
+          <span class="text-[#4c566a] mx-1">·</span>
+          <span class="text-[#4c566a]">${uniqueModels} model${uniqueModels !== 1 ? 's' : ''}</span>
+          ${bestChips}
+          ${distHtml}
+        `;
+      }
+    }
 
     // Type badge colour map (Nord palette)
     const TYPE_BADGE = {
@@ -5975,8 +6675,25 @@ async function fetchBenchmarks() {
       }
 
       const { ttftCell, metricCell, latCell } = metricCells(summaryRun, bType, rangeData);
-      const score      = latest.reasoning_score || 'F';
-      const scoreClass = scoreBadgeClass(score);
+
+      // Score: use saved score if manually rated; compute auto-score for Pending rows
+      const rawScore   = latest.reasoning_score;
+      const isAutoNote = latest.notes === 'auto';
+      const isPending  = !rawScore || rawScore === 'Pending';
+      let displayScore, isAutoScore;
+      if (isPending && !isAutoNote) {
+        // Compute on-the-fly for older runs that predate auto-scoring
+        const sumExtra = (() => { try { return JSON.parse(summaryRun.extra_json || '{}'); } catch (_) { return {}; } })();
+        displayScore = autoScore(bType, summaryRun.tps || 0, sumExtra);
+        isAutoScore  = true;
+      } else {
+        displayScore = rawScore || 'F';
+        isAutoScore  = isAutoNote;
+      }
+      const scoreClass = scoreBadgeClass(displayScore);
+      const autoBadge  = isAutoScore
+        ? `<span class="text-[8px] text-[#4c566a] font-mono ml-0.5" title="Auto-scored from metrics">auto</span>`
+        : '';
 
       // Runs count badge shown next to model name when multi-run
       const runsBadge = multiRun
@@ -5992,17 +6709,20 @@ async function fetchBenchmarks() {
            </button>`
         : '';
 
+      // Notes display (strip 'auto' marker; don't show for multi-run summary)
+      const userNotes = (latest.notes && latest.notes !== 'auto') ? latest.notes : '';
+      const noteHtml  = (userNotes && !multiRun)
+        ? `<div class="text-[10px] text-[#4c566a] mt-0.5 max-w-[200px] truncate" title="${escapeHTML(userNotes)}">${escapeHTML(userNotes)}</div>`
+        : '';
+
       // Single-run rows keep their own delete + rate; multi-run uses per-sub-row buttons
+      const rateNotes = userNotes || '';
       const singleActions = !multiRun ? `
-              <button onclick="openScoreModal(${latest.id}, '${escapeHTML(score)}', '${escapeHTML(latest.notes || '')}')"
+              <button onclick="openScoreModal(${latest.id}, '${escapeHTML(displayScore)}', '${escapeHTML(rateNotes)}')"
                       class="btn btn-xs btn-neutral border-[#4c566a] font-tech text-[9px] px-2">RATE</button>
               <button onclick="deleteBenchmark(${latest.id})" class="btn btn-xs btn-ghost text-[#bf616a] hover:bg-[#bf616a]/15 p-1">
                 <i class="fa-solid fa-trash-can text-[10px]"></i>
               </button>` : '';
-
-      const noteHtml = (latest.notes && !multiRun)
-        ? `<div class="text-[10px] text-[#4c566a] mt-0.5 max-w-[200px] truncate" title="${escapeHTML(latest.notes)}">${escapeHTML(latest.notes)}</div>`
-        : '';
 
       html += `
         <tr class="hover:bg-[#3b4252]/20 border-b border-[#4c566a]/20 transition-colors${multiRun ? ' cursor-pointer' : ''}"
@@ -6023,7 +6743,7 @@ async function fetchBenchmarks() {
           ${metricCell}
           ${latCell}
           <td class="text-center">
-            <span class="border px-2 py-0.5 rounded text-[9px] font-bold ${scoreClass}">${escapeHTML(score)}</span>
+            <span class="border px-2 py-0.5 rounded text-[9px] font-bold ${scoreClass}">${escapeHTML(displayScore)}</span>${autoBadge}
           </td>
           <td class="text-right">
             <div class="flex gap-1 justify-end" onclick="event.stopPropagation()">
@@ -6042,8 +6762,21 @@ async function fetchBenchmarks() {
       // Sub-rows for individual runs (multi-run only, hidden by default)
       if (multiRun) {
         runs.forEach((run, idx) => {
-          const runScore  = run.reasoning_score || 'F';
-          const runScCls  = scoreBadgeClass(runScore);
+          const rawRunScore   = run.reasoning_score;
+          const runIsAuto     = run.notes === 'auto';
+          const runIsPending  = !rawRunScore || rawRunScore === 'Pending';
+          let runDisplayScore, runIsAutoScore;
+          if (runIsPending && !runIsAuto) {
+            const runExtra = (() => { try { return JSON.parse(run.extra_json || '{}'); } catch (_) { return {}; } })();
+            runDisplayScore  = autoScore(bType, run.tps || 0, runExtra);
+            runIsAutoScore   = true;
+          } else {
+            runDisplayScore  = rawRunScore || 'F';
+            runIsAutoScore   = runIsAuto;
+          }
+          const runScCls      = scoreBadgeClass(runDisplayScore);
+          const runAutoBadge  = runIsAutoScore ? `<span class="text-[8px] text-[#4c566a] font-mono ml-0.5">auto</span>` : '';
+          const runUserNotes  = (run.notes && run.notes !== 'auto') ? run.notes : '';
           const { ttftCell: rt, metricCell: rm, latCell: rl } = metricCells(run, bType);
           const runDate   = run.created_at
             ? new Date(run.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -6063,11 +6796,11 @@ async function fetchBenchmarks() {
               ${rm}
               ${rl}
               <td class="text-center">
-                <span class="border px-2 py-0.5 rounded text-[9px] font-bold ${runScCls}">${escapeHTML(runScore)}</span>
+                <span class="border px-2 py-0.5 rounded text-[9px] font-bold ${runScCls}">${escapeHTML(runDisplayScore)}</span>${runAutoBadge}
               </td>
               <td class="text-right">
                 <div class="flex gap-1 justify-end">
-                  <button onclick="openScoreModal(${run.id}, '${escapeHTML(runScore)}', '${escapeHTML(run.notes || '')}')"
+                  <button onclick="openScoreModal(${run.id}, '${escapeHTML(runDisplayScore)}', '${escapeHTML(runUserNotes)}')"
                           class="btn btn-xs btn-neutral border-[#4c566a] font-tech text-[9px] px-2">RATE</button>
                   <button onclick="deleteBenchmark(${run.id})" class="btn btn-xs btn-ghost text-[#bf616a] hover:bg-[#bf616a]/15 p-1">
                     <i class="fa-solid fa-trash-can text-[10px]"></i>
@@ -6190,6 +6923,56 @@ async function deleteBenchmark(id) {
     fetchBenchmarks();
   } catch (error) {
     showToast(error.message, 'error');
+  }
+}
+
+async function exportBenchmarksCSV() {
+  try {
+    const response = await fetch('/api/benchmarks');
+    if (!response.ok) throw new Error('Failed to fetch benchmarks');
+    const list = await response.json();
+
+    // Apply current filter
+    const filtered = (currentLbFilter === 'all') ? (list || []) : (list || []).filter(b => (b.benchmark_type || 'standard') === currentLbFilter);
+    if (!filtered.length) { showToast('No benchmark data to export', 'warning'); return; }
+
+    const esc = v => `"${String(v || '').replace(/"/g, '""')}"`;
+    const headers = ['ID', 'Model', 'Server', 'Type', 'TTFT_ms', 'TPS_or_metric', 'Latency_ms', 'Score', 'Notes', 'Date'];
+    const rows = filtered.map(b => {
+      let extra = {};
+      try { extra = JSON.parse(b.extra_json || '{}'); } catch (_) {}
+      const bType = b.benchmark_type || 'standard';
+      let metric = b.tps;
+      if (bType === 'embedding') metric = extra.chunks_per_sec || 0;
+      else if (bType === 'reasoning') metric = extra.accuracy_pct || 0;
+      const userNotes = (b.notes && b.notes !== 'auto') ? b.notes : '';
+      return [
+        b.id,
+        esc(b.model_name),
+        esc(b.server_name),
+        bType,
+        (b.ttft_ms || 0).toFixed(2),
+        (metric || 0).toFixed(2),
+        (b.avg_latency_ms || 0).toFixed(2),
+        b.reasoning_score || '',
+        esc(userNotes),
+        b.created_at || ''
+      ].join(',');
+    });
+
+    const csv  = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `neurollama-benchmarks-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast(`Exported ${filtered.length} records to CSV`, 'success');
+  } catch (e) {
+    showToast('CSV export failed: ' + e.message, 'error');
   }
 }
 
@@ -6529,9 +7312,9 @@ async function deleteOptimizerRun(id) {
 
 // --- DOCUMENT RAG CONTROLLER ---
 
-// Configure PDF.js worker
+// Configure PDF.js worker — vendored locally so airgapped / firewall installs work
 if (window.pdfjsLib) {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+  pdfjsLib.GlobalWorkerOptions.workerSrc = '/static/js/pdf.worker.min.js';
 }
 
 function chunkText(text, size = 800, overlap = 100) {
@@ -6601,9 +7384,29 @@ async function handleRAGUpload(file) {
     if (progressStatus) progressStatus.textContent = status;
   };
   
+  // ── Guards ──────────────────────────────────────────────────────────────────
+  const MAX_FILE_MB    = 50;   // hard reject above this
+  const WARN_FILE_MB   = 20;   // warn but continue
+  const MAX_PAGES      = 300;
+  const WARN_PAGES     = 100;
+  const UPLOAD_BATCH   = 200;  // chunks per POST — server embeds 50 at a time within each
+  const PDF_TIMEOUT_MS = 30000;
+
+  const fileMB = file.size / (1024 * 1024);
+  if (fileMB > MAX_FILE_MB) {
+    showToast(`File too large (${fileMB.toFixed(1)} MB). Maximum is ${MAX_FILE_MB} MB.`, 'error');
+    if (progressDiv) progressDiv.classList.add('hidden');
+    return;
+  }
+
+  let docID = null;
+
   try {
     const t0 = Date.now();
-    logMessage(`Initializing parse for: ${file.name} (${(file.size / 1024).toFixed(1)} KB)...`);
+    logMessage(`Initializing parse for: ${file.name} (${fileMB.toFixed(1)} MB)...`);
+    if (fileMB > WARN_FILE_MB) {
+      logMessage(`⚠ Large file (${fileMB.toFixed(1)} MB) — processing may take a moment.`);
+    }
     updateProgress(10, 'Reading file...');
 
     let text = '';
@@ -6611,11 +7414,11 @@ async function handleRAGUpload(file) {
 
     if (extension === 'pdf') {
       if (!window.pdfjsLib) {
-        throw new Error('PDF.js library not loaded — check your internet connection and refresh the page.');
+        throw new Error('PDF.js library not loaded. Try refreshing the page.');
       }
-      if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
-      }
+      // Ensure worker always points to the vendored local copy
+      pdfjsLib.GlobalWorkerOptions.workerSrc = '/static/js/pdf.worker.min.js';
+
       logMessage('Reading PDF into memory...');
       updateProgress(15, 'Reading PDF...');
 
@@ -6623,30 +7426,45 @@ async function handleRAGUpload(file) {
       logMessage('Parsing PDF structure with PDF.js...');
       updateProgress(20, 'Parsing PDF...');
 
+      // Fix #3: 30-second timeout so a hung worker can't freeze the tab
       let pdf;
       try {
-        pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        const docTask = pdfjsLib.getDocument({ data: arrayBuffer });
+        const timeout  = new Promise((_, reject) =>
+          setTimeout(() => { docTask.destroy(); reject(new Error(`PDF.js timed out after ${PDF_TIMEOUT_MS / 1000}s. The file may be corrupted or too complex.`)); }, PDF_TIMEOUT_MS)
+        );
+        pdf = await Promise.race([docTask.promise, timeout]);
       } catch (pdfErr) {
         throw new Error(`PDF.js failed to open file: ${pdfErr.message || pdfErr}`);
       }
 
+      // Fix #2: hard page-count limit
+      if (pdf.numPages > MAX_PAGES) {
+        throw new Error(`PDF has ${pdf.numPages} pages. Maximum supported is ${MAX_PAGES} pages. Try splitting the document first.`);
+      }
       logMessage(`Found ${pdf.numPages} page(s) — extracting text...`);
-      if (pdf.numPages > 50) {
-        logMessage(`⚠ Large document (${pdf.numPages} pages). This may take a moment.`);
+      if (pdf.numPages > WARN_PAGES) {
+        logMessage(`⚠ Large document (${pdf.numPages} pages). Extraction may take a moment.`);
       }
 
+      // Fix #4: array-push + join instead of string concatenation (avoids O(n²) allocations)
+      const pageTexts = [];
+      let charsSoFar = 0;
       for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
+        const page    = await pdf.getPage(i);
         const content = await page.getTextContent();
         const pageText = content.items.map(item => item.str).join(' ');
-        text += pageText + '\n';
+        pageTexts.push(pageText);
+        charsSoFar += pageText.length;
 
         const pct = 20 + Math.round((i / pdf.numPages) * 30);
         if (i % 10 === 0 || i === pdf.numPages) {
-          logMessage(`Extracted page ${i}/${pdf.numPages} — ${text.length.toLocaleString()} chars so far`);
+          logMessage(`Extracted page ${i}/${pdf.numPages} — ${charsSoFar.toLocaleString()} chars so far`);
         }
         updateProgress(pct, `Parsing PDF (page ${i}/${pdf.numPages})...`);
       }
+      text = pageTexts.join('\n');
+
     } else if (extension === 'txt' || extension === 'md') {
       text = await new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -6660,54 +7478,80 @@ async function handleRAGUpload(file) {
     }
 
     if (!text.trim()) {
-      throw new Error('No extractable text found in this file. It may be an image-only/scanned PDF — try converting to text first.');
+      throw new Error('No extractable text found. This may be an image-only or scanned PDF — try running it through OCR first (e.g. ocrmypdf).');
     }
 
     logMessage(`Extracted ${text.length.toLocaleString()} chars in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
     logMessage('Chunking into ~800-char blocks (100-char overlap)...');
     updateProgress(60, 'Chunking text...');
 
-    const chunks = chunkText(text, 800, 100);
-    logMessage(`${chunks.length} chunks ready — sending to Ollama for embedding (this may take a moment if the model is cold-loading)...`);
+    const chunks      = chunkText(text, 800, 100);
+    const totalChunks  = chunks.length;
+    const totalBatches = Math.ceil(totalChunks / UPLOAD_BATCH);
+    logMessage(`${totalChunks} chunk${totalChunks !== 1 ? 's' : ''} → ${totalBatches} upload batch${totalBatches !== 1 ? 'es' : ''} of up to ${UPLOAD_BATCH} (this may take a moment if the model is cold-loading)...`);
 
-    updateProgress(70, `Embedding ${chunks.length} chunks via ${model}...`);
+    let chunksIndexed = 0;
 
-    const payload = {
-      name: file.name,
-      embedding_model: model,
-      chunks: chunks.map((c, idx) => ({
-        chunk_index: idx,
-        content: c
-      }))
-    };
+    for (let b = 0; b < totalBatches; b++) {
+      const start       = b * UPLOAD_BATCH;
+      const end         = Math.min(start + UPLOAD_BATCH, totalChunks);
+      const batchChunks = chunks.slice(start, end);
 
-    const response = await fetch('/api/rag/documents', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+      updateProgress(
+        65 + Math.round((b / totalBatches) * 30),
+        `Batch ${b + 1}/${totalBatches}: embedding chunks ${start + 1}–${end}...`
+      );
+      logMessage(`Batch ${b + 1}/${totalBatches}: chunks ${start + 1}–${end} (${batchChunks.length} chunks)...`);
 
-    if (!response.ok) {
-      let errMsg = `Server error ${response.status}`;
-      try {
-        const errData = await response.json();
-        errMsg = errData.error || errMsg;
-      } catch (_) {}
-      throw new Error(errMsg);
+      const batchPayload = {
+        embedding_model: model,
+        chunks: batchChunks.map((c, i) => ({ chunk_index: start + i, content: c }))
+      };
+
+      let url, body;
+      if (docID === null) {
+        url  = '/api/rag/documents';
+        body = JSON.stringify({ name: file.name, ...batchPayload });
+      } else {
+        url  = `/api/rag/documents/${docID}/chunks`;
+        body = JSON.stringify(batchPayload);
+      }
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body
+      });
+
+      if (!response.ok) {
+        let errMsg = `Server error ${response.status} on batch ${b + 1}`;
+        try { const e = await response.json(); errMsg = e.error || errMsg; } catch (_) {}
+        throw new Error(errMsg);
+      }
+
+      const resData = await response.json();
+      if (docID === null) docID = resData.document_id;
+      chunksIndexed += resData.chunks;
+      logMessage(`Batch ${b + 1}/${totalBatches} done — ${chunksIndexed}/${totalChunks} chunks indexed.`);
     }
-    
-    const resData = await response.json();
-    logMessage(`Indexer response: ${resData.message} (ID: ${resData.document_id}, Chunks: ${resData.chunks})`);
+
     updateProgress(100, 'Indexing complete!');
-    showToast(`Successfully indexed "${file.name}" with ${resData.chunks} chunks.`, 'success');
-    
+    logMessage(`All ${chunksIndexed} chunk${chunksIndexed !== 1 ? 's' : ''} indexed (document ID: ${docID}).`);
+    showToast(`Successfully indexed "${file.name}" — ${chunksIndexed} chunks.`, 'success');
+
     loadRAGDocuments();
-    
+
     const fileInput = document.getElementById('rag-file-input');
     if (fileInput) fileInput.value = '';
-    
+
   } catch (error) {
     console.error('RAG Upload Error:', error);
+    if (docID !== null) {
+      try {
+        await fetch(`/api/rag/documents/${docID}`, { method: 'DELETE' });
+        logMessage(`Cleaned up partial document (ID: ${docID}).`, true);
+      } catch (_) {}
+    }
     logMessage(`ERROR: ${error.message}`, true);
     updateProgress(0, 'Indexing failed.');
     showToast(error.message, 'error');

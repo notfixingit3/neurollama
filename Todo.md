@@ -61,7 +61,7 @@
 - [ ] **Context Window: Model-Aware Validation**
   - The context selects now go up to 100M but have no awareness of what the selected model actually supports. Add a soft warning when the chosen context exceeds the model's `context_length` from its details (already available in model metadata). Prevents confusing silent failures when Ollama silently clamps the value.
 
-- [ ] **PDF.js: Self-Host Worker Instead of CDN**
+- [x] **PDF.js: Self-Host Worker Instead of CDN**
   - Worker script is loaded from `cdnjs.cloudflare.com` at runtime. If the CDN is unreachable (airgapped installs, strict firewalls) PDF upload silently breaks. Vendor `pdf.worker.min.js` into `static/js/` and update the `workerSrc` path. The main `pdf.min.js` would also need to be vendored or loaded locally.
 
 - [ ] **Cold-Start Timeout Audit**
@@ -193,3 +193,81 @@
 - [ ] **Concurrency Controls for Background Work**
   - Prevent overlapping scheduler checks and manual update checks from pulling the same models simultaneously.
   - Add per-job cancellation contexts and a visible job state machine.
+
+---
+
+## 🐛 Bug: RAG PDF Upload Crashes Browser Tab
+
+**Reproduction**: Upload any non-trivial PDF (e.g. 1.1MB zip-deflate-encoded book) in the RAG panel.
+
+**Root cause analysis** (traced through `static/js/app.js` `handleRAGUpload` and `ollama.go` `GetEmbeddings`):
+
+1. **CDN-fetched PDF.js worker crashes on certain PDFs** *(primary crash vector)*
+   - Worker is loaded from `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js` at call time.
+   - A "zip deflate encoded" PDF expands compressed image/font streams inside the worker. Peak in-worker memory can be 10–50× the file size. If the worker OOMs or hits a parsing error, the browser kills the tab.
+   - Version mismatch between `pdf.min.js` (CDN) and `pdf.worker.min.js` (separate CDN fetch) can also crash the worker silently.
+   - **Fix**: Vendor both `pdf.min.js` and `pdf.worker.min.js` into `static/js/`. Already tracked above ("PDF.js: Self-Host Worker").
+
+2. **No file-size guard before attempting parse**
+   - `file.arrayBuffer()` loads the entire PDF into browser RAM. For a 1.1MB file the raw buffer is fine, but decompression inside PDF.js can spike to 50–100MB.
+   - **Fix**: Reject files > 10MB with a clear error before touching them. Warn at > 5MB.
+
+3. **No hard page-count limit**
+   - Code warns at > 50 pages but does not abort. A 500-page technical PDF would loop `getPage()` for minutes and eventually freeze the tab.
+   - **Fix**: Hard reject > 150 pages. Warn at > 50.
+
+4. **No AbortController / timeout on `pdfjsLib.getDocument()`**
+   - If the PDF.js worker hangs (corrupt PDF, unsupported content), there is no recovery path. The await never resolves and the UI is frozen.
+   - **Fix**: Wrap `pdfjsLib.getDocument()` in a `Promise.race()` with a 30-second timeout. Cancel the document load if it fires.
+
+5. **O(n²) string concatenation across pages**
+   - `text += pageText + '\n'` creates a new string on each loop iteration. For a 200-page PDF this allocates ~20,000 temporary strings.
+   - **Fix**: Use an array of page strings and join at the end: `const pages = []; ... pages.push(pageText); text = pages.join('\n');`
+
+6. **No chunk count cap**
+   - A 100,000-char document at 800 chars/chunk = ~125 chunks. A 500,000-char document = ~625 chunks. Each chunk × embedding dimensions (e.g. 768 float64 = 6KB) stays in-memory until the DB write completes.
+   - **Fix**: Cap at 400 chunks with a user-visible warning. Consider streaming chunks to the server in batches of 50 rather than one massive payload (already tracked under "RAG: Large Document Batching").
+
+7. **Batch embedding call not chunked on the server**
+   - `GetEmbeddings()` in `ollama.go` sends all chunk texts to Ollama's `/api/embed` in one request. For 300 chunks × 800 chars = 240KB request body, plus Ollama must hold all in-flight embeddings in GPU memory simultaneously.
+   - **Fix**: Chunk `GetEmbeddings` into batches of 50 server-side. Already tracked under "RAG: Large Document Batching".
+
+**Recommended fix order**:
+- [x] Vendor PDF.js locally (`static/js/pdf.min.js` + `static/js/pdf.worker.min.js`) — eliminates the CDN-crash class entirely
+- [x] Add file-size guard (> 10MB = hard reject) and page-count guard (> 150 = hard reject) at the top of `handleRAGUpload`
+- [x] Add 30s timeout + AbortController on `pdfjsLib.getDocument()`
+- [x] Fix string concatenation (array push + join)
+- [x] Cap chunk count at 400, batch-embed 50 at a time both client→server and server→Ollama
+
+---
+
+## 📈 Benchmark Area Improvements
+
+### Quick wins
+- [x] **Auto-scoring** — Calculate S/A/B/C/F automatically from measured metrics instead of requiring manual RATE clicks.
+  - Standard/Vision/LongCtx: `>80 TPS = S`, `50–80 = A`, `25–50 = B`, `8–25 = C`, `<8 = F`
+  - Embedding: `>500 ch/s = S`, `200–500 = A`, `50–200 = B`, `10–50 = C`, `<10 = F`
+  - Reasoning: `>90% acc = S`, `75–90 = A`, `55–75 = B`, `35–55 = C`, `<35 = F`
+  - Auto-score saved via PUT on benchmark completion (notes = 'auto' marker). Manual override via RATE modal strips the marker. "auto" tag shown on auto-scored rows.
+
+- [x] **Summary stats bar** — Slim strip above the leaderboard showing:
+  `N runs · M models · Best: <model> @ <metric>`
+  Computed client-side from the current filtered set. Recalculates on filter/sort change.
+
+- [x] **CSV export** — "Export CSV" button downloads the currently filtered + sorted leaderboard as a `.csv` file. Built client-side from the fetched data (no new backend route).
+
+- [x] **Improved live log formatting** — Highlighted timing numbers (`TPS`, `ms`, `ch/s`, `%`) in accent colours. `[COMPLETED]` lines bold green, `[ERROR]` lines bold red, `[CANCELLED]` bold yellow. Run separators highlighted cyan.
+
+### Medium effort
+- [ ] **TPS sparkline per multi-run group** — For rows with 2+ runs, render a tiny SVG bar chart (inline, ~60px wide) in the Metric column showing the TPS trend across runs chronologically. Makes consistency visible at a glance.
+
+- [x] **Sort + filter persistence** — Save `lbSortCol`, `lbSortDir`, and `currentLbFilter` to `localStorage` so leaderboard state survives page refresh. Keys: `neurollama-bench-sort-col`, `neurollama-bench-sort-dir`, `neurollama-bench-filter`.
+
+- [x] **Run duration display** — Record elapsed wall-clock time from benchmark start to `done` event on the client side. Displayed in the completion log line as `42s` or `1m 18s`. No backend change needed.
+
+- [ ] **Inline notes on leaderboard rows** — Make the notes line in the model-name cell directly editable (click-to-edit) instead of requiring the RATE modal. Save on blur via `PUT /api/benchmarks/:id/score` with the current score and new notes text.
+
+### Higher effort
+- [ ] **Bar chart view** — Add a "Chart" toggle above the leaderboard that replaces the table with an SVG or canvas bar chart comparing the primary metric (TPS / accuracy / cps) across all visible model groups. Same filter state as the table. Toggle back with "Table".
+
+- [ ] **Batch run mode** — "Run All" button queues every installed compatible model for the selected benchmark type and runs them sequentially, one at a time, with a queue progress indicator. Skip models that already have a run from the last 24h (configurable).
