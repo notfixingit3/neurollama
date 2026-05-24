@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	goPDF "github.com/ledongthuc/pdf"
 )
 
 const appVersion = "v0.2.10"
@@ -233,6 +234,7 @@ func main() {
 		api.DELETE("/optimizer/runs/:id", deleteOptimizerRunHandler)
 
 		// Document RAG Panel Endpoints
+		api.POST("/rag/extract-pdf", extractPDFTextHandler) // server-side PDF → text (avoids browser hang)
 		api.GET("/rag/documents", getRAGDocumentsHandler)
 		api.POST("/rag/documents", uploadRAGDocumentHandler)
 		api.POST("/rag/documents/:id/chunks", appendRAGChunksHandler)
@@ -3452,6 +3454,89 @@ func getRAGDocumentsHandler(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, docs)
+}
+
+// extractPDFTextHandler accepts a multipart PDF upload and returns extracted plain text.
+// Running extraction server-side avoids the browser renderer hang (RESULT_CODE_HUNG) that
+// occurs when PDF.js tries to structured-clone a massive text-item array from its worker.
+func extractPDFTextHandler(c *gin.Context) {
+	const maxPDFBytes = 50 * 1024 * 1024 // 50 MB
+	const maxPages    = 300
+
+	fh, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No file uploaded (field: 'file')"})
+		return
+	}
+	if fh.Size > maxPDFBytes {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("File too large (%.1f MB). Maximum is 50 MB.", float64(fh.Size)/(1024*1024))})
+		return
+	}
+
+	// Write to a temp file — ledongthuc/pdf needs a seekable reader
+	tmp, err := os.CreateTemp("", "neurollama-pdf-*.pdf")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create temp file"})
+		return
+	}
+	defer func() {
+		tmp.Close()
+		os.Remove(tmp.Name())
+	}()
+
+	src, err := fh.Open()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not open upload"})
+		return
+	}
+	defer src.Close()
+
+	if _, err = io.Copy(tmp, src); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to buffer upload"})
+		return
+	}
+	if err = tmp.Close(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to flush temp file"})
+		return
+	}
+
+	f, pdfReader, err := goPDF.Open(tmp.Name())
+	if err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": fmt.Sprintf("PDF parse failed: %v — try converting to a plain PDF first.", err)})
+		return
+	}
+	defer f.Close()
+
+	numPages := pdfReader.NumPage()
+	if numPages > maxPages {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("PDF has %d pages. Maximum supported is %d.", numPages, maxPages)})
+		return
+	}
+
+	var sb strings.Builder
+	skipped := 0
+	for i := 1; i <= numPages; i++ {
+		page := pdfReader.Page(i)
+		if page.V.IsNull() {
+			skipped++
+			continue
+		}
+		pageText, err := page.GetPlainText(nil)
+		if err != nil {
+			skipped++
+			continue
+		}
+		sb.WriteString(pageText)
+		sb.WriteByte('\n')
+	}
+
+	text := sb.String()
+	c.JSON(http.StatusOK, gin.H{
+		"pages":   numPages,
+		"skipped": skipped,
+		"chars":   len(text),
+		"text":    text,
+	})
 }
 
 func uploadRAGDocumentHandler(c *gin.Context) {

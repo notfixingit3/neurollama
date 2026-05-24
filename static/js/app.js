@@ -7385,12 +7385,10 @@ async function handleRAGUpload(file) {
   };
   
   // ── Guards ──────────────────────────────────────────────────────────────────
-  const MAX_FILE_MB    = 50;   // hard reject above this
-  const WARN_FILE_MB   = 20;   // warn but continue
-  const MAX_PAGES      = 300;
-  const WARN_PAGES     = 100;
-  const UPLOAD_BATCH   = 200;  // chunks per POST — server embeds 50 at a time within each
-  const PDF_TIMEOUT_MS = 30000;
+  const MAX_FILE_MB  = 50;   // hard reject above this
+  const WARN_FILE_MB = 20;   // warn but continue
+  const UPLOAD_BATCH = 200;  // chunks per POST — server embeds 50 at a time within each
+  // PDF page/size limits are now enforced server-side in extractPDFTextHandler (max 300 pages)
 
   const fileMB = file.size / (1024 * 1024);
   if (fileMB > MAX_FILE_MB) {
@@ -7413,101 +7411,30 @@ async function handleRAGUpload(file) {
     const extension = file.name.split('.').pop().toLowerCase();
 
     if (extension === 'pdf') {
-      if (!window.pdfjsLib) {
-        throw new Error('PDF.js library not loaded. Try refreshing the page.');
-      }
-      // Ensure worker always points to the vendored local copy
-      pdfjsLib.GlobalWorkerOptions.workerSrc = '/static/js/pdf.worker.min.js';
+      // PDF extraction runs server-side (Go) to avoid RESULT_CODE_HUNG —
+      // browser-side PDF.js structured-clone of tagged PDFs blocks the main
+      // thread long enough for Chrome to kill the renderer.
+      logMessage('Uploading PDF to server for text extraction...');
+      updateProgress(15, 'Uploading PDF...');
 
-      logMessage('Reading PDF into memory...');
-      updateProgress(15, 'Reading PDF...');
+      const formData = new FormData();
+      formData.append('file', file);
 
-      const arrayBuffer = await file.arrayBuffer();
-      logMessage('Parsing PDF structure with PDF.js...');
-      updateProgress(20, 'Parsing PDF...');
+      const extractResp = await fetch('/api/rag/extract-pdf', {
+        method: 'POST',
+        body: formData   // no Content-Type header — browser sets multipart boundary
+      });
 
-      // Fix #3: 30-second timeout so a hung worker can't freeze the tab
-      let pdf;
-      try {
-        const docTask = pdfjsLib.getDocument({ data: arrayBuffer });
-        const timeout  = new Promise((_, reject) =>
-          setTimeout(() => { docTask.destroy(); reject(new Error(`PDF.js timed out after ${PDF_TIMEOUT_MS / 1000}s. The file may be corrupted or too complex.`)); }, PDF_TIMEOUT_MS)
-        );
-        pdf = await Promise.race([docTask.promise, timeout]);
-      } catch (pdfErr) {
-        throw new Error(`PDF.js failed to open file: ${pdfErr.message || pdfErr}`);
+      if (!extractResp.ok) {
+        let errMsg = `PDF extraction failed (${extractResp.status})`;
+        try { const e = await extractResp.json(); errMsg = e.error || errMsg; } catch (_) {}
+        throw new Error(errMsg);
       }
 
-      // Fix #2: hard page-count limit
-      if (pdf.numPages > MAX_PAGES) {
-        throw new Error(`PDF has ${pdf.numPages} pages. Maximum supported is ${MAX_PAGES} pages. Try splitting the document first.`);
-      }
-      logMessage(`Found ${pdf.numPages} page(s) — extracting text...`);
-      if (pdf.numPages > WARN_PAGES) {
-        logMessage(`⚠ Large document (${pdf.numPages} pages). Extraction may take a moment.`);
-      }
-
-      // Fix #4: array-push + join instead of string concatenation (avoids O(n²) allocations)
-      //
-      // RESULT_CODE_HUNG defence:
-      //  - Tagged PDFs (StructTreeRoot) can return tens of thousands of text items per page.
-      //    The structured clone of that array from the PDF.js worker to the main thread is
-      //    synchronous and blocks long enough for Chrome to kill the tab.
-      //  - Pass { includeMarkedContent: false } to suppress the marked-content boundary
-      //    items that a tagged PDF adds (dramatically reduces item count).
-      //  - Hard-cap items per page at 10 000 so runaway pages can't freeze the UI.
-      //  - Yield to the event loop after every page so Chrome's hang detector stays happy.
-      //  - Stop extraction early if total text exceeds 2 MB (≈ 2 500 chunks already).
-      const MAX_ITEMS_PER_PAGE = 10_000;
-      const MAX_TEXT_CHARS     = 2_000_000;   // 2 MB ceiling
-      const PAGE_TIMEOUT_MS    = 15_000;
-      const withPageTimeout = (promise, label) => Promise.race([
-        promise,
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error(`${label} timed out`)), PAGE_TIMEOUT_MS)
-        )
-      ]);
-
-      const pageTexts = [];
-      let charsSoFar = 0;
-      let skippedPages = 0;
-      for (let i = 1; i <= pdf.numPages; i++) {
-        try {
-          const page    = await withPageTimeout(pdf.getPage(i), `Page ${i}`);
-          const content = await withPageTimeout(
-            page.getTextContent({ includeMarkedContent: false }),
-            `Page ${i} text`
-          );
-          // Cap items to prevent a massive structured-clone from blocking the main thread
-          const items    = content.items.length > MAX_ITEMS_PER_PAGE
-            ? content.items.slice(0, MAX_ITEMS_PER_PAGE)
-            : content.items;
-          const pageText = items.map(item => item.str || '').join(' ');
-          pageTexts.push(pageText);
-          charsSoFar += pageText.length;
-        } catch (pageErr) {
-          skippedPages++;
-          logMessage(`⚠ Page ${i} skipped: ${pageErr.message}`, true);
-        }
-
-        const pct = 20 + Math.round((i / pdf.numPages) * 30);
-        if (i % 10 === 0 || i === pdf.numPages) {
-          logMessage(`Extracted page ${i}/${pdf.numPages} — ${charsSoFar.toLocaleString()} chars so far`);
-        }
-        updateProgress(pct, `Parsing PDF (page ${i}/${pdf.numPages})...`);
-
-        // Yield to the event loop so Chrome's hang-detector stays green
-        await new Promise(resolve => setTimeout(resolve, 0));
-
-        if (charsSoFar >= MAX_TEXT_CHARS) {
-          logMessage(`⚠ Text limit reached at page ${i}/${pdf.numPages} — stopping early.`, true);
-          break;
-        }
-      }
-      if (skippedPages > 0) {
-        logMessage(`⚠ ${skippedPages} page(s) skipped due to extraction errors.`, true);
-      }
-      text = pageTexts.join('\n');
+      const extracted = await extractResp.json();
+      text = extracted.text || '';
+      logMessage(`Server extracted ${extracted.pages} page(s)${extracted.skipped ? `, ${extracted.skipped} skipped` : ''} — ${extracted.chars.toLocaleString()} chars`);
+      updateProgress(50, 'Text extracted.');
 
     } else if (extension === 'txt' || extension === 'md') {
       text = await new Promise((resolve, reject) => {
