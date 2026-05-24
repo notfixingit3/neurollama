@@ -44,3 +44,6 @@ ollama-manager-bin
 neurollama
 neurollama-bin
 
+# Local test PDFs (not committed — used for manual testing only)
+test-*.pdf
+

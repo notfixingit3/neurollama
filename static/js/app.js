@@ -7448,20 +7448,39 @@ async function handleRAGUpload(file) {
       }
 
       // Fix #4: array-push + join instead of string concatenation (avoids O(n²) allocations)
+      // Per-page timeout: 15s cap per page so a hung PDF.js worker can't freeze the UI.
+      // Bad pages are skipped with a warning rather than aborting the whole document.
+      const PAGE_TIMEOUT_MS = 15_000;
+      const withPageTimeout = (promise, label) => Promise.race([
+        promise,
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error(`${label} timed out`)), PAGE_TIMEOUT_MS)
+        )
+      ]);
+
       const pageTexts = [];
       let charsSoFar = 0;
+      let skippedPages = 0;
       for (let i = 1; i <= pdf.numPages; i++) {
-        const page    = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        const pageText = content.items.map(item => item.str).join(' ');
-        pageTexts.push(pageText);
-        charsSoFar += pageText.length;
+        try {
+          const page    = await withPageTimeout(pdf.getPage(i), `Page ${i}`);
+          const content = await withPageTimeout(page.getTextContent(), `Page ${i} text`);
+          const pageText = content.items.map(item => item.str || '').join(' ');
+          pageTexts.push(pageText);
+          charsSoFar += pageText.length;
+        } catch (pageErr) {
+          skippedPages++;
+          logMessage(`⚠ Page ${i} skipped: ${pageErr.message}`, true);
+        }
 
         const pct = 20 + Math.round((i / pdf.numPages) * 30);
         if (i % 10 === 0 || i === pdf.numPages) {
           logMessage(`Extracted page ${i}/${pdf.numPages} — ${charsSoFar.toLocaleString()} chars so far`);
         }
         updateProgress(pct, `Parsing PDF (page ${i}/${pdf.numPages})...`);
+      }
+      if (skippedPages > 0) {
+        logMessage(`⚠ ${skippedPages} page(s) skipped due to extraction errors.`, true);
       }
       text = pageTexts.join('\n');
 
@@ -7526,6 +7545,9 @@ async function handleRAGUpload(file) {
       if (!response.ok) {
         let errMsg = `Server error ${response.status} on batch ${b + 1}`;
         try { const e = await response.json(); errMsg = e.error || errMsg; } catch (_) {}
+        if (response.status === 404 && b > 0) {
+          errMsg = `Route not found — the server may need to be restarted to pick up recent updates. (${errMsg})`;
+        }
         throw new Error(errMsg);
       }
 
