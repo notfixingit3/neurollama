@@ -7448,9 +7448,19 @@ async function handleRAGUpload(file) {
       }
 
       // Fix #4: array-push + join instead of string concatenation (avoids O(n²) allocations)
-      // Per-page timeout: 15s cap per page so a hung PDF.js worker can't freeze the UI.
-      // Bad pages are skipped with a warning rather than aborting the whole document.
-      const PAGE_TIMEOUT_MS = 15_000;
+      //
+      // RESULT_CODE_HUNG defence:
+      //  - Tagged PDFs (StructTreeRoot) can return tens of thousands of text items per page.
+      //    The structured clone of that array from the PDF.js worker to the main thread is
+      //    synchronous and blocks long enough for Chrome to kill the tab.
+      //  - Pass { includeMarkedContent: false } to suppress the marked-content boundary
+      //    items that a tagged PDF adds (dramatically reduces item count).
+      //  - Hard-cap items per page at 10 000 so runaway pages can't freeze the UI.
+      //  - Yield to the event loop after every page so Chrome's hang detector stays happy.
+      //  - Stop extraction early if total text exceeds 2 MB (≈ 2 500 chunks already).
+      const MAX_ITEMS_PER_PAGE = 10_000;
+      const MAX_TEXT_CHARS     = 2_000_000;   // 2 MB ceiling
+      const PAGE_TIMEOUT_MS    = 15_000;
       const withPageTimeout = (promise, label) => Promise.race([
         promise,
         new Promise((_, reject) =>
@@ -7464,8 +7474,15 @@ async function handleRAGUpload(file) {
       for (let i = 1; i <= pdf.numPages; i++) {
         try {
           const page    = await withPageTimeout(pdf.getPage(i), `Page ${i}`);
-          const content = await withPageTimeout(page.getTextContent(), `Page ${i} text`);
-          const pageText = content.items.map(item => item.str || '').join(' ');
+          const content = await withPageTimeout(
+            page.getTextContent({ includeMarkedContent: false }),
+            `Page ${i} text`
+          );
+          // Cap items to prevent a massive structured-clone from blocking the main thread
+          const items    = content.items.length > MAX_ITEMS_PER_PAGE
+            ? content.items.slice(0, MAX_ITEMS_PER_PAGE)
+            : content.items;
+          const pageText = items.map(item => item.str || '').join(' ');
           pageTexts.push(pageText);
           charsSoFar += pageText.length;
         } catch (pageErr) {
@@ -7478,6 +7495,14 @@ async function handleRAGUpload(file) {
           logMessage(`Extracted page ${i}/${pdf.numPages} — ${charsSoFar.toLocaleString()} chars so far`);
         }
         updateProgress(pct, `Parsing PDF (page ${i}/${pdf.numPages})...`);
+
+        // Yield to the event loop so Chrome's hang-detector stays green
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        if (charsSoFar >= MAX_TEXT_CHARS) {
+          logMessage(`⚠ Text limit reached at page ${i}/${pdf.numPages} — stopping early.`, true);
+          break;
+        }
       }
       if (skippedPages > 0) {
         logMessage(`⚠ ${skippedPages} page(s) skipped due to extraction errors.`, true);
