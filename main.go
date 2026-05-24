@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/csv"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -225,12 +226,14 @@ func main() {
 		// Benchmarks
 		api.GET("/benchmarks", getBenchmarksHandler)
 		api.GET("/benchmarks/grouped", getGroupedBenchmarksHandler)
+		api.GET("/benchmarks/export.csv", exportBenchmarksCSVHandler)
 		api.GET("/benchmarks/run", runBenchmarkSSEHandler)
 		api.PUT("/benchmarks/:id/score", updateBenchmarkScoreHandler)
 		api.DELETE("/benchmarks/:id", deleteBenchmarkHandler)
 
 		// Hyperparameter Optimizer
 		api.GET("/optimizer/runs", getOptimizerRunsHandler)
+		api.GET("/optimizer/runs/grouped", getGroupedOptimizerRunsHandler)
 		api.GET("/optimizer/run", runOptimizerSSEHandler)
 		api.DELETE("/optimizer/runs/:id", deleteOptimizerRunHandler)
 
@@ -2631,6 +2634,76 @@ func getGroupedBenchmarksHandler(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+// exportBenchmarksCSVHandler streams benchmark data as a CSV download.
+// Accepts ?type=all|standard|vision|embedding|longctx|reasoning to filter.
+func exportBenchmarksCSVHandler(c *gin.Context) {
+	filter := c.DefaultQuery("type", "all")
+
+	all, err := GetBenchmarks()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	var rows []Benchmark
+	for _, b := range all {
+		if filter == "" || filter == "all" || b.BenchmarkType == filter {
+			rows = append(rows, b)
+		}
+	}
+	if len(rows) == 0 {
+		c.JSON(http.StatusOK, gin.H{"message": "No benchmark data to export"})
+		return
+	}
+
+	filename := fmt.Sprintf("neurollama-benchmarks-%s.csv", time.Now().Format("2006-01-02"))
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+
+	w := csv.NewWriter(c.Writer)
+	_ = w.Write([]string{"ID", "Model", "Server", "Type", "TTFT_ms", "TPS_or_metric", "Latency_ms", "Score", "Notes", "Date"})
+
+	for _, b := range rows {
+		var ex struct {
+			ChunksPerSec *float64 `json:"chunks_per_sec"`
+			AccuracyPct  *float64 `json:"accuracy_pct"`
+		}
+		if b.ExtraJSON != "" {
+			_ = json.Unmarshal([]byte(b.ExtraJSON), &ex)
+		}
+		metric := b.Tps
+		switch b.BenchmarkType {
+		case "embedding":
+			if ex.ChunksPerSec != nil { metric = *ex.ChunksPerSec }
+		case "reasoning":
+			if ex.AccuracyPct != nil { metric = *ex.AccuracyPct }
+		}
+		notes := b.Notes
+		if notes == "auto" { notes = "" }
+
+		_ = w.Write([]string{
+			strconv.FormatInt(b.ID, 10),
+			b.ModelName, b.ServerName, b.BenchmarkType,
+			strconv.FormatFloat(b.TtftMs, 'f', 2, 64),
+			strconv.FormatFloat(metric, 'f', 2, 64),
+			strconv.FormatFloat(b.AvgLatencyMs, 'f', 2, 64),
+			b.ReasoningScore, notes, b.CreatedAt,
+		})
+	}
+	w.Flush()
+}
+
+// getGroupedOptimizerRunsHandler returns optimizer runs grouped by server+model+params
+// with at most 3 runs per group, so the browser only renders.
+func getGroupedOptimizerRunsHandler(c *gin.Context) {
+	groups, err := GetGroupedOptimizerRuns()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, groups)
 }
 
 // --- Vision test image (generated once at startup) ---

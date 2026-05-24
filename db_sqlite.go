@@ -88,22 +88,30 @@ type BenchmarkSummaryRun struct {
 	MaxAcc       *float64 `json:"max_accuracy_pct"`
 }
 
+// BenchmarkWithScore wraps a raw Benchmark run with a pre-resolved display
+// score so the browser never needs to call autoScore() for leaderboard rows.
+type BenchmarkWithScore struct {
+	Benchmark
+	DisplayScore string `json:"display_score"`
+	IsAutoScore  bool   `json:"is_auto_score"`
+}
+
 // BenchmarkGroup is a set of runs for one model+type+server combination,
 // with all aggregation pre-computed by the server.
 type BenchmarkGroup struct {
-	ModelName       string              `json:"model_name"`
-	BenchmarkType   string              `json:"benchmark_type"`
-	ServerName      string              `json:"server_name"`
-	ServerURL       string              `json:"server_url"`
-	RunCount        int                 `json:"run_count"`
-	LatestID        int64               `json:"latest_id"`
-	LatestScore     string              `json:"latest_score"`     // raw DB value
-	LatestNotes     string              `json:"latest_notes"`
-	LatestCreatedAt string              `json:"latest_created_at"`
-	DisplayScore    string              `json:"display_score"`    // resolved: stored or auto-computed
-	IsAutoScore     bool                `json:"is_auto_score"`
-	SummaryRun      BenchmarkSummaryRun `json:"summary_run"`
-	Runs            []Benchmark         `json:"runs"`
+	ModelName       string               `json:"model_name"`
+	BenchmarkType   string               `json:"benchmark_type"`
+	ServerName      string               `json:"server_name"`
+	ServerURL       string               `json:"server_url"`
+	RunCount        int                  `json:"run_count"`
+	LatestID        int64                `json:"latest_id"`
+	LatestScore     string               `json:"latest_score"`     // raw DB value
+	LatestNotes     string               `json:"latest_notes"`
+	LatestCreatedAt string               `json:"latest_created_at"`
+	DisplayScore    string               `json:"display_score"`    // resolved: stored or auto-computed
+	IsAutoScore     bool                 `json:"is_auto_score"`
+	SummaryRun      BenchmarkSummaryRun  `json:"summary_run"`
+	Runs            []BenchmarkWithScore `json:"runs"`
 }
 
 // TypeBest captures the best-performing group for one benchmark type.
@@ -693,6 +701,14 @@ func GetGroupedBenchmarks(filter, sortCol, sortDir string) (*BenchmarkGroupedRes
 		summaryRun := buildGroupSummary(runs)
 		displayScore, isAutoScore := resolveDisplayScore(latest, summaryRun)
 
+		// Resolve display score for every individual run so sub-rows need no JS computation.
+		runsWithScore := make([]BenchmarkWithScore, len(runs))
+		for i, r := range runs {
+			singleSummary := buildGroupSummary([]Benchmark{r})
+			ds, isAuto := resolveDisplayScore(r, singleSummary)
+			runsWithScore[i] = BenchmarkWithScore{Benchmark: r, DisplayScore: ds, IsAutoScore: isAuto}
+		}
+
 		groups = append(groups, BenchmarkGroup{
 			ModelName:       k.model,
 			BenchmarkType:   k.btype,
@@ -706,7 +722,7 @@ func GetGroupedBenchmarks(filter, sortCol, sortDir string) (*BenchmarkGroupedRes
 			DisplayScore:    displayScore,
 			IsAutoScore:     isAutoScore,
 			SummaryRun:      summaryRun,
-			Runs:            runs,
+			Runs:            runsWithScore,
 		})
 	}
 
@@ -1073,6 +1089,61 @@ func GetOptimizerRuns() ([]OptimizerRun, error) {
 func DeleteOptimizerRun(id int64) error {
 	_, err := DB.Exec("DELETE FROM optimizer_runs WHERE id = ?", id)
 	return err
+}
+
+// OptimizerRunGroup is a set of optimizer runs sharing the same
+// server+model+hyperparameter combination, newest-first, capped at 3.
+type OptimizerRunGroup struct {
+	ServerName  string         `json:"server_name"`
+	ServerURL   string         `json:"server_url"`
+	ModelName   string         `json:"model_name"`
+	Temperature float64        `json:"temperature"`
+	TopP        float64        `json:"top_p"`
+	TopK        int            `json:"top_k"`
+	Runs        []OptimizerRun `json:"runs"`
+}
+
+// GetGroupedOptimizerRuns groups runs by server+model+hyperparams and caps
+// each group at the 3 most recent runs, so the browser only renders.
+func GetGroupedOptimizerRuns() ([]OptimizerRunGroup, error) {
+	all, err := GetOptimizerRuns() // already newest-first
+	if err != nil {
+		return nil, err
+	}
+
+	type groupKey struct {
+		serverURL, model string
+		temp             float64
+		topP             float64
+		topK             int
+	}
+	groupMap := make(map[groupKey]*OptimizerRunGroup)
+	var order []groupKey
+
+	for _, r := range all {
+		k := groupKey{r.ServerURL, r.ModelName, r.Temperature, r.TopP, r.TopK}
+		if _, ok := groupMap[k]; !ok {
+			groupMap[k] = &OptimizerRunGroup{
+				ServerName:  r.ServerName,
+				ServerURL:   r.ServerURL,
+				ModelName:   r.ModelName,
+				Temperature: r.Temperature,
+				TopP:        r.TopP,
+				TopK:        r.TopK,
+			}
+			order = append(order, k)
+		}
+		g := groupMap[k]
+		if len(g.Runs) < 3 { // keep last 3 per group
+			g.Runs = append(g.Runs, r)
+		}
+	}
+
+	result := make([]OptimizerRunGroup, 0, len(order))
+	for _, k := range order {
+		result = append(result, *groupMap[k])
+	}
+	return result, nil
 }
 
 // RAG Helper Functions

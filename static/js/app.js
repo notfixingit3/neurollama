@@ -6642,20 +6642,11 @@ async function fetchBenchmarks() {
       // Sub-rows for individual runs (multi-run only, collapsed by default)
       if (multiRun) {
         (group.runs || []).forEach((run, idx) => {
-          // Sub-run scores are already stored in the DB; resolve just like the group
-          const rawRunScore = run.reasoning_score;
-          const runIsAuto   = run.notes === 'auto';
-          const runIsPending = !rawRunScore || rawRunScore === 'Pending';
-          let runDisplayScore, runIsAutoScore;
-          if (runIsPending && !runIsAuto) {
-            runDisplayScore = autoScore(bType, run.tps || 0, (() => { try { return JSON.parse(run.extra_json || '{}'); } catch (_) { return {}; } })());
-            runIsAutoScore  = true;
-          } else {
-            runDisplayScore = rawRunScore || 'F';
-            runIsAutoScore  = runIsAuto;
-          }
-          const runScCls     = scoreBadgeClass(runDisplayScore);
-          const runAutoBadge = runIsAutoScore ? `<span class="text-[8px] text-[#4c566a] font-mono ml-0.5">auto</span>` : '';
+          // display_score and is_auto_score are pre-resolved server-side for every run.
+          const runDisplayScore = run.display_score || 'F';
+          const runIsAutoScore  = !!run.is_auto_score;
+          const runScCls        = scoreBadgeClass(runDisplayScore);
+          const runAutoBadge    = runIsAutoScore ? `<span class="text-[8px] text-[#4c566a] font-mono ml-0.5">auto</span>` : '';
           const runUserNotes = (run.notes && run.notes !== 'auto') ? run.notes : '';
           const { ttftCell: rt, metricCell: rm, latCell: rl } = metricCells(run, bType);
           const runDate  = run.created_at
@@ -6806,54 +6797,10 @@ async function deleteBenchmark(id) {
   }
 }
 
-async function exportBenchmarksCSV() {
-  try {
-    const response = await fetch('/api/benchmarks');
-    if (!response.ok) throw new Error('Failed to fetch benchmarks');
-    const list = await response.json();
-
-    // Apply current filter
-    const filtered = (currentLbFilter === 'all') ? (list || []) : (list || []).filter(b => (b.benchmark_type || 'standard') === currentLbFilter);
-    if (!filtered.length) { showToast('No benchmark data to export', 'warning'); return; }
-
-    const esc = v => `"${String(v || '').replace(/"/g, '""')}"`;
-    const headers = ['ID', 'Model', 'Server', 'Type', 'TTFT_ms', 'TPS_or_metric', 'Latency_ms', 'Score', 'Notes', 'Date'];
-    const rows = filtered.map(b => {
-      let extra = {};
-      try { extra = JSON.parse(b.extra_json || '{}'); } catch (_) {}
-      const bType = b.benchmark_type || 'standard';
-      let metric = b.tps;
-      if (bType === 'embedding') metric = extra.chunks_per_sec || 0;
-      else if (bType === 'reasoning') metric = extra.accuracy_pct || 0;
-      const userNotes = (b.notes && b.notes !== 'auto') ? b.notes : '';
-      return [
-        b.id,
-        esc(b.model_name),
-        esc(b.server_name),
-        bType,
-        (b.ttft_ms || 0).toFixed(2),
-        (metric || 0).toFixed(2),
-        (b.avg_latency_ms || 0).toFixed(2),
-        b.reasoning_score || '',
-        esc(userNotes),
-        b.created_at || ''
-      ].join(',');
-    });
-
-    const csv  = [headers.join(','), ...rows].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href     = url;
-    a.download = `neurollama-benchmarks-${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    showToast(`Exported ${filtered.length} records to CSV`, 'success');
-  } catch (e) {
-    showToast('CSV export failed: ' + e.message, 'error');
-  }
+function exportBenchmarksCSV() {
+  // CSV is built and streamed server-side — the browser just triggers a download.
+  const type = (currentLbFilter && currentLbFilter !== 'all') ? `?type=${encodeURIComponent(currentLbFilter)}` : '';
+  window.open(`/api/benchmarks/export.csv${type}`, '_blank');
 }
 
 // --- HYPERPARAMETER OPTIMIZER CONTROLLERS ---
@@ -7066,42 +7013,26 @@ function highlightBestConfigs(results) {
 }
 
 async function loadOptimizerHistory() {
+  // Grouping (by server+model+params, last-3 per group) is done server-side.
   const container = document.getElementById('optimizer-history-container');
   if (!container) return;
-  
+
   try {
-    const response = await fetch('/api/optimizer/runs');
+    const response = await fetch('/api/optimizer/runs/grouped');
     if (!response.ok) throw new Error('Failed to fetch parameter optimizer history');
-    const list = await response.json();
-    
-    // Group runs by Server + Model + Setting (Temp, TopP, TopK)
-    const groups = {};
-    if (list && list.length > 0) {
-      list.forEach(run => {
-        // Group Key: Server URL + Model Name + Setting Params
-        const key = `${run.server_name || run.server_url}::${run.model_name}::T:${run.temperature}_P:${run.top_p}_K:${run.top_k}`;
-        if (!groups[key]) {
-          groups[key] = {
-            server_name: run.server_name,
-            server_url: run.server_url,
-            model_name: run.model_name,
-            temperature: run.temperature,
-            top_p: run.top_p,
-            top_k: run.top_k,
-            runs: []
-          };
-        }
-        // Retain only the last 3 runs for each unique group
-        if (groups[key].runs.length < 3) {
-          groups[key].runs.push(run);
-        }
-      });
+    const groups = await response.json();
+
+    if (!groups || groups.length === 0) {
+      container.innerHTML = `
+        <div class="text-center py-12 text-[#4c566a] italic text-xs">
+          No past runs logged for the parameter optimizer yet. Run a suite on the left to start history logging.
+        </div>
+      `;
+      return;
     }
-    
+
     let html = '';
-    for (let key in groups) {
-      const g = groups[key];
-      
+    groups.forEach(g => {
       html += `
         <div class="tech-panel border border-[#4c566a]/40 rounded-lg p-3 bg-[#2e3440]/30 space-y-2">
           <div class="flex justify-between items-center pb-1.5 border-b border-[#4c566a]/30">
@@ -7127,8 +7058,8 @@ async function loadOptimizerHistory() {
               </thead>
               <tbody>
       `;
-      
-      g.runs.forEach(r => {
+
+      (g.runs || []).forEach(r => {
         html += `
           <tr class="hover:bg-[#3b4252]/10 border-b border-[#4c566a]/10 last:border-none transition-colors">
             <td class="py-1.5 text-left text-[#4c566a]">${escapeHTML(r.created_at)}</td>
@@ -7146,23 +7077,15 @@ async function loadOptimizerHistory() {
           </tr>
         `;
       });
-      
+
       html += `
               </tbody>
             </table>
           </div>
         </div>
       `;
-    }
-    
-    if (html === '') {
-      html = `
-        <div class="text-center py-12 text-[#4c566a] italic text-xs">
-          No past runs logged for the parameter optimizer yet. Run a suite on the left to start history logging.
-        </div>
-      `;
-    }
-    
+    });
+
     container.innerHTML = html;
   } catch (error) {
     container.innerHTML = `
