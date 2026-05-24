@@ -6422,18 +6422,25 @@ async function fetchBenchmarks() {
   const tbody = document.getElementById('benchmark-leaderboard-body');
   if (!tbody) return;
 
+  // All grouping, averaging, scoring, and stats are computed server-side.
+  // This function only fetches and renders — no arithmetic here.
+  const params = new URLSearchParams({
+    type: currentLbFilter || 'all',
+    sort: lbSortCol        || 'created_at',
+    dir:  lbSortDir        || 'desc',
+  });
+
   try {
-    const response = await fetch('/api/benchmarks');
+    const response = await fetch(`/api/benchmarks/grouped?${params}`);
     if (!response.ok) throw new Error('Failed to fetch benchmark leaderboard');
-    const list = await response.json();
+    const data = await response.json();
 
-    // Client-side filter by selected type
-    const allRuns = (!list || currentLbFilter === 'all')
-      ? (list || [])
-      : list.filter(b => (b.benchmark_type || 'standard') === currentLbFilter);
+    const groupList = data.groups || [];
+    const stats     = data.stats  || {};
 
-    if (allRuns.length === 0) {
-      const label = currentLbFilter === 'all' ? '' : ` for type "${currentLbFilter}"`;
+    // ── Empty state ──────────────────────────────────────────────────────────
+    if (groupList.length === 0) {
+      const label = (currentLbFilter && currentLbFilter !== 'all') ? ` for type "${currentLbFilter}"` : '';
       tbody.innerHTML = `
         <tr>
           <td colspan="7" class="text-center py-12 text-[#4c566a] italic">
@@ -6446,127 +6453,50 @@ async function fetchBenchmarks() {
       return;
     }
 
-    // Group by model_name + benchmark_type + server_url
-    const groups = new Map();
-    for (const b of allRuns) {
-      const key = `${b.model_name}|${b.benchmark_type || 'standard'}|${b.server_url || ''}`;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(b);
-    }
-    // Sort runs within each group newest-first
-    for (const runs of groups.values()) {
-      runs.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
-    }
+    // ── Stats bar (data already computed by server) ──────────────────────────
+    const statsBar = document.getElementById('lb-stats-bar');
+    if (statsBar && stats.total_runs > 0) {
+      const TYPE_META = {
+        standard:  { short:'STD', cls:'text-[#88c0d0]', border:'border-[#88c0d0]/40' },
+        vision:    { short:'VIS', cls:'text-[#b48ead]', border:'border-[#b48ead]'     },
+        embedding: { short:'EMB', cls:'text-[#ebcb8b]', border:'border-[#ebcb8b]/40' },
+        longctx:   { short:'CTX', cls:'text-[#a3be8c]', border:'border-[#a3be8c]/40' },
+        reasoning: { short:'RSN', cls:'text-[#d08770]', border:'border-[#d08770]'     },
+      };
+      const SCORE_BADGE = {
+        S: 'text-[#a3be8c]', A: 'text-[#88c0d0]',
+        B: 'text-[#8fbcbb]', C: 'text-[#ebcb8b]', F: 'text-[#bf616a]',
+      };
 
-    // Sort groups
-    const groupList = [...groups.values()];
-    groupList.sort((ga, gb) => {
-      const a = ga[0], b = gb[0];
-      const avgTpsOf = arr => arr.reduce((s, r) => s + (r.tps || 0), 0) / arr.length;
-      let av, bv;
-      switch (lbSortCol) {
-        case 'model_name':    av = (a.model_name || '').toLowerCase();    bv = (b.model_name || '').toLowerCase();    break;
-        case 'server_name':   av = (a.server_name || '').toLowerCase();   bv = (b.server_name || '').toLowerCase();   break;
-        case 'tps':           av = avgTpsOf(ga); bv = avgTpsOf(gb); break;
-        case 'ttft_ms':       av = a.ttft_ms;        bv = b.ttft_ms;       break;
-        case 'avg_latency_ms':av = a.avg_latency_ms; bv = b.avg_latency_ms; break;
-        case 'score':         av = SCORE_ORDER[a.reasoning_score] || 0; bv = SCORE_ORDER[b.reasoning_score] || 0; break;
-        default:              av = new Date(a.created_at || 0).getTime(); bv = new Date(b.created_at || 0).getTime();
-      }
-      if (typeof av === 'string') return lbSortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
-      return lbSortDir === 'asc' ? av - bv : bv - av;
-    });
-
-    // Stats bar — per-type bests + score distribution
-    {
-      const statsBar = document.getElementById('lb-stats-bar');
-      if (statsBar && allRuns.length > 0) {
-        const totalRuns    = allRuns.length;
-        const uniqueModels = new Set(allRuns.map(b => b.model_name)).size;
-
-        // Per-type colour config (border variants confirmed in compiled CSS)
-        const TYPE_META = {
-          standard:  { short:'STD', cls:'text-[#88c0d0]', border:'border-[#88c0d0]/40' },
-          vision:    { short:'VIS', cls:'text-[#b48ead]', border:'border-[#b48ead]'     },
-          embedding: { short:'EMB', cls:'text-[#ebcb8b]', border:'border-[#ebcb8b]/40' },
-          longctx:   { short:'CTX', cls:'text-[#a3be8c]', border:'border-[#a3be8c]/40' },
-          reasoning: { short:'RSN', cls:'text-[#d08770]', border:'border-[#d08770]'     },
-        };
-
-        // Find best group per type (compare within each type, not across types)
-        const typeBests = new Map(); // type → { model, label, meta }
-        for (const runs of groupList) {
-          const bType  = runs[0].benchmark_type || 'standard';
-          const extras = runs.map(r => { try { return JSON.parse(r.extra_json || '{}'); } catch (_) { return {}; } });
-          let metric, label;
-          if (bType === 'embedding') {
-            metric = extras.reduce((s, e) => s + (e.chunks_per_sec || 0), 0) / runs.length;
-            label  = `${metric.toFixed(1)} ch/s`;
-          } else if (bType === 'reasoning') {
-            metric = extras.reduce((s, e) => s + (e.accuracy_pct || 0), 0) / runs.length;
-            label  = `${metric.toFixed(0)}%`;
-          } else {
-            metric = runs.reduce((s, r) => s + (r.tps || 0), 0) / runs.length;
-            label  = `${metric.toFixed(1)} TPS`;
-          }
-          const prev = typeBests.get(bType);
-          if (!prev || metric > prev.metric) {
-            typeBests.set(bType, { metric, label, model: runs[0].model_name, meta: TYPE_META[bType] || { short: bType.slice(0,3).toUpperCase(), cls:'text-[#4c566a]', border:'border-[#4c566a]' } });
-          }
-        }
-
-        // Score distribution — per group, using auto-score for pending rows
-        const scoreDist = { S: 0, A: 0, B: 0, C: 0, F: 0 };
-        for (const runs of groupList) {
-          const latest = runs[0];
-          const bType  = latest.benchmark_type || 'standard';
-          const rawSc  = latest.reasoning_score;
-          let sc;
-          if (!rawSc || rawSc === 'Pending') {
-            const extras = runs.map(r => { try { return JSON.parse(r.extra_json || '{}'); } catch (_) { return {}; } });
-            const avgTps = runs.reduce((s, r) => s + (r.tps || 0), 0) / runs.length;
-            const avgEx  = {
-              chunks_per_sec: extras.reduce((s, e) => s + (e.chunks_per_sec || 0), 0) / runs.length,
-              accuracy_pct:   extras.reduce((s, e) => s + (e.accuracy_pct   || 0), 0) / runs.length,
-            };
-            sc = autoScore(bType, avgTps, avgEx);
-          } else {
-            sc = rawSc;
-          }
-          if (sc in scoreDist) scoreDist[sc]++;
-        }
-
-        const SCORE_BADGE = {
-          S: 'text-[#a3be8c]', A: 'text-[#88c0d0]',
-          B: 'text-[#8fbcbb]', C: 'text-[#ebcb8b]', F: 'text-[#bf616a]',
-        };
-        const distParts = Object.entries(scoreDist)
-          .filter(([, n]) => n > 0)
-          .map(([sc, n]) => `<span class="${SCORE_BADGE[sc] || ''} font-mono">${sc}:${n}</span>`)
-          .join('<span class="text-[#4c566a]/30 mx-0.5">·</span>');
-
-        // Build per-type best chips
-        const bestChips = [...typeBests.entries()].map(([, info]) => `
+      const bestChips = (stats.type_bests || []).map(tb => {
+        const meta = TYPE_META[tb.benchmark_type] || { short: tb.benchmark_type.slice(0,3).toUpperCase(), cls:'text-[#4c566a]', border:'border-[#4c566a]' };
+        return `
           <span class="text-[#4c566a] mx-1">·</span>
-          <span class="border ${info.meta.border} ${info.meta.cls} text-[8px] font-mono px-1 py-0.5 rounded mr-1">${info.meta.short}</span><span class="text-[#e5e9f0] font-semibold truncate max-w-[120px]" style="display:inline-block;vertical-align:middle;" title="${escapeHTML(info.model)}">${escapeHTML(info.model.split(':')[0])}</span><span class="${info.meta.cls} ml-1 font-bold">${escapeHTML(info.label)}</span>
-        `).join('');
-
-        const distHtml = distParts
-          ? `<span class="text-[#4c566a] mx-1">·</span><span class="flex items-center gap-1">${distParts}</span>`
-          : '';
-
-        statsBar.innerHTML = `
-          <i class="fa-solid fa-chart-line text-[#4c566a] mr-1.5 text-[9px]"></i>
-          <span class="text-[#4c566a]">${totalRuns} run${totalRuns !== 1 ? 's' : ''}</span>
-          <span class="text-[#4c566a] mx-1">·</span>
-          <span class="text-[#4c566a]">${uniqueModels} model${uniqueModels !== 1 ? 's' : ''}</span>
-          ${bestChips}
-          ${distHtml}
+          <span class="border ${meta.border} ${meta.cls} text-[8px] font-mono px-1 py-0.5 rounded mr-1">${meta.short}</span><span class="text-[#e5e9f0] font-semibold truncate max-w-[120px]" style="display:inline-block;vertical-align:middle;" title="${escapeHTML(tb.model_name)}">${escapeHTML(tb.model_name.split(':')[0])}</span><span class="${meta.cls} ml-1 font-bold">${escapeHTML(tb.label)}</span>
         `;
-      }
+      }).join('');
+
+      const scoreDist = stats.score_distribution || {};
+      const distParts = ['S','A','B','C','F']
+        .filter(sc => (scoreDist[sc] || 0) > 0)
+        .map(sc => `<span class="${SCORE_BADGE[sc] || ''} font-mono">${sc}:${scoreDist[sc]}</span>`)
+        .join('<span class="text-[#4c566a]/30 mx-0.5">·</span>');
+      const distHtml = distParts
+        ? `<span class="text-[#4c566a] mx-1">·</span><span class="flex items-center gap-1">${distParts}</span>`
+        : '';
+
+      statsBar.innerHTML = `
+        <i class="fa-solid fa-chart-line text-[#4c566a] mr-1.5 text-[9px]"></i>
+        <span class="text-[#4c566a]">${stats.total_runs} run${stats.total_runs !== 1 ? 's' : ''}</span>
+        <span class="text-[#4c566a] mx-1">·</span>
+        <span class="text-[#4c566a]">${stats.unique_models} model${stats.unique_models !== 1 ? 's' : ''}</span>
+        ${bestChips}
+        ${distHtml}
+      `;
     }
 
-    // Type badge colour map (Nord palette)
+    // ── Rendering helpers (presentation only — no computation) ───────────────
+
     const TYPE_BADGE = {
       standard:  { label: 'STD', cls: 'text-[#88c0d0] border-[#88c0d0]' },
       vision:    { label: 'VIS', cls: 'text-[#b48ead] border-[#b48ead]' },
@@ -6576,131 +6506,83 @@ async function fetchBenchmarks() {
     };
 
     function scoreBadgeClass(score) {
-      if      (score === 'S') return 'bg-[#a3be8c]/25 text-[#a3be8c] border-[#a3be8c]';
+      if      (score === 'S')                  return 'bg-[#a3be8c]/25 text-[#a3be8c] border-[#a3be8c]';
       else if (score === 'A' || score === 'B') return 'bg-[#88c0d0]/25 text-[#88c0d0] border-[#88c0d0]';
-      else if (score === 'C') return 'bg-[#ebcb8b]/25 text-[#ebcb8b] border-[#ebcb8b]';
-      else if (score === 'F') return 'bg-[#bf616a]/25 text-[#bf616a] border-[#bf616a]';
-      else                    return 'bg-[#4c566a]/25 text-[#d8dee9] border-[#4c566a]';
+      else if (score === 'C')                  return 'bg-[#ebcb8b]/25 text-[#ebcb8b] border-[#ebcb8b]';
+      else if (score === 'F')                  return 'bg-[#bf616a]/25 text-[#bf616a] border-[#bf616a]';
+      else                                     return 'bg-[#4c566a]/25 text-[#d8dee9] border-[#4c566a]';
     }
 
-    // Build metric cells for a single run (or a synthetic avg run)
-    function metricCells(b, bType, rangeData = {}) {
+    // Build the three metric TD cells for one run row.
+    // sr is either a full Benchmark run or a BenchmarkSummaryRun (same field names).
+    function metricCells(sr, bType) {
       let extra = {};
-      try { extra = JSON.parse(b.extra_json || '{}'); } catch (_) {}
-      const { isAvg, minTps, maxTps, minAcc, maxAcc, minCps, maxCps } = rangeData;
+      try { extra = JSON.parse(sr.extra_json || '{}'); } catch (_) {}
+      const isAvg = !!sr.is_avg;
       let ttftCell, metricCell, latCell;
 
       if (bType === 'embedding') {
         const cps = extra.chunks_per_sec != null ? extra.chunks_per_sec.toFixed(1) : '—';
-        const rng = (isAvg && minCps != null && maxCps != null && maxCps !== minCps)
-          ? `<span class="text-[9px] text-[#4c566a] font-normal ml-1">±${((maxCps - minCps) / 2).toFixed(1)}</span>` : '';
+        const rng = (isAvg && sr.min_chunks_per_sec != null && sr.max_chunks_per_sec != null && sr.max_chunks_per_sec !== sr.min_chunks_per_sec)
+          ? `<span class="text-[9px] text-[#4c566a] font-normal ml-1">±${((sr.max_chunks_per_sec - sr.min_chunks_per_sec) / 2).toFixed(1)}</span>` : '';
         ttftCell   = `<td class="text-center text-[#4c566a]">—</td>`;
         metricCell = `<td class="text-center font-bold text-[#ebcb8b]">${cps}${rng} <span class="text-[9px] text-[#4c566a] font-normal">ch/s</span></td>`;
         latCell    = `<td class="text-center text-[#4c566a]">—</td>`;
       } else if (bType === 'reasoning') {
         const acc = extra.accuracy_pct != null ? extra.accuracy_pct.toFixed(0) + '%' : '—';
-        const rng = (isAvg && minAcc != null && maxAcc != null && maxAcc !== minAcc)
-          ? `<span class="text-[9px] text-[#4c566a] font-normal ml-1">±${((maxAcc - minAcc) / 2).toFixed(1)}%</span>` : '';
+        const rng = (isAvg && sr.min_accuracy_pct != null && sr.max_accuracy_pct != null && sr.max_accuracy_pct !== sr.min_accuracy_pct)
+          ? `<span class="text-[9px] text-[#4c566a] font-normal ml-1">±${((sr.max_accuracy_pct - sr.min_accuracy_pct) / 2).toFixed(1)}%</span>` : '';
         ttftCell   = `<td class="text-center text-[#4c566a]">—</td>`;
         metricCell = `<td class="text-center font-bold text-[#a3be8c]">${acc}${rng} <span class="text-[9px] text-[#4c566a] font-normal">acc</span></td>`;
-        latCell    = `<td class="text-center">${b.avg_latency_ms.toFixed(0)} ms</td>`;
+        latCell    = `<td class="text-center">${(sr.avg_latency_ms || 0).toFixed(0)} ms</td>`;
       } else if (bType === 'longctx') {
-        const deg = extra.degradation_pct != null ? extra.degradation_pct.toFixed(1) + '%' : '';
+        const deg    = extra.degradation_pct != null ? extra.degradation_pct.toFixed(1) + '%' : '';
         const degHtml = deg ? ` <span class="text-[9px] text-[#bf616a] font-normal">↓${deg}</span>` : '';
-        const rng = (isAvg && minTps != null && maxTps != null && maxTps !== minTps)
-          ? `<span class="text-[9px] text-[#4c566a] font-normal ml-1">±${((maxTps - minTps) / 2).toFixed(1)}</span>` : '';
-        ttftCell   = `<td class="text-center">${b.ttft_ms.toFixed(1)} ms</td>`;
-        metricCell = `<td class="text-center font-bold text-[#88c0d0]">${b.tps.toFixed(1)}${degHtml}${rng}</td>`;
-        latCell    = `<td class="text-center">${b.avg_latency_ms.toFixed(0)} ms</td>`;
+        const rng    = (isAvg && sr.min_tps != null && sr.max_tps != null && sr.max_tps !== sr.min_tps)
+          ? `<span class="text-[9px] text-[#4c566a] font-normal ml-1">±${((sr.max_tps - sr.min_tps) / 2).toFixed(1)}</span>` : '';
+        ttftCell   = `<td class="text-center">${(sr.ttft_ms || 0).toFixed(1)} ms</td>`;
+        metricCell = `<td class="text-center font-bold text-[#88c0d0]">${(sr.tps || 0).toFixed(1)}${degHtml}${rng}</td>`;
+        latCell    = `<td class="text-center">${(sr.avg_latency_ms || 0).toFixed(0)} ms</td>`;
       } else {
         // standard / vision
-        const rng = (isAvg && minTps != null && maxTps != null && maxTps !== minTps)
-          ? `<span class="text-[9px] text-[#4c566a] font-normal ml-1">±${((maxTps - minTps) / 2).toFixed(1)}</span>` : '';
-        ttftCell   = `<td class="text-center">${b.ttft_ms.toFixed(1)} ms</td>`;
-        metricCell = `<td class="text-center font-bold text-[#88c0d0]">${b.tps.toFixed(1)}${rng} <span class="text-[9px] text-[#4c566a] font-normal">TPS</span></td>`;
-        latCell    = `<td class="text-center">${b.avg_latency_ms.toFixed(0)} ms</td>`;
+        const rng = (isAvg && sr.min_tps != null && sr.max_tps != null && sr.max_tps !== sr.min_tps)
+          ? `<span class="text-[9px] text-[#4c566a] font-normal ml-1">±${((sr.max_tps - sr.min_tps) / 2).toFixed(1)}</span>` : '';
+        ttftCell   = `<td class="text-center">${(sr.ttft_ms || 0).toFixed(1)} ms</td>`;
+        metricCell = `<td class="text-center font-bold text-[#88c0d0]">${(sr.tps || 0).toFixed(1)}${rng} <span class="text-[9px] text-[#4c566a] font-normal">TPS</span></td>`;
+        latCell    = `<td class="text-center">${(sr.avg_latency_ms || 0).toFixed(0)} ms</td>`;
       }
       return { ttftCell, metricCell, latCell };
     }
 
+    // ── Build table rows ─────────────────────────────────────────────────────
     let html = '';
-    let groupIdx = 0;
 
-    for (const runs of groupList) {
-      const latest  = runs[0];
-      const bType   = latest.benchmark_type || 'standard';
-      const gkey    = `grp-${groupIdx++}`;
-      const multiRun = runs.length > 1;
+    groupList.forEach((group, groupIdx) => {
+      const bType     = group.benchmark_type || 'standard';
+      const gkey      = `grp-${groupIdx}`;
+      const multiRun  = group.run_count > 1;
 
-      // Server display
-      let serverDisplay = latest.server_name || '';
-      if (!serverDisplay && latest.server_url) {
-        try { serverDisplay = new URL(latest.server_url).hostname; } catch (_) { serverDisplay = latest.server_url; }
+      // Server display: prefer server_name, fall back to hostname
+      let serverDisplay = group.server_name || '';
+      if (!serverDisplay && group.server_url) {
+        try { serverDisplay = new URL(group.server_url).hostname; } catch (_) { serverDisplay = group.server_url; }
       }
 
-      // Type badge
-      const tb = TYPE_BADGE[bType] || { label: bType.toUpperCase().slice(0, 3), cls: 'text-[#4c566a] border-[#4c566a]' };
+      const tb            = TYPE_BADGE[bType] || { label: bType.toUpperCase().slice(0, 3), cls: 'text-[#4c566a] border-[#4c566a]' };
       const typeBadgeHtml = `<span class="border px-1.5 rounded text-[8px] font-bold font-mono ${tb.cls}">${tb.label}</span>`;
 
-      // Build summary run (avg of group when multi-run)
-      let summaryRun = latest;
-      let rangeData  = {};
-      if (multiRun) {
-        const avgOf  = key => runs.reduce((s, r) => s + (r[key] || 0), 0) / runs.length;
-        const minOf  = key => Math.min(...runs.map(r => r[key] || 0));
-        const maxOf  = key => Math.max(...runs.map(r => r[key] || 0));
-        const extras = runs.map(r => { try { return JSON.parse(r.extra_json || '{}'); } catch (_) { return {}; } });
-        const hasCps = extras.some(e => e.chunks_per_sec != null);
-        const hasAcc = extras.some(e => e.accuracy_pct   != null);
-        const hasDeg = extras.some(e => e.degradation_pct != null);
-        summaryRun = {
-          ...latest,
-          ttft_ms:        avgOf('ttft_ms'),
-          tps:            avgOf('tps'),
-          avg_latency_ms: avgOf('avg_latency_ms'),
-          extra_json: JSON.stringify({
-            ...(hasCps && { chunks_per_sec:   extras.reduce((s, e) => s + (e.chunks_per_sec   || 0), 0) / runs.length }),
-            ...(hasAcc && { accuracy_pct:     extras.reduce((s, e) => s + (e.accuracy_pct     || 0), 0) / runs.length }),
-            ...(hasDeg && { degradation_pct:  extras.reduce((s, e) => s + (e.degradation_pct  || 0), 0) / runs.length }),
-          }),
-        };
-        rangeData = {
-          isAvg: true,
-          minTps: minOf('tps'), maxTps: maxOf('tps'),
-          minAcc: hasAcc ? Math.min(...extras.map(e => e.accuracy_pct    || 0)) : null,
-          maxAcc: hasAcc ? Math.max(...extras.map(e => e.accuracy_pct    || 0)) : null,
-          minCps: hasCps ? Math.min(...extras.map(e => e.chunks_per_sec  || 0)) : null,
-          maxCps: hasCps ? Math.max(...extras.map(e => e.chunks_per_sec  || 0)) : null,
-        };
-      }
+      // Summary row uses pre-computed summary_run from server
+      const { ttftCell, metricCell, latCell } = metricCells(group.summary_run, bType);
 
-      const { ttftCell, metricCell, latCell } = metricCells(summaryRun, bType, rangeData);
-
-      // Score: use saved score if manually rated; compute auto-score for Pending rows
-      const rawScore   = latest.reasoning_score;
-      const isAutoNote = latest.notes === 'auto';
-      const isPending  = !rawScore || rawScore === 'Pending';
-      let displayScore, isAutoScore;
-      if (isPending && !isAutoNote) {
-        // Compute on-the-fly for older runs that predate auto-scoring
-        const sumExtra = (() => { try { return JSON.parse(summaryRun.extra_json || '{}'); } catch (_) { return {}; } })();
-        displayScore = autoScore(bType, summaryRun.tps || 0, sumExtra);
-        isAutoScore  = true;
-      } else {
-        displayScore = rawScore || 'F';
-        isAutoScore  = isAutoNote;
-      }
-      const scoreClass = scoreBadgeClass(displayScore);
-      const autoBadge  = isAutoScore
+      const displayScore = group.display_score || 'F';
+      const scoreClass   = scoreBadgeClass(displayScore);
+      const autoBadge    = group.is_auto_score
         ? `<span class="text-[8px] text-[#4c566a] font-mono ml-0.5" title="Auto-scored from metrics">auto</span>`
         : '';
 
-      // Runs count badge shown next to model name when multi-run
       const runsBadge = multiRun
-        ? `<span class="ml-1 bg-[#3b4252] border border-[#4c566a] text-[#8fbcbb] text-[8px] font-mono px-1.5 rounded-full">${runs.length}×</span>`
+        ? `<span class="ml-1 bg-[#3b4252] border border-[#4c566a] text-[#8fbcbb] text-[8px] font-mono px-1.5 rounded-full">${group.run_count}×</span>`
         : '';
-
-      // Expand toggle only for multi-run
       const expandBtn = multiRun
         ? `<button onclick="event.stopPropagation();toggleBenchGroup('${gkey}')" id="expand-btn-${gkey}"
                    title="Show individual runs"
@@ -6709,18 +6591,16 @@ async function fetchBenchmarks() {
            </button>`
         : '';
 
-      // Notes display (strip 'auto' marker; don't show for multi-run summary)
-      const userNotes = (latest.notes && latest.notes !== 'auto') ? latest.notes : '';
+      const userNotes = (group.latest_notes && group.latest_notes !== 'auto') ? group.latest_notes : '';
       const noteHtml  = (userNotes && !multiRun)
         ? `<div class="text-[10px] text-[#4c566a] mt-0.5 max-w-[200px] truncate" title="${escapeHTML(userNotes)}">${escapeHTML(userNotes)}</div>`
         : '';
 
-      // Single-run rows keep their own delete + rate; multi-run uses per-sub-row buttons
-      const rateNotes = userNotes || '';
+      const rateNotes   = userNotes || '';
       const singleActions = !multiRun ? `
-              <button onclick="openScoreModal(${latest.id}, '${escapeHTML(displayScore)}', '${escapeHTML(rateNotes)}')"
+              <button onclick="openScoreModal(${group.latest_id}, '${escapeHTML(displayScore)}', '${escapeHTML(rateNotes)}')"
                       class="btn btn-xs btn-neutral border-[#4c566a] font-tech text-[9px] px-2">RATE</button>
-              <button onclick="deleteBenchmark(${latest.id})" class="btn btn-xs btn-ghost text-[#bf616a] hover:bg-[#bf616a]/15 p-1">
+              <button onclick="deleteBenchmark(${group.latest_id})" class="btn btn-xs btn-ghost text-[#bf616a] hover:bg-[#bf616a]/15 p-1">
                 <i class="fa-solid fa-trash-can text-[10px]"></i>
               </button>` : '';
 
@@ -6730,14 +6610,14 @@ async function fetchBenchmarks() {
           <td class="py-3 text-left font-mono">
             <div class="flex items-center gap-1.5 flex-wrap">
               ${typeBadgeHtml}
-              <span class="font-bold text-[#e5e9f0]">${escapeHTML(latest.model_name)}</span>
+              <span class="font-bold text-[#e5e9f0]">${escapeHTML(group.model_name)}</span>
               ${runsBadge}
             </div>
             ${noteHtml}
           </td>
           <td class="py-3 text-left font-mono text-[11px]">
             <div class="text-[#88c0d0] font-bold">${escapeHTML(serverDisplay || '—')}</div>
-            <div class="text-[9px] text-[#4c566a] truncate max-w-[120px]" title="${escapeHTML(latest.server_url || '')}">${escapeHTML(latest.server_url || '')}</div>
+            <div class="text-[9px] text-[#4c566a] truncate max-w-[120px]" title="${escapeHTML(group.server_url || '')}">${escapeHTML(group.server_url || '')}</div>
           </td>
           ${ttftCell}
           ${metricCell}
@@ -6747,7 +6627,7 @@ async function fetchBenchmarks() {
           </td>
           <td class="text-right">
             <div class="flex gap-1 justify-end" onclick="event.stopPropagation()">
-              <button onclick="retestBenchmark('${escapeHTML(latest.model_name)}', '${escapeHTML(bType)}')"
+              <button onclick="retestBenchmark('${escapeHTML(group.model_name)}', '${escapeHTML(bType)}')"
                       title="Re-run this benchmark"
                       class="btn btn-xs btn-ghost text-[#88c0d0] hover:bg-[#88c0d0]/15 p-1">
                 <i class="fa-solid fa-rotate-right text-[10px]"></i>
@@ -6759,26 +6639,26 @@ async function fetchBenchmarks() {
         </tr>
       `;
 
-      // Sub-rows for individual runs (multi-run only, hidden by default)
+      // Sub-rows for individual runs (multi-run only, collapsed by default)
       if (multiRun) {
-        runs.forEach((run, idx) => {
-          const rawRunScore   = run.reasoning_score;
-          const runIsAuto     = run.notes === 'auto';
-          const runIsPending  = !rawRunScore || rawRunScore === 'Pending';
+        (group.runs || []).forEach((run, idx) => {
+          // Sub-run scores are already stored in the DB; resolve just like the group
+          const rawRunScore = run.reasoning_score;
+          const runIsAuto   = run.notes === 'auto';
+          const runIsPending = !rawRunScore || rawRunScore === 'Pending';
           let runDisplayScore, runIsAutoScore;
           if (runIsPending && !runIsAuto) {
-            const runExtra = (() => { try { return JSON.parse(run.extra_json || '{}'); } catch (_) { return {}; } })();
-            runDisplayScore  = autoScore(bType, run.tps || 0, runExtra);
-            runIsAutoScore   = true;
+            runDisplayScore = autoScore(bType, run.tps || 0, (() => { try { return JSON.parse(run.extra_json || '{}'); } catch (_) { return {}; } })());
+            runIsAutoScore  = true;
           } else {
-            runDisplayScore  = rawRunScore || 'F';
-            runIsAutoScore   = runIsAuto;
+            runDisplayScore = rawRunScore || 'F';
+            runIsAutoScore  = runIsAuto;
           }
-          const runScCls      = scoreBadgeClass(runDisplayScore);
-          const runAutoBadge  = runIsAutoScore ? `<span class="text-[8px] text-[#4c566a] font-mono ml-0.5">auto</span>` : '';
-          const runUserNotes  = (run.notes && run.notes !== 'auto') ? run.notes : '';
+          const runScCls     = scoreBadgeClass(runDisplayScore);
+          const runAutoBadge = runIsAutoScore ? `<span class="text-[8px] text-[#4c566a] font-mono ml-0.5">auto</span>` : '';
+          const runUserNotes = (run.notes && run.notes !== 'auto') ? run.notes : '';
           const { ttftCell: rt, metricCell: rm, latCell: rl } = metricCells(run, bType);
-          const runDate   = run.created_at
+          const runDate  = run.created_at
             ? new Date(run.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
             : '—';
           const newestTag = idx === 0
@@ -6811,7 +6691,7 @@ async function fetchBenchmarks() {
           `;
         });
       }
-    }
+    });
 
     tbody.innerHTML = html;
   } catch (error) {
@@ -7317,41 +7197,6 @@ if (window.pdfjsLib) {
   pdfjsLib.GlobalWorkerOptions.workerSrc = '/static/js/pdf.worker.min.js';
 }
 
-function chunkText(text, size = 800, overlap = 100) {
-  text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  if (text.length <= size) return [text];
-  
-  const chunks = [];
-  let start = 0;
-  while (start < text.length) {
-    let end = start + size;
-    if (end > text.length) {
-      end = text.length;
-    }
-    
-    if (end < text.length) {
-      const maxSearch = Math.min(100, end - start);
-      let foundBoundary = false;
-      for (let searchIdx = 0; searchIdx < maxSearch; searchIdx++) {
-        const char = text.charAt(end - searchIdx);
-        if (char === '\n' || char === ' ' || char === '.' || char === '?') {
-          end = end - searchIdx + 1;
-          foundBoundary = true;
-          break;
-        }
-      }
-    }
-    
-    chunks.push(text.substring(start, end).trim());
-    start = end - overlap;
-    
-    if (start >= end) {
-      start = end;
-    }
-  }
-  return chunks.filter(c => c.length > 0);
-}
-
 async function handleRAGUpload(file) {
   const modelSelect = document.getElementById('rag-model-select');
   if (!modelSelect || !modelSelect.value) {
@@ -7359,37 +7204,36 @@ async function handleRAGUpload(file) {
     return;
   }
   const model = modelSelect.value;
-  
-  const progressDiv = document.getElementById('rag-upload-progress');
-  const progressStatus = document.getElementById('rag-progress-status');
+
+  const progressDiv     = document.getElementById('rag-upload-progress');
+  const progressStatus  = document.getElementById('rag-progress-status');
   const progressPercent = document.getElementById('rag-progress-percent');
-  const progressBar = document.getElementById('rag-progress-bar');
-  const uploadLogs = document.getElementById('rag-upload-logs');
-  
+  const progressBar     = document.getElementById('rag-progress-bar');
+  const uploadLogs      = document.getElementById('rag-upload-logs');
+
   if (progressDiv) progressDiv.classList.remove('hidden');
   if (uploadLogs) uploadLogs.innerHTML = '';
-  
+
   const logMessage = (msg, isError = false) => {
-    const time = new Date().toLocaleTimeString();
+    const time  = new Date().toLocaleTimeString();
     const style = isError ? 'text-[#bf616a]' : 'text-[#d8dee9]/80';
     if (uploadLogs) {
       uploadLogs.innerHTML += `<div class="${style}">[${time}] ${msg}</div>`;
       uploadLogs.scrollTop = uploadLogs.scrollHeight;
     }
   };
-  
+
   const updateProgress = (pct, status) => {
     if (progressPercent) progressPercent.textContent = `${pct}%`;
     if (progressBar) progressBar.style.width = `${pct}%`;
     if (progressStatus) progressStatus.textContent = status;
   };
-  
-  // ── Guards ──────────────────────────────────────────────────────────────────
-  const MAX_FILE_MB  = 50;   // hard reject above this
-  const WARN_FILE_MB = 20;   // warn but continue
-  const UPLOAD_BATCH = 200;  // chunks per POST — server embeds 50 at a time within each
-  // PDF page/size limits are now enforced server-side in extractPDFTextHandler (max 300 pages)
 
+  // All extraction, chunking, embedding, and saving now happens server-side.
+  // The browser just uploads the file and reads a streaming NDJSON response —
+  // no text data ever touches the JS main thread, eliminating OOM crashes.
+
+  const MAX_FILE_MB = 50;
   const fileMB = file.size / (1024 * 1024);
   if (fileMB > MAX_FILE_MB) {
     showToast(`File too large (${fileMB.toFixed(1)} MB). Maximum is ${MAX_FILE_MB} MB.`, 'error');
@@ -7397,135 +7241,79 @@ async function handleRAGUpload(file) {
     return;
   }
 
-  let docID = null;
+  updateProgress(3, 'Uploading...');
+  logMessage(`Uploading ${file.name} (${fileMB.toFixed(1)} MB) for server-side processing...`);
+  if (fileMB > 20) {
+    logMessage(`⚠ Large file — extraction and embedding may take a moment.`);
+  }
 
   try {
-    const t0 = Date.now();
-    logMessage(`Initializing parse for: ${file.name} (${fileMB.toFixed(1)} MB)...`);
-    if (fileMB > WARN_FILE_MB) {
-      logMessage(`⚠ Large file (${fileMB.toFixed(1)} MB) — processing may take a moment.`);
-    }
-    updateProgress(10, 'Reading file...');
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('embedding_model', model);
 
-    let text = '';
-    const extension = file.name.split('.').pop().toLowerCase();
+    const response = await fetch('/api/rag/upload-and-index', {
+      method: 'POST',
+      body: formData  // browser sets multipart boundary automatically
+    });
 
-    if (extension === 'pdf') {
-      // PDF extraction runs server-side (Go) to avoid RESULT_CODE_HUNG —
-      // browser-side PDF.js structured-clone of tagged PDFs blocks the main
-      // thread long enough for Chrome to kill the renderer.
-      logMessage('Uploading PDF to server for text extraction...');
-      updateProgress(15, 'Uploading PDF...');
-
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const extractResp = await fetch('/api/rag/extract-pdf', {
-        method: 'POST',
-        body: formData   // no Content-Type header — browser sets multipart boundary
-      });
-
-      if (!extractResp.ok) {
-        let errMsg = `PDF extraction failed (${extractResp.status})`;
-        try { const e = await extractResp.json(); errMsg = e.error || errMsg; } catch (_) {}
-        throw new Error(errMsg);
-      }
-
-      const extracted = await extractResp.json();
-      text = extracted.text || '';
-      logMessage(`Server extracted ${extracted.pages} page(s)${extracted.skipped ? `, ${extracted.skipped} skipped` : ''} — ${extracted.chars.toLocaleString()} chars`);
-      updateProgress(50, 'Text extracted.');
-
-    } else if (extension === 'txt' || extension === 'md') {
-      text = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (e) => resolve(e.target.result);
-        reader.onerror = (err) => reject(err);
-        reader.readAsText(file);
-      });
-      updateProgress(50, 'Text extracted successfully.');
-    } else {
-      throw new Error('Unsupported file format. Only .txt, .md, and .pdf files are allowed.');
+    // Pre-stream errors (400, 422, 503, etc.) arrive as plain JSON
+    if (!response.ok) {
+      let errMsg = `Server error ${response.status}`;
+      try { const e = await response.json(); errMsg = e.error || errMsg; } catch (_) {}
+      throw new Error(errMsg);
     }
 
-    if (!text.trim()) {
-      throw new Error('No extractable text found. This may be an image-only or scanned PDF — try running it through OCR first (e.g. ocrmypdf).');
-    }
+    // Stream the NDJSON response — each line is a JSON event
+    const reader  = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer    = '';
+    let success   = false;
 
-    logMessage(`Extracted ${text.length.toLocaleString()} chars in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
-    logMessage('Chunking into ~800-char blocks (100-char overlap)...');
-    updateProgress(60, 'Chunking text...');
+    streamLoop:
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-    const chunks      = chunkText(text, 800, 100);
-    const totalChunks  = chunks.length;
-    const totalBatches = Math.ceil(totalChunks / UPLOAD_BATCH);
-    logMessage(`${totalChunks} chunk${totalChunks !== 1 ? 's' : ''} → ${totalBatches} upload batch${totalBatches !== 1 ? 'es' : ''} of up to ${UPLOAD_BATCH} (this may take a moment if the model is cold-loading)...`);
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop(); // keep any incomplete trailing line for the next chunk
 
-    let chunksIndexed = 0;
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let event;
+        try { event = JSON.parse(line); } catch (_) { continue; }
 
-    for (let b = 0; b < totalBatches; b++) {
-      const start       = b * UPLOAD_BATCH;
-      const end         = Math.min(start + UPLOAD_BATCH, totalChunks);
-      const batchChunks = chunks.slice(start, end);
+        switch (event.type) {
+          case 'progress':
+            updateProgress(event.pct ?? 0, event.message ?? '');
+            logMessage(event.message ?? '');
+            break;
 
-      updateProgress(
-        65 + Math.round((b / totalBatches) * 30),
-        `Batch ${b + 1}/${totalBatches}: embedding chunks ${start + 1}–${end}...`
-      );
-      logMessage(`Batch ${b + 1}/${totalBatches}: chunks ${start + 1}–${end} (${batchChunks.length} chunks)...`);
+          case 'done':
+            updateProgress(100, 'Indexing complete!');
+            logMessage(`All ${event.chunks} chunk${event.chunks !== 1 ? 's' : ''} indexed (document ID: ${event.document_id}).`);
+            showToast(`Successfully indexed "${file.name}" — ${event.chunks} chunks.`, 'success');
+            success = true;
+            break streamLoop;
 
-      const batchPayload = {
-        embedding_model: model,
-        chunks: batchChunks.map((c, i) => ({ chunk_index: start + i, content: c }))
-      };
-
-      let url, body;
-      if (docID === null) {
-        url  = '/api/rag/documents';
-        body = JSON.stringify({ name: file.name, ...batchPayload });
-      } else {
-        url  = `/api/rag/documents/${docID}/chunks`;
-        body = JSON.stringify(batchPayload);
-      }
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body
-      });
-
-      if (!response.ok) {
-        let errMsg = `Server error ${response.status} on batch ${b + 1}`;
-        try { const e = await response.json(); errMsg = e.error || errMsg; } catch (_) {}
-        if (response.status === 404 && b > 0) {
-          errMsg = `Route not found — the server may need to be restarted to pick up recent updates. (${errMsg})`;
+          case 'error':
+            throw new Error(event.message || 'Unknown server error');
         }
-        throw new Error(errMsg);
       }
-
-      const resData = await response.json();
-      if (docID === null) docID = resData.document_id;
-      chunksIndexed += resData.chunks;
-      logMessage(`Batch ${b + 1}/${totalBatches} done — ${chunksIndexed}/${totalChunks} chunks indexed.`);
     }
 
-    updateProgress(100, 'Indexing complete!');
-    logMessage(`All ${chunksIndexed} chunk${chunksIndexed !== 1 ? 's' : ''} indexed (document ID: ${docID}).`);
-    showToast(`Successfully indexed "${file.name}" — ${chunksIndexed} chunks.`, 'success');
-
-    loadRAGDocuments();
-
-    const fileInput = document.getElementById('rag-file-input');
-    if (fileInput) fileInput.value = '';
+    if (success) {
+      loadRAGDocuments();
+      const fileInput = document.getElementById('rag-file-input');
+      if (fileInput) fileInput.value = '';
+    } else if (!success) {
+      // Stream ended without a done event (server closed connection early)
+      throw new Error('Upload stream ended unexpectedly — check server logs.');
+    }
 
   } catch (error) {
     console.error('RAG Upload Error:', error);
-    if (docID !== null) {
-      try {
-        await fetch(`/api/rag/documents/${docID}`, { method: 'DELETE' });
-        logMessage(`Cleaned up partial document (ID: ${docID}).`, true);
-      } catch (_) {}
-    }
     logMessage(`ERROR: ${error.message}`, true);
     updateProgress(0, 'Indexing failed.');
     showToast(error.message, 'error');

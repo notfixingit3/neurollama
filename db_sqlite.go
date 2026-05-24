@@ -7,6 +7,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	_ "github.com/glebarez/go-sqlite"
 )
@@ -66,6 +68,64 @@ type Benchmark struct {
 	ExtraJSON      string  `json:"extra_json"`
 	Notes          string  `json:"notes"`
 	CreatedAt      string  `json:"created_at"`
+}
+
+// BenchmarkSummaryRun is an averaged view of all runs in a group.
+// It carries the same numeric fields that the leaderboard rendering code needs,
+// plus the min/max range data for variance indicators — so the browser can
+// render without doing any arithmetic.
+type BenchmarkSummaryRun struct {
+	TtftMs       float64  `json:"ttft_ms"`
+	Tps          float64  `json:"tps"`
+	AvgLatencyMs float64  `json:"avg_latency_ms"`
+	ExtraJSON    string   `json:"extra_json"`   // JSON with avg chunks_per_sec / accuracy_pct / degradation_pct
+	IsAvg        bool     `json:"is_avg"`        // true when run_count > 1
+	MinTps       float64  `json:"min_tps"`
+	MaxTps       float64  `json:"max_tps"`
+	MinCps       *float64 `json:"min_chunks_per_sec"`
+	MaxCps       *float64 `json:"max_chunks_per_sec"`
+	MinAcc       *float64 `json:"min_accuracy_pct"`
+	MaxAcc       *float64 `json:"max_accuracy_pct"`
+}
+
+// BenchmarkGroup is a set of runs for one model+type+server combination,
+// with all aggregation pre-computed by the server.
+type BenchmarkGroup struct {
+	ModelName       string              `json:"model_name"`
+	BenchmarkType   string              `json:"benchmark_type"`
+	ServerName      string              `json:"server_name"`
+	ServerURL       string              `json:"server_url"`
+	RunCount        int                 `json:"run_count"`
+	LatestID        int64               `json:"latest_id"`
+	LatestScore     string              `json:"latest_score"`     // raw DB value
+	LatestNotes     string              `json:"latest_notes"`
+	LatestCreatedAt string              `json:"latest_created_at"`
+	DisplayScore    string              `json:"display_score"`    // resolved: stored or auto-computed
+	IsAutoScore     bool                `json:"is_auto_score"`
+	SummaryRun      BenchmarkSummaryRun `json:"summary_run"`
+	Runs            []Benchmark         `json:"runs"`
+}
+
+// TypeBest captures the best-performing group for one benchmark type.
+type TypeBest struct {
+	BenchmarkType string  `json:"benchmark_type"`
+	ModelName     string  `json:"model_name"`
+	Metric        float64 `json:"metric"`
+	Label         string  `json:"label"`
+}
+
+// BenchmarkLeaderboardStats contains the aggregated data for the stats bar.
+type BenchmarkLeaderboardStats struct {
+	TotalRuns         int            `json:"total_runs"`
+	UniqueModels      int            `json:"unique_models"`
+	TypeBests         []TypeBest     `json:"type_bests"`
+	ScoreDistribution map[string]int `json:"score_distribution"`
+}
+
+// BenchmarkGroupedResponse is returned by GET /api/benchmarks/grouped.
+type BenchmarkGroupedResponse struct {
+	Groups []BenchmarkGroup          `json:"groups"`
+	Stats  BenchmarkLeaderboardStats `json:"stats"`
 }
 
 type OptimizerRun struct {
@@ -581,6 +641,273 @@ func GetBenchmarks() ([]Benchmark, error) {
 		list = append(list, b)
 	}
 	return list, nil
+}
+
+// benchmarkGroupKey identifies a unique model+type+server combination.
+type benchmarkGroupKey struct{ model, btype, serverURL string }
+
+// GetGroupedBenchmarks returns benchmark runs aggregated server-side so the
+// browser only has to render, not compute. filter may be "all" or a specific
+// benchmark type. sortCol and sortDir match the JS leaderboard sort controls.
+func GetGroupedBenchmarks(filter, sortCol, sortDir string) (*BenchmarkGroupedResponse, error) {
+	all, err := GetBenchmarks()
+	if err != nil {
+		return nil, err
+	}
+
+	// ── 1. Optional type filter ───────────────────────────────────────────────
+	var rows []Benchmark
+	for _, b := range all {
+		if filter == "" || filter == "all" || b.BenchmarkType == filter {
+			rows = append(rows, b)
+		}
+	}
+
+	// ── 2. Group (GetBenchmarks returns newest-first, so each slice is already
+	//        ordered that way — latest run is index 0). ────────────────────────
+	type groupEntry struct {
+		key  benchmarkGroupKey
+		runs []Benchmark
+	}
+	groupMap := make(map[benchmarkGroupKey]*groupEntry)
+	var groupOrder []benchmarkGroupKey
+
+	for _, b := range rows {
+		k := benchmarkGroupKey{b.ModelName, b.BenchmarkType, b.ServerURL}
+		if _, ok := groupMap[k]; !ok {
+			groupMap[k] = &groupEntry{key: k}
+			groupOrder = append(groupOrder, k)
+		}
+		groupMap[k].runs = append(groupMap[k].runs, b)
+	}
+
+	// ── 3. Build BenchmarkGroup for each entry ────────────────────────────────
+	scoreOrder := map[string]int{"S": 5, "A": 4, "B": 3, "C": 2, "F": 1}
+	groups := make([]BenchmarkGroup, 0, len(groupOrder))
+
+	for _, k := range groupOrder {
+		entry := groupMap[k]
+		runs := entry.runs
+		latest := runs[0]
+
+		summaryRun := buildGroupSummary(runs)
+		displayScore, isAutoScore := resolveDisplayScore(latest, summaryRun)
+
+		groups = append(groups, BenchmarkGroup{
+			ModelName:       k.model,
+			BenchmarkType:   k.btype,
+			ServerName:      latest.ServerName,
+			ServerURL:       k.serverURL,
+			RunCount:        len(runs),
+			LatestID:        latest.ID,
+			LatestScore:     latest.ReasoningScore,
+			LatestNotes:     latest.Notes,
+			LatestCreatedAt: latest.CreatedAt,
+			DisplayScore:    displayScore,
+			IsAutoScore:     isAutoScore,
+			SummaryRun:      summaryRun,
+			Runs:            runs,
+		})
+	}
+
+	// ── 4. Sort groups ────────────────────────────────────────────────────────
+	sort.SliceStable(groups, func(i, j int) bool {
+		a, b := &groups[i], &groups[j]
+		asc := sortDir == "asc"
+		less := func(av, bv float64) bool {
+			if asc {
+				return av < bv
+			}
+			return av > bv
+		}
+		lessStr := func(av, bv string) bool {
+			if asc {
+				return av < bv
+			}
+			return av > bv
+		}
+		switch sortCol {
+		case "model_name":
+			return lessStr(strings.ToLower(a.ModelName), strings.ToLower(b.ModelName))
+		case "server_name":
+			return lessStr(strings.ToLower(a.ServerName), strings.ToLower(b.ServerName))
+		case "tps":
+			return less(a.SummaryRun.Tps, b.SummaryRun.Tps)
+		case "ttft_ms":
+			return less(a.SummaryRun.TtftMs, b.SummaryRun.TtftMs)
+		case "avg_latency_ms":
+			return less(a.SummaryRun.AvgLatencyMs, b.SummaryRun.AvgLatencyMs)
+		case "score":
+			return less(float64(scoreOrder[a.DisplayScore]), float64(scoreOrder[b.DisplayScore]))
+		default: // "created_at" — groups are already newest-first from the DB query,
+			// so this preserves insertion order for desc; reverse for asc.
+			if asc {
+				return i > j
+			}
+			return i < j
+		}
+	})
+
+	// ── 5. Compute stats bar data ─────────────────────────────────────────────
+	uniqueModels := make(map[string]struct{})
+	for _, b := range rows {
+		uniqueModels[b.ModelName] = struct{}{}
+	}
+
+	typeBestMap := make(map[string]*TypeBest)
+	scoreDist := map[string]int{"S": 0, "A": 0, "B": 0, "C": 0, "F": 0}
+
+	for i := range groups {
+		g := &groups[i]
+
+		// Per-type best
+		var metric float64
+		var label string
+		switch g.BenchmarkType {
+		case "embedding":
+			var ex struct{ ChunksPerSec float64 `json:"chunks_per_sec"` }
+			_ = json.Unmarshal([]byte(g.SummaryRun.ExtraJSON), &ex)
+			metric = ex.ChunksPerSec
+			label = fmt.Sprintf("%.1f ch/s", metric)
+		case "reasoning":
+			var ex struct{ AccuracyPct float64 `json:"accuracy_pct"` }
+			_ = json.Unmarshal([]byte(g.SummaryRun.ExtraJSON), &ex)
+			metric = ex.AccuracyPct
+			label = fmt.Sprintf("%.0f%%", metric)
+		default:
+			metric = g.SummaryRun.Tps
+			label = fmt.Sprintf("%.1f TPS", metric)
+		}
+		prev, ok := typeBestMap[g.BenchmarkType]
+		if !ok || metric > prev.Metric {
+			typeBestMap[g.BenchmarkType] = &TypeBest{
+				BenchmarkType: g.BenchmarkType,
+				ModelName:     g.ModelName,
+				Metric:        metric,
+				Label:         label,
+			}
+		}
+
+		// Score distribution
+		sc := g.DisplayScore
+		if _, ok := scoreDist[sc]; ok {
+			scoreDist[sc]++
+		}
+	}
+
+	typeBests := make([]TypeBest, 0, len(typeBestMap))
+	for _, tb := range typeBestMap {
+		typeBests = append(typeBests, *tb)
+	}
+	sort.Slice(typeBests, func(i, j int) bool {
+		return typeBests[i].BenchmarkType < typeBests[j].BenchmarkType
+	})
+
+	return &BenchmarkGroupedResponse{
+		Groups: groups,
+		Stats: BenchmarkLeaderboardStats{
+			TotalRuns:         len(rows),
+			UniqueModels:      len(uniqueModels),
+			TypeBests:         typeBests,
+			ScoreDistribution: scoreDist,
+		},
+	}, nil
+}
+
+// buildGroupSummary computes an averaged BenchmarkSummaryRun from all runs in a group.
+func buildGroupSummary(runs []Benchmark) BenchmarkSummaryRun {
+	n := float64(len(runs))
+	if n == 0 {
+		return BenchmarkSummaryRun{}
+	}
+	if len(runs) == 1 {
+		r := runs[0]
+		return BenchmarkSummaryRun{
+			TtftMs:       r.TtftMs,
+			Tps:          r.Tps,
+			AvgLatencyMs: r.AvgLatencyMs,
+			ExtraJSON:    r.ExtraJSON,
+			IsAvg:        false,
+			MinTps:       r.Tps,
+			MaxTps:       r.Tps,
+		}
+	}
+
+	var sumTtft, sumTps, sumLat float64
+	minTps, maxTps := runs[0].Tps, runs[0].Tps
+
+	var sumCps, sumAcc, sumDeg float64
+	var hasCps, hasAcc, hasDeg bool
+	var minCps, maxCps, minAcc, maxAcc float64
+
+	for _, r := range runs {
+		sumTtft += r.TtftMs
+		sumTps += r.Tps
+		sumLat += r.AvgLatencyMs
+		if r.Tps < minTps { minTps = r.Tps }
+		if r.Tps > maxTps { maxTps = r.Tps }
+
+		var ex struct {
+			ChunksPerSec   *float64 `json:"chunks_per_sec"`
+			AccuracyPct    *float64 `json:"accuracy_pct"`
+			DegradationPct *float64 `json:"degradation_pct"`
+		}
+		if r.ExtraJSON != "" {
+			_ = json.Unmarshal([]byte(r.ExtraJSON), &ex)
+		}
+		if ex.ChunksPerSec != nil {
+			v := *ex.ChunksPerSec
+			if !hasCps { minCps, maxCps = v, v } else { if v < minCps { minCps = v }; if v > maxCps { maxCps = v } }
+			sumCps += v; hasCps = true
+		}
+		if ex.AccuracyPct != nil {
+			v := *ex.AccuracyPct
+			if !hasAcc { minAcc, maxAcc = v, v } else { if v < minAcc { minAcc = v }; if v > maxAcc { maxAcc = v } }
+			sumAcc += v; hasAcc = true
+		}
+		if ex.DegradationPct != nil {
+			sumDeg += *ex.DegradationPct; hasDeg = true
+		}
+	}
+
+	// Build avg extra_json
+	avgExtra := make(map[string]interface{})
+	if hasCps { avgExtra["chunks_per_sec"] = sumCps / n }
+	if hasAcc { avgExtra["accuracy_pct"] = sumAcc / n }
+	if hasDeg { avgExtra["degradation_pct"] = sumDeg / n }
+	extraBytes, _ := json.Marshal(avgExtra)
+
+	s := BenchmarkSummaryRun{
+		TtftMs:       sumTtft / n,
+		Tps:          sumTps / n,
+		AvgLatencyMs: sumLat / n,
+		ExtraJSON:    string(extraBytes),
+		IsAvg:        true,
+		MinTps:       minTps,
+		MaxTps:       maxTps,
+	}
+	if hasCps { avgCps := sumCps / n; minC := minCps; maxC := maxCps; s.MinCps = &minC; s.MaxCps = &maxC; _ = avgCps }
+	if hasAcc { avgAcc := sumAcc / n; minA := minAcc; maxA := maxAcc; s.MinAcc = &minA; s.MaxAcc = &maxA; _ = avgAcc }
+	return s
+}
+
+// resolveDisplayScore determines the score to show on the leaderboard.
+// If the stored score is blank or "Pending" and wasn't set by auto-scoring,
+// it computes one on the fly from the group's averaged summary.
+func resolveDisplayScore(latest Benchmark, summary BenchmarkSummaryRun) (score string, isAuto bool) {
+	raw := latest.ReasoningScore
+	isPending := raw == "" || raw == "Pending"
+	isAutoNote := latest.Notes == "auto"
+
+	if isPending && !isAutoNote {
+		// Legacy run that predates auto-scoring — compute from avg summary
+		score = computeBenchmarkScore(latest.BenchmarkType, summary.Tps, summary.ExtraJSON)
+		return score, true
+	}
+	if raw == "" {
+		raw = "F"
+	}
+	return raw, isAutoNote
 }
 
 // speedTier returns a performance tier based on tokens-per-second.

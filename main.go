@@ -224,6 +224,7 @@ func main() {
 
 		// Benchmarks
 		api.GET("/benchmarks", getBenchmarksHandler)
+		api.GET("/benchmarks/grouped", getGroupedBenchmarksHandler)
 		api.GET("/benchmarks/run", runBenchmarkSSEHandler)
 		api.PUT("/benchmarks/:id/score", updateBenchmarkScoreHandler)
 		api.DELETE("/benchmarks/:id", deleteBenchmarkHandler)
@@ -234,7 +235,8 @@ func main() {
 		api.DELETE("/optimizer/runs/:id", deleteOptimizerRunHandler)
 
 		// Document RAG Panel Endpoints
-		api.POST("/rag/extract-pdf", extractPDFTextHandler) // server-side PDF → text (avoids browser hang)
+		api.POST("/rag/extract-pdf", extractPDFTextHandler)         // server-side PDF → text (avoids browser hang)
+		api.POST("/rag/upload-and-index", uploadAndIndexHandler)     // combined: extract + chunk + embed + save, streams NDJSON
 		api.GET("/rag/documents", getRAGDocumentsHandler)
 		api.POST("/rag/documents", uploadRAGDocumentHandler)
 		api.POST("/rag/documents/:id/chunks", appendRAGChunksHandler)
@@ -2602,6 +2604,35 @@ func getBenchmarksHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, benchmarks)
 }
 
+// getGroupedBenchmarksHandler returns benchmark runs pre-grouped, averaged, and
+// scored by the server so the browser only needs to render the result.
+//
+// Query params:
+//
+//	type  — "all" or a specific benchmark type (standard/vision/embedding/longctx/reasoning)
+//	sort  — column name: model_name | server_name | tps | ttft_ms | avg_latency_ms | score | created_at
+//	dir   — "asc" or "desc"
+func getGroupedBenchmarksHandler(c *gin.Context) {
+	filter  := c.DefaultQuery("type", "all")
+	sortCol := c.DefaultQuery("sort", "created_at")
+	sortDir := c.DefaultQuery("dir", "desc")
+
+	// Whitelist sort params to avoid unexpected behaviour
+	validCols := map[string]bool{
+		"model_name": true, "server_name": true, "tps": true,
+		"ttft_ms": true, "avg_latency_ms": true, "score": true, "created_at": true,
+	}
+	if !validCols[sortCol] { sortCol = "created_at" }
+	if sortDir != "asc" && sortDir != "desc" { sortDir = "desc" }
+
+	resp, err := GetGroupedBenchmarks(filter, sortCol, sortDir)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
 // --- Vision test image (generated once at startup) ---
 
 var visionTestImageBase64 string
@@ -3537,6 +3568,287 @@ func extractPDFTextHandler(c *gin.Context) {
 		"chars":   len(text),
 		"text":    text,
 	})
+}
+
+// chunkTextGo splits text into overlapping chunks, mirroring the JS chunkText(text, 800, 100) logic.
+// Boundaries are snapped backward to the nearest whitespace or sentence terminator.
+func chunkTextGo(text string, size, overlap int) []string {
+	// Normalize line endings
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+
+	n := len(text)
+	if n == 0 {
+		return nil
+	}
+	if n <= size {
+		t := strings.TrimSpace(text)
+		if t == "" {
+			return nil
+		}
+		return []string{t}
+	}
+
+	var chunks []string
+	start := 0
+	for start < n {
+		end := start + size
+		if end > n {
+			end = n
+		}
+
+		// Snap end backward to a word/sentence boundary (up to 100 chars)
+		if end < n {
+			maxSearch := 100
+			if maxSearch > end-start {
+				maxSearch = end - start
+			}
+			for searchIdx := 0; searchIdx < maxSearch; searchIdx++ {
+				ch := text[end-searchIdx] // end < n, so text[end] is valid; searchIdx < end-start so >= start+1
+				if ch == '\n' || ch == ' ' || ch == '.' || ch == '?' {
+					end = end - searchIdx + 1
+					break
+				}
+			}
+			if end > n {
+				end = n
+			}
+		}
+
+		chunk := strings.TrimSpace(text[start:end])
+		if chunk != "" {
+			chunks = append(chunks, chunk)
+		}
+
+		newStart := end - overlap
+		if newStart <= start {
+			newStart = end
+		}
+		start = newStart
+	}
+	return chunks
+}
+
+// uploadAndIndexHandler accepts a multipart file upload plus an embedding_model field,
+// extracts text server-side (PDF via ledongthuc/pdf, or TXT/MD via io.ReadAll),
+// chunks it with chunkTextGo, embeds with Ollama, saves to SQLite, and streams
+// progress as newline-delimited JSON so the browser never touches the raw text.
+// This avoids the RESULT_CODE_HUNG browser crash that occurs when the browser tries
+// to chunk/JSON-stringify tens of thousands of characters in the main thread.
+func uploadAndIndexHandler(c *gin.Context) {
+	const (
+		maxFileBytes   = 50 * 1024 * 1024
+		maxPages       = 300
+		chunkSize      = 800
+		chunkOverlap   = 100
+		embedBatchSize = 50
+	)
+
+	// emit writes one NDJSON line to the response and flushes.
+	// After the first emit the HTTP status is committed as 200 — subsequent
+	// errors must be reported as {"type":"error"} events, not HTTP status codes.
+	type ndjsonEvent = map[string]any
+	emit := func(event ndjsonEvent) {
+		data, _ := json.Marshal(event)
+		data = append(data, '\n')
+		c.Writer.Write(data) //nolint:errcheck
+		c.Writer.Flush()
+	}
+
+	// ── Pre-stream validation (can still set HTTP error status here) ──────────
+
+	fh, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No file uploaded (field: 'file')"})
+		return
+	}
+	embeddingModel := c.PostForm("embedding_model")
+	if embeddingModel == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing embedding_model field"})
+		return
+	}
+	if fh.Size > maxFileBytes {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("File too large (%.1f MB). Maximum is 50 MB.", float64(fh.Size)/(1024*1024))})
+		return
+	}
+	filename := fh.Filename
+	dotIdx := strings.LastIndex(filename, ".")
+	var ext string
+	if dotIdx >= 0 {
+		ext = strings.ToLower(filename[dotIdx:])
+	}
+	if ext != ".pdf" && ext != ".txt" && ext != ".md" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unsupported file type. Only .pdf, .txt, and .md files are supported."})
+		return
+	}
+
+	// ── Streaming begins — status 200 is committed on first Write ─────────────
+
+	c.Header("Content-Type", "application/x-ndjson")
+	c.Header("Transfer-Encoding", "chunked")
+	c.Header("X-Accel-Buffering", "no")
+	c.Header("Cache-Control", "no-cache")
+
+	fileMB := float64(fh.Size) / (1024 * 1024)
+	emit(ndjsonEvent{"type": "progress", "pct": 5, "message": fmt.Sprintf("Reading %s (%.1f MB)...", filename, fileMB)})
+
+	// ── Text extraction ───────────────────────────────────────────────────────
+
+	var rawText string
+
+	if ext == ".pdf" {
+		emit(ndjsonEvent{"type": "progress", "pct": 10, "message": "Uploading PDF to extraction engine..."})
+
+		tmp, err := os.CreateTemp("", "neurollama-pdf-*.pdf")
+		if err != nil {
+			emit(ndjsonEvent{"type": "error", "message": "Could not create temp file"})
+			return
+		}
+		tmpName := tmp.Name()
+		defer os.Remove(tmpName)
+
+		src, err := fh.Open()
+		if err != nil {
+			tmp.Close()
+			emit(ndjsonEvent{"type": "error", "message": "Could not open upload"})
+			return
+		}
+		_, copyErr := io.Copy(tmp, src)
+		src.Close()
+		tmp.Close()
+		if copyErr != nil {
+			emit(ndjsonEvent{"type": "error", "message": "Failed to buffer PDF upload"})
+			return
+		}
+
+		f, pdfReader, err := goPDF.Open(tmpName)
+		if err != nil {
+			emit(ndjsonEvent{"type": "error", "message": fmt.Sprintf("PDF parse failed: %v — try converting to a plain PDF first.", err)})
+			return
+		}
+
+		numPages := pdfReader.NumPage()
+		if numPages > maxPages {
+			f.Close()
+			emit(ndjsonEvent{"type": "error", "message": fmt.Sprintf("PDF has %d pages. Maximum supported is %d.", numPages, maxPages)})
+			return
+		}
+
+		emit(ndjsonEvent{"type": "progress", "pct": 15, "message": fmt.Sprintf("Extracting text from %d pages...", numPages)})
+
+		var sb strings.Builder
+		skipped := 0
+		for i := 1; i <= numPages; i++ {
+			page := pdfReader.Page(i)
+			if page.V.IsNull() {
+				skipped++
+				continue
+			}
+			pageText, err := page.GetPlainText(nil)
+			if err != nil {
+				skipped++
+				continue
+			}
+			sb.WriteString(pageText)
+			sb.WriteByte('\n')
+		}
+		f.Close()
+
+		rawText = sb.String()
+		skipNote := ""
+		if skipped > 0 {
+			skipNote = fmt.Sprintf(", %d page(s) skipped", skipped)
+		}
+		emit(ndjsonEvent{"type": "progress", "pct": 30, "message": fmt.Sprintf("Extracted %d chars from %d pages%s", len(rawText), numPages, skipNote)})
+
+	} else {
+		// TXT / MD
+		src, err := fh.Open()
+		if err != nil {
+			emit(ndjsonEvent{"type": "error", "message": "Could not open upload"})
+			return
+		}
+		raw, err := io.ReadAll(src)
+		src.Close()
+		if err != nil {
+			emit(ndjsonEvent{"type": "error", "message": "Failed to read file"})
+			return
+		}
+		rawText = string(raw)
+		emit(ndjsonEvent{"type": "progress", "pct": 30, "message": fmt.Sprintf("Read %d chars", len(rawText))})
+	}
+
+	if strings.TrimSpace(rawText) == "" {
+		emit(ndjsonEvent{"type": "error", "message": "No extractable text found. This may be an image-only or scanned PDF — try running it through OCR first (e.g. ocrmypdf)."})
+		return
+	}
+
+	// ── Chunking ──────────────────────────────────────────────────────────────
+
+	emit(ndjsonEvent{"type": "progress", "pct": 35, "message": "Chunking into ~800-char blocks (100-char overlap)..."})
+	chunks := chunkTextGo(rawText, chunkSize, chunkOverlap)
+	if len(chunks) == 0 {
+		emit(ndjsonEvent{"type": "error", "message": "Text chunking produced no output"})
+		return
+	}
+	emit(ndjsonEvent{"type": "progress", "pct": 40, "message": fmt.Sprintf("%d chunk(s) created", len(chunks))})
+
+	// ── Embedding ─────────────────────────────────────────────────────────────
+
+	activeSrv, err := GetActiveServer()
+	if err != nil {
+		emit(ndjsonEvent{"type": "error", "message": "No active Ollama server selected"})
+		return
+	}
+	ollamaClient := NewOllamaClient(activeSrv)
+
+	totalBatches := (len(chunks) + embedBatchSize - 1) / embedBatchSize
+	emit(ndjsonEvent{"type": "progress", "pct": 45, "message": fmt.Sprintf("Embedding %d chunk(s) via %s (%d batch(es) of up to %d)...", len(chunks), embeddingModel, totalBatches, embedBatchSize)})
+
+	var allEmbeddings [][]float64
+	for b := 0; b < totalBatches; b++ {
+		start := b * embedBatchSize
+		end := start + embedBatchSize
+		if end > len(chunks) {
+			end = len(chunks)
+		}
+
+		batch, err := ollamaClient.GetEmbeddings(embeddingModel, chunks[start:end])
+		if err != nil {
+			emit(ndjsonEvent{"type": "error", "message": fmt.Sprintf("Embedding batch %d/%d failed: %v", b+1, totalBatches, err)})
+			return
+		}
+		allEmbeddings = append(allEmbeddings, batch...)
+
+		pct := 45 + int(float64(b+1)/float64(totalBatches)*47) // 45 → 92
+		emit(ndjsonEvent{"type": "progress", "pct": pct, "message": fmt.Sprintf("Embedded batch %d/%d (%d/%d chunks)", b+1, totalBatches, end, len(chunks))})
+	}
+
+	if len(allEmbeddings) != len(chunks) {
+		emit(ndjsonEvent{"type": "error", "message": fmt.Sprintf("Embedding count mismatch: got %d, want %d", len(allEmbeddings), len(chunks))})
+		return
+	}
+
+	// ── Save to database ──────────────────────────────────────────────────────
+
+	emit(ndjsonEvent{"type": "progress", "pct": 93, "message": "Saving to database..."})
+
+	ragChunks := make([]RAGChunk, len(chunks))
+	for i, chk := range chunks {
+		ragChunks[i] = RAGChunk{
+			ChunkIndex: i,
+			Content:    chk,
+			Embedding:  allEmbeddings[i],
+		}
+	}
+
+	docID, err := SaveRAGDocument(filename, embeddingModel, ragChunks)
+	if err != nil {
+		emit(ndjsonEvent{"type": "error", "message": fmt.Sprintf("Database save failed: %v", err)})
+		return
+	}
+
+	emit(ndjsonEvent{"type": "done", "document_id": docID, "chunks": len(ragChunks)})
 }
 
 func uploadRAGDocumentHandler(c *gin.Context) {
