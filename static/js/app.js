@@ -8883,12 +8883,19 @@ function startCodeBenchmark() {
   }
 
   const btn = document.getElementById('code-bench-run-btn');
+  const stopBtn = document.getElementById('code-bench-stop-btn');
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-[10px]"></i> RUNNING…'; }
+  if (stopBtn) stopBtn.classList.remove('hidden');
 
   appendCodeConsole('Connecting to server…');
 
   const params = new URLSearchParams({ model, langs: langs.join(','), judge_model: judgeModel });
   codeBenchEventSource = new EventSource(`/api/benchmarks/code/run?${params}`);
+
+  const codeBenchDone = () => {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-play text-[10px]"></i>RUN CODE BENCHMARK'; }
+    if (stopBtn) stopBtn.classList.add('hidden');
+  };
 
   codeBenchEventSource.addEventListener('status', e => {
     appendCodeConsole(e.data);
@@ -8896,22 +8903,34 @@ function startCodeBenchmark() {
 
   codeBenchEventSource.addEventListener('error', e => {
     appendCodeConsole('ERROR: ' + e.data);
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-play text-[10px]"></i>RUN CODE BENCHMARK'; }
+    codeBenchDone();
     codeBenchEventSource?.close();
   });
 
   codeBenchEventSource.addEventListener('done', async e => {
     codeBenchEventSource?.close();
     codeBenchEventSource = null;
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-play text-[10px]"></i>RUN CODE BENCHMARK'; }
+    codeBenchDone();
     await fetchCodeBenchRuns();
   });
 
   codeBenchEventSource.onerror = () => {
     appendCodeConsole('✗ Connection lost — benchmark may have completed or timed out.');
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-play text-[10px]"></i>RUN CODE BENCHMARK'; }
+    codeBenchDone();
     codeBenchEventSource?.close();
   };
+}
+
+function stopCodeBenchmark() {
+  if (codeBenchEventSource) {
+    codeBenchEventSource.close();
+    codeBenchEventSource = null;
+  }
+  appendCodeConsole('⏹ Benchmark stopped by user.');
+  const btn = document.getElementById('code-bench-run-btn');
+  const stopBtn = document.getElementById('code-bench-stop-btn');
+  if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-play text-[10px]"></i>RUN CODE BENCHMARK'; }
+  if (stopBtn) stopBtn.classList.add('hidden');
 }
 
 function copyConsole(id) {
@@ -9145,7 +9164,9 @@ function startHallucinationTest() {
   renderLiveHeatmap(maxK);
 
   const btn = document.getElementById('halluc-run-btn');
+  const stopBtn = document.getElementById('halluc-stop-btn');
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-[10px]"></i> RUNNING…'; }
+  if (stopBtn) stopBtn.classList.remove('hidden');
 
   appendHallucConsole('Connecting to server…');
 
@@ -9153,6 +9174,11 @@ function startHallucinationTest() {
   if (customFiller) params.set('custom_filler', customFiller);
 
   hallucinationEventSource = new EventSource(`/api/benchmarks/hallucination/run?${params}`);
+
+  const hallucDone = () => {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-play text-[10px]"></i>RUN HALLUCINATION TEST'; }
+    if (stopBtn) stopBtn.classList.add('hidden');
+  };
 
   hallucinationEventSource.addEventListener('status', e => {
     appendHallucConsole(e.data);
@@ -9169,14 +9195,14 @@ function startHallucinationTest() {
 
   hallucinationEventSource.addEventListener('error', e => {
     appendHallucConsole('ERROR: ' + e.data);
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-play text-[10px]"></i>RUN HALLUCINATION TEST'; }
+    hallucDone();
     hallucinationEventSource?.close();
   });
 
   hallucinationEventSource.addEventListener('done', async e => {
     hallucinationEventSource?.close();
     hallucinationEventSource = null;
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-play text-[10px]"></i>RUN HALLUCINATION TEST'; }
+    hallucDone();
     try {
       const d = JSON.parse(e.data);
       const statsEl = document.getElementById('halluc-stats');
@@ -9193,9 +9219,21 @@ function startHallucinationTest() {
 
   hallucinationEventSource.onerror = () => {
     appendHallucConsole('✗ Connection lost — test may have completed or timed out.');
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-play text-[10px]"></i>RUN HALLUCINATION TEST'; }
+    hallucDone();
     hallucinationEventSource?.close();
   };
+}
+
+function stopHallucinationTest() {
+  if (hallucinationEventSource) {
+    hallucinationEventSource.close();
+    hallucinationEventSource = null;
+  }
+  appendHallucConsole('⏹ Test stopped by user.');
+  const btn = document.getElementById('halluc-run-btn');
+  const stopBtn = document.getElementById('halluc-stop-btn');
+  if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-play text-[10px]"></i>RUN HALLUCINATION TEST'; }
+  if (stopBtn) stopBtn.classList.add('hidden');
 }
 
 function renderLiveHeatmap(maxK) {

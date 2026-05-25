@@ -1793,9 +1793,14 @@
                   </div>
                 </div>
 
-                <button id="code-bench-run-btn" onclick="startCodeBenchmark()" class="btn btn-sm btn-outline btn-info font-tech tracking-wider w-full gap-2 hover:tech-glow-blue">
-                  <i class="fa-solid fa-play text-[10px]"></i>RUN CODE BENCHMARK
-                </button>
+                <div class="flex gap-2">
+                  <button id="code-bench-run-btn" onclick="startCodeBenchmark()" class="btn btn-sm btn-outline btn-info font-tech tracking-wider flex-1 gap-2 hover:tech-glow-blue">
+                    <i class="fa-solid fa-play text-[10px]"></i>RUN CODE BENCHMARK
+                  </button>
+                  <button id="code-bench-stop-btn" onclick="stopCodeBenchmark()" class="btn btn-sm btn-outline btn-error font-tech tracking-wider gap-2 hidden">
+                    <i class="fa-solid fa-stop text-[10px]"></i>STOP
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1903,9 +1908,14 @@
                   </div>
                 </details>
 
-                <button id="halluc-run-btn" onclick="startHallucinationTest()" class="btn btn-sm btn-outline btn-warning font-tech tracking-wider w-full gap-2">
-                  <i class="fa-solid fa-play text-[10px]"></i>RUN HALLUCINATION TEST
-                </button>
+                <div class="flex gap-2">
+                  <button id="halluc-run-btn" onclick="startHallucinationTest()" class="btn btn-sm btn-outline btn-warning font-tech tracking-wider flex-1 gap-2">
+                    <i class="fa-solid fa-play text-[10px]"></i>RUN HALLUCINATION TEST
+                  </button>
+                  <button id="halluc-stop-btn" onclick="stopHallucinationTest()" class="btn btn-sm btn-outline btn-error font-tech tracking-wider gap-2 hidden">
+                    <i class="fa-solid fa-stop text-[10px]"></i>STOP
+                  </button>
+                </div>
               </div>
             </div>
 
