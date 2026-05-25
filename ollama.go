@@ -269,7 +269,7 @@ func (c *OllamaClient) CopyModel(source, destination string) error {
 	return nil
 }
 
-// StreamPullModel issues a pull request and writes the raw bytes stream to an output channel
+// StreamPullModel issues a pull request and writes the raw bytes stream to an output channel.
 func (c *OllamaClient) StreamPullModel(ctx context.Context, name string) (io.ReadCloser, error) {
 	reqBody, err := json.Marshal(map[string]interface{}{
 		"name":   name,
