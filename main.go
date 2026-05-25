@@ -3953,6 +3953,13 @@ func runCodeBenchmarkSSEHandler(c *gin.Context) {
 				c.SSEvent("error", fmt.Sprintf("panic: %v", r))
 				c.Writer.Flush()
 			}
+			// Ensure models are unloaded even if stopped early or panicked
+			go func() {
+				_ = client.UnloadModel(model)
+				if judgeModel != "same" && judgeModel != "" && judgeModel != model {
+					_ = client.UnloadModel(judgeModel)
+				}
+			}()
 		}()
 
 		emit := func(msg string) {
@@ -4039,6 +4046,15 @@ func runCodeBenchmarkSSEHandler(c *gin.Context) {
 		}
 
 		emit(fmt.Sprintf("✓ Complete — Avg quality: %.1f/10 | Avg TPS: %.1f | Score: %s | Syntax: %d/%d", avgQ, avgTPS, overallScore, passSyntax, len(results)))
+
+		// Unload model(s) from VRAM now that the benchmark is done
+		emit("⏹ Unloading model from VRAM…")
+		go func() {
+			_ = client.UnloadModel(model)
+			if judgeModel != "same" && judgeModel != "" && judgeModel != model {
+				_ = client.UnloadModel(judgeModel)
+			}
+		}()
 
 		doneBytes, _ := json.Marshal(map[string]interface{}{
 			"id":                   id,
@@ -4130,6 +4146,11 @@ func runHallucinationSSEHandler(c *gin.Context) {
 	}
 
 	c.Stream(func(w io.Writer) bool {
+		defer func() {
+			// Ensure model is unloaded even on stop/error
+			go client.UnloadModel(model)
+		}()
+
 		hemit := func(msg string) {
 			c.SSEvent("status", msg)
 			c.Writer.Flush()
@@ -4307,6 +4328,10 @@ func runHallucinationSSEHandler(c *gin.Context) {
 		}
 
 		hemit(fmt.Sprintf("✓ Complete — Recall: %.1f%% | Hallucinations: %.1f%%", recallPct, hallPct))
+
+		// Unload model from VRAM
+		hemit("⏹ Unloading model from VRAM…")
+		go client.UnloadModel(model)
 
 		doneBytes, _ := json.Marshal(map[string]interface{}{
 			"id":                id,
