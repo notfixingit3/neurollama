@@ -4109,6 +4109,66 @@ function renderChatSessions() {
   }).join('');
 }
 
+// ── Chat FTS5 Search ──────────────────────────────────────────────────────────
+let chatSearchTimer = null;
+
+function onChatSearch(query) {
+  const clearBtn  = document.getElementById('chat-search-clear');
+  const resultsEl = document.getElementById('chat-search-results');
+  const listEl    = document.getElementById('chat-sessions-list');
+  if (clearBtn) clearBtn.classList.toggle('hidden', !query);
+  clearTimeout(chatSearchTimer);
+  if (!query.trim()) {
+    if (resultsEl) { resultsEl.classList.add('hidden'); resultsEl.innerHTML = ''; }
+    if (listEl) listEl.classList.remove('hidden');
+    return;
+  }
+  chatSearchTimer = setTimeout(() => runChatSearch(query.trim()), 300);
+}
+
+async function runChatSearch(query) {
+  const resultsEl = document.getElementById('chat-search-results');
+  const listEl    = document.getElementById('chat-sessions-list');
+  if (!resultsEl) return;
+  resultsEl.classList.remove('hidden');
+  if (listEl) listEl.classList.add('hidden');
+  resultsEl.innerHTML = '<div class="text-[#4c566a] py-2 text-center animate-pulse">Searching…</div>';
+  try {
+    const res = await fetch(`/api/chats/search?q=${encodeURIComponent(query)}`);
+    if (!res.ok) throw new Error('Search failed');
+    renderChatSearchResults(await res.json());
+  } catch {
+    resultsEl.innerHTML = '<div class="text-[#bf616a] py-2 text-center">Search failed</div>';
+  }
+}
+
+function renderChatSearchResults(results) {
+  const resultsEl = document.getElementById('chat-search-results');
+  if (!resultsEl) return;
+  if (!results || results.length === 0) {
+    resultsEl.innerHTML = '<div class="text-[#4c566a] py-2 text-center">No results</div>';
+    return;
+  }
+  resultsEl.innerHTML = results.map(r => {
+    // HTML-escape the raw snippet, then safely swap our server-side markers for <mark> tags
+    const snippet = escapeHTML(r.snippet)
+      .replace(/\{\{HL_S\}\}/g, '<mark class="chat-search-mark">')
+      .replace(/\{\{HL_E\}\}/g, '</mark>');
+    return `
+      <button onclick="switchChatSession(${r.chat_id}); clearChatSearch();"
+        class="w-full text-left p-2 rounded-lg bg-[#2e3440]/60 hover:bg-[#3b4252] border border-[#4c566a]/30 hover:border-[#88c0d0]/40 transition-all">
+        <div class="text-[#d8dee9] text-[10px] truncate font-semibold mb-0.5">${escapeHTML(r.chat_title)}</div>
+        <div class="text-[#9ca3af] text-[9px] leading-snug line-clamp-2">${snippet}</div>
+      </button>
+    `;
+  }).join('');
+}
+
+function clearChatSearch() {
+  const input = document.getElementById('chat-search-input');
+  if (input) { input.value = ''; onChatSearch(''); }
+}
+
 async function startNewChatSession(showFeedback = true) {
   const model = document.getElementById('chat-model-select').value;
   if (!model) {

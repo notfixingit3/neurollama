@@ -40,6 +40,7 @@
       <div class="flex items-center gap-2 w-[190px] min-w-0">
         <span class="text-[#88c0d0] shrink-0">ACTIVE_SRV:</span>
         <span id="global-active-server-name" class="text-[#e5e9f0] font-semibold truncate min-w-0">---</span>
+        <span id="ollama-version-dot" class="h-2 w-2 rounded-full shrink-0 hidden cursor-default transition-colors" title=""></span>
       </div>
       <div class="h-4 w-[1px] bg-[#4c566a] shrink-0"></div>
       <div class="flex items-center gap-2 w-[110px] shrink-0">
@@ -221,18 +222,33 @@
           <div id="inventory-hub-container" class="hidden">
             <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col gap-4">
 
-              <!-- Header + source toggle -->
-              <div class="flex items-center justify-between pb-2 border-b border-[#4c566a]/40">
+              <!-- Header + source toggle + browse links -->
+              <div class="flex items-center justify-between pb-2 border-b border-[#4c566a]/40 flex-wrap gap-2">
                 <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
                   <i class="fa-solid fa-compass mr-2"></i>Model Hub
                 </h2>
-                <div class="flex gap-1">
-                  <button id="pull-src-ollama" onclick="setPullSource('ollama')" class="bench-type-btn bench-type-btn-active">
-                    <i class="fa-solid fa-box mr-1"></i>Ollama
-                  </button>
-                  <button id="pull-src-hf" onclick="setPullSource('hf')" class="bench-type-btn">
-                    <i class="fa-brands fa-python mr-1"></i>HuggingFace
-                  </button>
+                <div class="flex items-center gap-2 flex-wrap">
+                  <!-- Browse external libraries -->
+                  <div class="flex gap-1">
+                    <a href="https://ollama.com/library" target="_blank" rel="noopener"
+                       class="btn btn-xs font-tech text-[9px] px-2 h-6 min-h-0 border-[#4c566a] text-[#88c0d0] hover:border-[#88c0d0] hover:bg-[#88c0d0]/10 uppercase gap-1">
+                      <i class="fa-solid fa-arrow-up-right-from-square text-[8px]"></i>Ollama Library
+                    </a>
+                    <a href="https://huggingface.co/models?library=gguf&sort=trending" target="_blank" rel="noopener"
+                       class="btn btn-xs font-tech text-[9px] px-2 h-6 min-h-0 border-[#4c566a] text-[#ebcb8b] hover:border-[#ebcb8b] hover:bg-[#ebcb8b]/10 uppercase gap-1">
+                      <i class="fa-solid fa-arrow-up-right-from-square text-[8px]"></i>HF GGUF Models
+                    </a>
+                  </div>
+                  <div class="w-px h-4 bg-[#4c566a]/60"></div>
+                  <!-- Source toggle -->
+                  <div class="flex gap-1">
+                    <button id="pull-src-ollama" onclick="setPullSource('ollama')" class="bench-type-btn bench-type-btn-active">
+                      <i class="fa-solid fa-box mr-1"></i>Ollama
+                    </button>
+                    <button id="pull-src-hf" onclick="setPullSource('hf')" class="bench-type-btn">
+                      <i class="fa-brands fa-python mr-1"></i>HuggingFace
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -328,6 +344,19 @@
                   <i class="fa-solid fa-plus text-[10px]"></i> NEW
                 </button>
               </div>
+
+              <!-- Chat search -->
+              <div class="relative mb-2">
+                <input id="chat-search-input" type="text" placeholder="Search chats…"
+                  class="input input-xs w-full bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none pl-6 pr-6"
+                  oninput="onChatSearch(this.value)" autocomplete="off" spellcheck="false">
+                <i class="fa-solid fa-magnifying-glass absolute left-2 top-1/2 -translate-y-1/2 text-[#4c566a] text-[10px] pointer-events-none"></i>
+                <button id="chat-search-clear" onclick="clearChatSearch()" class="hidden absolute right-1.5 top-1/2 -translate-y-1/2 text-[#4c566a] hover:text-[#d8dee9] leading-none p-0" title="Clear search">
+                  <i class="fa-solid fa-xmark text-[10px]"></i>
+                </button>
+              </div>
+              <!-- Search results (visible while a query is active) -->
+              <div id="chat-search-results" class="hidden overflow-y-auto max-h-48 space-y-1 mb-2 pr-1 font-mono text-xs"></div>
 
               <!-- Chats list container -->
               <div id="chat-sessions-list" class="overflow-y-auto max-h-64 space-y-2 pr-1 font-mono text-xs">
@@ -1043,22 +1072,31 @@
               </a>
             </div>
           </div>
+          <!-- Ollama release notes tiles -->
+          <div id="ollama-release-tiles"></div>
         </div>
 
         <!-- PANEL: DATA (cache + backup/restore) -->
         <div id="ws-panel-data" class="ws-panel hidden flex flex-col gap-4">
 
-          <!-- LOCAL STORAGE -->
+          <!-- BROWSER LOCAL STORAGE -->
           <div class="tech-panel rounded-xl px-5 py-4">
-            <div class="flex items-center gap-2 mb-3">
-              <i class="fa-solid fa-hard-drive text-[#88c0d0] text-sm"></i>
-              <h3 class="text-[#88c0d0] font-mono font-bold text-xs tracking-widest">LOCAL STORAGE</h3>
+            <div class="flex items-center justify-between mb-1">
+              <div class="flex items-center gap-2">
+                <i class="fa-solid fa-browser text-[#88c0d0] text-sm"></i>
+                <h3 class="text-[#88c0d0] font-mono font-bold text-xs tracking-widest">BROWSER STORAGE</h3>
+              </div>
             </div>
+            <p class="font-mono text-[10px] text-[#4c566a] mb-3 leading-relaxed">
+              Ephemeral data stored in <span class="text-[#81a1c1]">this browser only</span> — not in the SQLite database and not synced across devices.
+              Clearing browser data or using a different browser will reset these.
+              All persistent data (chats, benchmarks, nodes, presets) lives in the SQLite database below.
+            </p>
             <div class="flex flex-col divide-y divide-[#3b4252]">
               <div class="flex items-center justify-between py-3">
                 <div>
                   <div class="font-mono text-xs text-[#d8dee9]">Model Cache</div>
-                  <div id="cache-model-desc" class="font-mono text-[10px] text-[#4c566a] mt-0.5">Stale-while-revalidate model list</div>
+                  <div id="cache-model-desc" class="font-mono text-[10px] text-[#4c566a] mt-0.5">Stale-while-revalidate model list for fast page loads</div>
                 </div>
                 <button onclick="clearModelCache()" class="btn btn-xs font-mono border-[#4c566a] text-[#ebcb8b] hover:border-[#ebcb8b]">
                   <i class="fa-solid fa-eraser mr-1"></i>Clear
@@ -1067,7 +1105,7 @@
               <div class="flex items-center justify-between py-3">
                 <div>
                   <div class="font-mono text-xs text-[#d8dee9]">Preferences</div>
-                  <div class="font-mono text-[10px] text-[#4c566a] mt-0.5">Workspace, model selections, sidebar states</div>
+                  <div class="font-mono text-[10px] text-[#4c566a] mt-0.5">Active workspace, model selections, sidebar states, prompt history</div>
                 </div>
                 <button onclick="clearPreferences()" class="btn btn-xs font-mono border-[#4c566a] text-[#ebcb8b] hover:border-[#ebcb8b]">
                   <i class="fa-solid fa-eraser mr-1"></i>Clear
@@ -1075,8 +1113,8 @@
               </div>
               <div class="flex items-center justify-between py-3">
                 <div>
-                  <div class="font-mono text-xs text-[#bf616a]">Wipe All Local Data</div>
-                  <div class="font-mono text-[10px] text-[#4c566a] mt-0.5">Removes all NEUROLLAMA entries from localStorage</div>
+                  <div class="font-mono text-xs text-[#bf616a]">Wipe All Browser Data</div>
+                  <div class="font-mono text-[10px] text-[#4c566a] mt-0.5">Removes every NEUROLLAMA key from localStorage</div>
                 </div>
                 <button onclick="wipeAllLocalStorage()" class="btn btn-xs font-mono border-[#bf616a] text-[#bf616a] hover:bg-[#bf616a]/10">
                   <i class="fa-solid fa-trash mr-1"></i>Wipe
@@ -1600,7 +1638,19 @@
 
                 <!-- Model select -->
                 <div class="form-control">
-                  <label class="label py-1"><span class="label-text text-[11px] font-mono text-[#4c566a] uppercase">Model</span></label>
+                  <label class="label py-1 flex items-center justify-between">
+                    <span class="label-text text-[11px] font-mono text-[#4c566a] uppercase">Model</span>
+                    <div class="flex items-center gap-1">
+                      <button id="nvn-filter-node-a-btn" onclick="toggleNvnNodeAFilter()"
+                              class="badge badge-outline font-tech text-[9px] px-2 py-2.5 border-[#4c566a] text-[#4c566a] hover:border-[#88c0d0] hover:text-[#88c0d0] cursor-pointer select-none transition-colors uppercase gap-1">
+                        <i class="fa-solid fa-filter text-[7px]"></i>Node A
+                      </button>
+                      <button id="nvn-filter-both-btn" onclick="toggleNvnBothFilter()"
+                              class="badge badge-outline font-tech text-[9px] px-2 py-2.5 border-[#4c566a] text-[#4c566a] hover:border-[#88c0d0] hover:text-[#88c0d0] cursor-pointer select-none transition-colors uppercase gap-1">
+                        <i class="fa-solid fa-link-slash text-[7px]"></i>A &amp; B
+                      </button>
+                    </div>
+                  </label>
                   <select id="nvn-model-select" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none text-[#d8dee9] w-full" onchange="updateNvnAvailability()">
                     <option value="">-- Loading models… --</option>
                   </select>
@@ -1610,7 +1660,7 @@
                 <div class="form-control">
                   <label class="label py-1"><span class="label-text text-[11px] font-mono text-[#4c566a] uppercase">Node A</span></label>
                   <div class="flex items-center gap-2">
-                    <select id="nvn-node-a" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none text-[#d8dee9] flex-1" onchange="updateNvnAvailability()">
+                    <select id="nvn-node-a" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none text-[#d8dee9] flex-1" onchange="populateNvnModelSelect()">
                       <option value="">-- Select node --</option>
                     </select>
                     <span id="nvn-avail-a" class="text-[10px] font-mono shrink-0 w-5 text-center">—</span>
@@ -1621,7 +1671,7 @@
                 <div class="form-control">
                   <label class="label py-1"><span class="label-text text-[11px] font-mono text-[#4c566a] uppercase">Node B</span></label>
                   <div class="flex items-center gap-2">
-                    <select id="nvn-node-b" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none text-[#d8dee9] flex-1" onchange="updateNvnAvailability()">
+                    <select id="nvn-node-b" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none text-[#d8dee9] flex-1" onchange="populateNvnModelSelect()">
                       <option value="">-- Select node --</option>
                     </select>
                     <span id="nvn-avail-b" class="text-[10px] font-mono shrink-0 w-5 text-center">—</span>
@@ -1654,19 +1704,47 @@
               </div>
             </div>
 
-            <!-- Right: Results (8 cols) -->
-            <div class="lg:col-span-8 flex flex-col">
-              <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col h-full">
-                <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] mb-4 pb-2 border-b border-[#4c566a]/40">
+            <!-- Right: Win/Loss Board + Results stacked (8 cols) -->
+            <div class="lg:col-span-8 flex flex-col gap-4">
+
+              <!-- Win / Loss Board (compact) -->
+              <div class="tech-panel tech-header-accent rounded-xl p-3 flex flex-col gap-2">
+                <div class="flex items-center justify-between pb-1.5 border-b border-[#4c566a]/40">
+                  <h2 class="text-xs font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
+                    <i class="fa-solid fa-trophy mr-1.5"></i>Win / Loss Board
+                  </h2>
+                  <button onclick="loadNvnLeaderboard()" class="btn btn-xs font-tech text-[9px] px-2 h-5 min-h-0 border-[#4c566a] text-[#4c566a] hover:text-[#d8dee9] hover:border-[#d8dee9] uppercase gap-1">
+                    <i class="fa-solid fa-rotate-right text-[8px]"></i>Refresh
+                  </button>
+                </div>
+                <div id="nvn-leaderboard-body">
+                  <div class="text-center text-[#4c566a] font-mono text-[10px] py-2 italic">No matches yet — run a comparison to start tracking wins.</div>
+                </div>
+                <!-- Match history drawer -->
+                <div id="nvn-match-drawer" class="hidden border-t border-[#4c566a]/40 pt-2 flex flex-col gap-1.5">
+                  <div class="flex items-center justify-between">
+                    <span id="nvn-drawer-title" class="text-[10px] font-tech uppercase text-[#88c0d0] tracking-wider"></span>
+                    <button onclick="closeNvnDrawer()" class="btn btn-xs font-tech text-[9px] px-1.5 h-5 min-h-0 border-[#4c566a] text-[#4c566a] hover:text-[#bf616a] hover:border-[#bf616a]">
+                      <i class="fa-solid fa-xmark"></i>
+                    </button>
+                  </div>
+                  <div id="nvn-match-list" class="max-h-72 overflow-y-auto scrollbar-thin space-y-1.5 pr-0.5"></div>
+                </div>
+              </div>
+
+              <!-- Comparison Results -->
+              <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col">
+                <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] mb-3 pb-2 border-b border-[#4c566a]/40">
                   <i class="fa-solid fa-chart-bar mr-2"></i>Comparison Results
                 </h2>
-                <div id="nvn-results" class="flex-1 flex items-center justify-center">
-                  <div class="text-center text-[#4c566a] italic font-mono text-sm">
-                    <i class="fa-solid fa-code-compare text-4xl mb-3 block opacity-20"></i>
+                <div id="nvn-results" class="flex items-center justify-center min-h-[80px]">
+                  <div class="text-center text-[#4c566a] italic font-mono text-xs">
+                    <i class="fa-solid fa-code-compare text-2xl mb-2 block opacity-20"></i>
                     Results will appear here after the comparison runs.
                   </div>
                 </div>
               </div>
+
             </div>
 
           </div>
@@ -1898,9 +1976,15 @@
     <div class="flex items-center gap-4">
       <span>© 2026 NEUROLLAMA // MIT License</span>
       <span class="hidden md:inline text-[#4c566a]">//</span>
-      <span class="hidden md:inline flex items-center gap-1.5">
-        SYSTEM: <span class="h-2 w-2 rounded-full bg-[#a3be8c]"></span> <span class="text-[#a3be8c] font-semibold">STABLE</span>
-      </span>
+      <!-- Dynamic node channel badge + slide-out trigger -->
+      <button id="footer-node-btn" onclick="toggleNodeSlideout()"
+              class="hidden md:flex items-center gap-1.5 hover:text-[#d8dee9] transition-colors group"
+              title="Node channel — click to switch nodes">
+        <span class="text-[#4c566a] group-hover:text-[#d8dee9]/60 transition-colors">NODE:</span>
+        <span id="footer-node-channel-dot" class="h-2 w-2 rounded-full bg-[#4c566a] shrink-0"></span>
+        <span id="footer-node-channel-text" class="font-semibold text-[#4c566a]">—</span>
+        <i id="footer-node-chevron" class="fa-solid fa-chevron-down text-[7px] text-[#4c566a] transition-transform"></i>
+      </button>
     </div>
     <!-- Loaded model indicator -->
     <div class="flex items-center gap-2">
@@ -1932,6 +2016,20 @@
       </a>
     </div>
   </footer>
+
+  <!-- Node Selector Slide-out (anchored above footer left) -->
+  <div id="node-slideout"
+       class="hidden fixed top-20 left-4 z-50 w-72 bg-[#242933] border border-[#4c566a]/80 rounded-xl shadow-2xl font-mono text-xs overflow-hidden">
+    <div class="flex items-center justify-between px-4 py-2.5 border-b border-[#4c566a]/40 bg-[#2e3440]/60">
+      <span class="text-[#88c0d0] font-tech text-[10px] uppercase tracking-widest">
+        <i class="fa-solid fa-server mr-1.5 text-[9px]"></i>Select Node
+      </span>
+      <button onclick="closeNodeSlideout()" class="text-[#4c566a] hover:text-[#d8dee9] transition-colors text-xs">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+    <div id="node-slideout-list" class="p-2 space-y-1 max-h-72 overflow-y-auto"></div>
+  </div>
 
   <!-- Modals -->
 

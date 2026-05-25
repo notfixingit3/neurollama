@@ -29,7 +29,7 @@ import (
 	goPDF "github.com/ledongthuc/pdf"
 )
 
-const appVersion = "v0.2.12"
+const appVersion = "v0.2.13"
 
 var (
 	appStartTime = time.Now()
@@ -360,6 +360,7 @@ func main() {
 
 		// Handlers for v0.0.3 SQLite Persistence & Presets
 		api.GET("/chats", getChatsHandler)
+		api.GET("/chats/search", searchChatsHandler) // FTS5 full-text search (must be before /:id)
 		api.GET("/chats/:id", getChatMessagesHandler)
 		api.POST("/chats", createChatHandler)
 		api.PUT("/chats/:id", updateChatHandler)
@@ -1459,6 +1460,24 @@ func deleteChatHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Chat deleted successfully"})
+}
+
+func searchChatsHandler(c *gin.Context) {
+	q := strings.TrimSpace(c.Query("q"))
+	if q == "" {
+		c.JSON(http.StatusOK, []ChatSearchResult{})
+		return
+	}
+	results, err := SearchChats(q, 25)
+	if err != nil {
+		log.Printf("FTS5 search error for query %q: %v", q, err)
+		c.JSON(http.StatusOK, []ChatSearchResult{})
+		return
+	}
+	if results == nil {
+		results = []ChatSearchResult{}
+	}
+	c.JSON(http.StatusOK, results)
 }
 
 // --- PROMPT PRESET HANDLERS (v0.0.3) ---

@@ -356,11 +356,37 @@ func migrate() error {
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (user_id, key)
 		);`,
+		// FTS5 virtual table for full-text chat search (external content backed by messages)
+		`CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts
+		 USING fts5(content, content='messages', content_rowid='id', tokenize='porter unicode61');`,
+		// Triggers to keep messages_fts in sync with messages
+		`CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+		   INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
+		 END;`,
+		`CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+		   INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.id, old.content);
+		 END;`,
+		`CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
+		   INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.id, old.content);
+		   INSERT INTO messages_fts(rowid, content) VALUES(new.id, new.content);
+		 END;`,
 	}
 
 	for _, q := range queries {
 		if _, err := DB.Exec(q); err != nil {
 			return err
+		}
+	}
+
+	// FTS5 backfill: index existing messages that predate this migration (runs once).
+	var ftsBackfilled string
+	_ = DB.QueryRow(`SELECT value FROM settings WHERE key = 'fts_backfill_done'`).Scan(&ftsBackfilled)
+	if ftsBackfilled != "1" {
+		if _, err := DB.Exec(`INSERT INTO messages_fts(rowid, content) SELECT id, content FROM messages`); err != nil {
+			log.Printf("Warning: FTS5 backfill failed: %v", err)
+		} else {
+			_, _ = DB.Exec(`INSERT OR REPLACE INTO settings (key, value) VALUES ('fts_backfill_done', '1')`)
+			log.Printf("FTS5: messages search index backfilled")
 		}
 	}
 
@@ -1523,4 +1549,78 @@ func SetPreference(userID, key, value string) error {
 func ClearPreferences(userID string) error {
 	_, err := DB.Exec(`DELETE FROM user_preferences WHERE user_id = ?`, userID)
 	return err
+}
+
+// ── FTS5 Chat Search ──────────────────────────────────────────────────────────
+
+// ChatSearchResult is a single FTS5 search hit returned by SearchChats.
+// Snippet contains the matched excerpt with {{HL_S}} / {{HL_E}} markers so the
+// caller can HTML-escape the text and then safely swap them for <mark> tags.
+type ChatSearchResult struct {
+	ChatID    int64  `json:"chat_id"`
+	ChatTitle string `json:"chat_title"`
+	Snippet   string `json:"snippet"`
+	Role      string `json:"role"`
+	CreatedAt string `json:"created_at"`
+}
+
+// sanitizeFTSQuery wraps each whitespace-delimited token in double-quotes so
+// FTS5 operators accidentally present in plain user input are treated as literals.
+func sanitizeFTSQuery(q string) string {
+	words := strings.Fields(q)
+	if len(words) == 0 {
+		return ""
+	}
+	quoted := make([]string, 0, len(words))
+	for _, w := range words {
+		w = strings.ReplaceAll(w, `"`, `""`) // escape any embedded double-quotes
+		quoted = append(quoted, `"`+w+`"`)
+	}
+	return strings.Join(quoted, " ")
+}
+
+// SearchChats runs a full-text search against messages and returns up to limit
+// matching chats, deduplicated by chat_id, ranked best-first.
+func SearchChats(query string, limit int) ([]ChatSearchResult, error) {
+	if limit <= 0 {
+		limit = 25
+	}
+	ftsQuery := sanitizeFTSQuery(query)
+	if ftsQuery == "" {
+		return nil, nil
+	}
+	rows, err := DB.Query(`
+		SELECT m.chat_id, c.title,
+		       snippet(messages_fts, 0, '{{HL_S}}', '{{HL_E}}', '…', 16),
+		       m.role,
+		       datetime(m.created_at, 'localtime')
+		FROM messages_fts
+		JOIN messages m ON messages_fts.rowid = m.id
+		JOIN chats   c ON m.chat_id = c.id
+		WHERE messages_fts MATCH ?
+		ORDER BY rank
+		LIMIT ?
+	`, ftsQuery, limit*5) // fetch extra so dedup doesn't under-fill
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	seen := make(map[int64]struct{})
+	var results []ChatSearchResult
+	for rows.Next() {
+		var r ChatSearchResult
+		if err := rows.Scan(&r.ChatID, &r.ChatTitle, &r.Snippet, &r.Role, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		if _, ok := seen[r.ChatID]; ok {
+			continue // keep only the best-ranked snippet per chat
+		}
+		seen[r.ChatID] = struct{}{}
+		results = append(results, r)
+		if len(results) >= limit {
+			break
+		}
+	}
+	return results, nil
 }

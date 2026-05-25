@@ -381,3 +381,11 @@
   color: #4c566a;
   font-style: italic;
 }
+
+/* FTS5 chat search — highlighted match tokens */
+mark.chat-search-mark {
+  background-color: rgba(235, 203, 139, 0.2);
+  color: #ebcb8b;
+  border-radius: 2px;
+  padding: 0 2px;
+}
