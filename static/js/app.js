@@ -8829,7 +8829,7 @@ function initCodeBenchLangGrid() {
   if (!grid || grid.children.length > 0) return;
   grid.innerHTML = CODE_LANGS.map(l => `
     <label class="flex items-center gap-1.5 cursor-pointer group">
-      <input type="checkbox" class="code-lang-cb checkbox checkbox-xs border-[#4c566a]" value="${l.lang}" checked>
+      <input type="checkbox" class="code-lang-cb checkbox checkbox-xs checkbox-info" value="${l.lang}" checked>
       <span class="text-[10px] font-mono text-[#d8dee9] group-hover:text-[#88c0d0]">
         <i class="${l.icon} mr-0.5 text-[#88c0d0]"></i>${l.label}
       </span>
