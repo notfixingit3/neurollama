@@ -8904,10 +8904,6 @@ function startCodeBenchmark() {
     codeBenchEventSource?.close();
     codeBenchEventSource = null;
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-play text-[10px]"></i>RUN CODE BENCHMARK'; }
-    try {
-      const d = JSON.parse(e.data);
-      appendCodeConsole(`✓ Done — Quality: ${(d.avg_quality_score || 0).toFixed(1)}/10 | TPS: ${(d.avg_tps || 0).toFixed(1)} | Score: ${d.overall_score} | Syntax: ${d.langs_passing_syntax}/${d.langs_total}`);
-    } catch { appendCodeConsole('✓ Benchmark complete.'); }
     await fetchCodeBenchRuns();
   });
 
@@ -8916,6 +8912,27 @@ function startCodeBenchmark() {
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-play text-[10px]"></i>RUN CODE BENCHMARK'; }
     codeBenchEventSource?.close();
   };
+}
+
+function copyConsole(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const text = [...el.children].map(d => d.textContent).join('\n');
+  if (!text.trim()) { showToast('Console is empty', 'warning'); return; }
+  navigator.clipboard.writeText(text)
+    .then(() => showToast('Console copied to clipboard', 'success'))
+    .catch(() => {
+      // Fallback for non-secure contexts
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      showToast('Console copied to clipboard', 'success');
+    });
 }
 
 function consoleLineColor(msg) {
@@ -9162,7 +9179,6 @@ function startHallucinationTest() {
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-play text-[10px]"></i>RUN HALLUCINATION TEST'; }
     try {
       const d = JSON.parse(e.data);
-      appendHallucConsole(`✓ Done — Recall: ${(d.recall_pct || 0).toFixed(1)}% | Hallucinations: ${(d.hallucination_pct || 0).toFixed(1)}%`);
       const statsEl = document.getElementById('halluc-stats');
       if (statsEl) {
         statsEl.innerHTML = `
@@ -9171,7 +9187,7 @@ function startHallucinationTest() {
           <span class="text-[#8fbcbb]">Model: ${escapeHTML(d.model_name || '')}</span>
         `;
       }
-    } catch { appendHallucConsole('✓ Test complete.'); }
+    } catch { /* ignore */ }
     await fetchHallucinationRuns();
   });
 
