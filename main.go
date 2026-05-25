@@ -3804,7 +3804,7 @@ func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judge
 		qualityScore := 0.0
 
 		if jErr == nil {
-			var jBuilder strings.Builder
+			var jRespBuilder, jThinkBuilder strings.Builder
 			jScanner := newStreamScanner(jStream)
 			for jScanner.Scan() {
 				line := jScanner.Bytes()
@@ -3816,29 +3816,46 @@ func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judge
 					Thinking string `json:"thinking"`
 				}
 				if json.Unmarshal(line, &chunk) == nil {
-					// Some thinking models (e.g. Gemma4) emit structured output in the
-					// thinking field rather than response — capture both so we don't miss it.
-					jBuilder.WriteString(chunk.Thinking)
-					jBuilder.WriteString(chunk.Response)
+					jRespBuilder.WriteString(chunk.Response)
+					jThinkBuilder.WriteString(chunk.Thinking)
 				}
 			}
 			_ = jStream.Close()
 
-			// Strip <think>…</think> blocks emitted by reasoning models before JSON extraction
-			raw := stripThinkBlocks(strings.TrimSpace(jBuilder.String()))
-			// Extract JSON object from response (may have surrounding prose)
-			if start := strings.Index(raw, "{"); start != -1 {
-				if end := strings.LastIndex(raw, "}"); end > start {
-					raw = raw[start : end+1]
-				}
-			}
+			respStr  := strings.TrimSpace(jRespBuilder.String())
+			thinkStr := strings.TrimSpace(jThinkBuilder.String())
+			logFunc(fmt.Sprintf("[%s] Judge raw: resp=%dB think=%dB | resp[:120]: %.120s", t.Label, len(respStr), len(thinkStr), respStr))
+
+			// Try each source in priority order: response-only, thinking-only, combined.
+			// For each candidate: strip think-tags, find the last valid {...} JSON block.
 			var jr struct {
 				Correctness   float64 `json:"correctness"`
 				Completeness  float64 `json:"completeness"`
 				Style         float64 `json:"style"`
 				BriefCritique string  `json:"brief_critique"`
 			}
-			if jParseErr := json.Unmarshal([]byte(raw), &jr); jParseErr == nil {
+			parsed := false
+			for _, candidate := range []string{respStr, thinkStr, thinkStr + "\n" + respStr} {
+				stripped := stripThinkBlocks(candidate)
+				// Walk backwards to find the last valid JSON object
+				end := strings.LastIndex(stripped, "}")
+				for end > 0 && !parsed {
+					start := strings.LastIndex(stripped[:end+1], "{")
+					if start < 0 {
+						break
+					}
+					if json.Unmarshal([]byte(stripped[start:end+1]), &jr) == nil {
+						parsed = true
+						break
+					}
+					end = strings.LastIndex(stripped[:end], "}")
+				}
+				if parsed {
+					break
+				}
+			}
+
+			if parsed {
 				judgeResult = map[string]interface{}{
 					"correctness":    math.Round(jr.Correctness*10) / 10,
 					"completeness":   math.Round(jr.Completeness*10) / 10,
@@ -3848,7 +3865,12 @@ func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judge
 				// Weighted: correctness 50%, completeness 30%, style 20%
 				qualityScore = math.Round((jr.Correctness*0.5+jr.Completeness*0.3+jr.Style*0.2)*10) / 10
 			} else {
-				judgeResult["brief_critique"] = fmt.Sprintf("parse error: %v", jParseErr)
+				snippet := respStr + thinkStr
+				if len(snippet) > 200 {
+					snippet = snippet[:200]
+				}
+				logFunc(fmt.Sprintf("[%s] ✗ Judge parse failed — raw: %.200s", t.Label, snippet))
+				judgeResult["brief_critique"] = "parse failed"
 			}
 		}
 

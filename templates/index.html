@@ -1806,6 +1806,15 @@
 
             <!-- Right: Results -->
             <div class="lg:col-span-9 flex flex-col gap-4">
+              <!-- Language Leaderboard -->
+              <div id="code-lang-leaderboard-panel" class="hidden tech-panel tech-header-accent rounded-xl p-3 flex flex-col gap-2">
+                <div class="flex items-center gap-2">
+                  <i class="fa-solid fa-medal text-[#ebcb8b] text-[10px]"></i>
+                  <h2 class="text-[10px] font-tech font-bold uppercase tracking-wider text-[#4c566a]">Top Model per Language</h2>
+                </div>
+                <div id="code-lang-leaderboard"></div>
+              </div>
+
               <!-- Console -->
               <div class="tech-panel rounded-xl p-3 flex flex-col gap-2">
                 <div class="flex items-center justify-between">
@@ -1816,14 +1825,6 @@
                   </button>
                 </div>
                 <div id="code-bench-console" class="font-mono text-[9px] text-[#a3be8c] overflow-y-auto h-44 space-y-0.5 leading-relaxed"></div>
-              </div>
-
-              <!-- Language Leaderboard -->
-              <div id="code-lang-leaderboard-panel" class="hidden tech-panel tech-header-accent rounded-xl p-4 flex flex-col gap-3">
-                <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
-                  <i class="fa-solid fa-medal mr-2"></i>Top Model per Language
-                </h2>
-                <div id="code-lang-leaderboard" class="overflow-x-auto"></div>
               </div>
 
               <!-- Run history -->

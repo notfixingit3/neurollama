@@ -9036,32 +9036,37 @@ function renderLangLeaderboard() {
     node:'Node.js', bash:'Bash', sh:'sh (POSIX)', rust:'Rust', php:'PHP', ruby:'Ruby', c:'C', sql:'SQL' };
   const activeLangs = langOrder.filter(l => leaders[l]);
 
+  // Compact badge-grid: languages as rows, nodes as column groups
+  // Each cell = score badge + short model chip
   el.innerHTML = `
-    <table class="table table-xs w-full font-mono text-[10px]">
-      <thead>
-        <tr class="text-[#4c566a] uppercase text-[9px]">
-          <th class="w-24">Language</th>
-          ${nodes.map(n => `<th class="text-[#88c0d0]">${escapeHTML(n)}</th>`).join('')}
-        </tr>
-      </thead>
-      <tbody>
-        ${activeLangs.map(lang => `
-          <tr class="border-b border-[#4c566a]/10 hover:bg-[#3b4252]/20">
-            <td class="text-[#d8dee9] font-semibold">${langLabels[lang] || lang}</td>
-            ${nodes.map(node => {
-              const entry = leaders[lang]?.[node];
-              if (!entry) return `<td class="text-[#4c566a]">—</td>`;
-              const shortModel = entry.model.length > 22 ? entry.model.slice(0, 20) + '…' : entry.model;
-              return `<td>
-                <div class="flex items-center gap-2">
-                  <span class="font-bold" style="color:${qColor(entry.quality_score)}">${entry.quality_score.toFixed(1)}</span>
-                  <span class="text-[#8fbcbb] truncate max-w-[120px]" title="${escapeHTML(entry.model)}">${escapeHTML(shortModel)}</span>
-                </div>
-              </td>`;
-            }).join('')}
-          </tr>`).join('')}
-      </tbody>
-    </table>
+    <div class="grid gap-x-4 gap-y-1" style="grid-template-columns: 5.5rem ${nodes.map(() => '1fr').join(' ')}">
+      <!-- header -->
+      <div class="text-[8px] font-tech uppercase text-[#4c566a] tracking-wider pb-1"></div>
+      ${nodes.map(n => `<div class="text-[8px] font-tech uppercase text-[#88c0d0] tracking-wider pb-1 truncate" title="${escapeHTML(n)}">${escapeHTML(n)}</div>`).join('')}
+      <!-- rows -->
+      ${activeLangs.map(lang => {
+        const hasAny = nodes.some(n => leaders[lang]?.[n]);
+        if (!hasAny) return '';
+        return `
+          <div class="text-[9px] font-mono text-[#d8dee9] font-semibold flex items-center py-0.5">${langLabels[lang] || lang}</div>
+          ${nodes.map(node => {
+            const entry = leaders[lang]?.[node];
+            if (!entry) return `<div class="flex items-center py-0.5"><span class="text-[8px] text-[#4c566a]">—</span></div>`;
+            const q = entry.quality_score;
+            const bgCls = q >= 8 ? 'bg-[#a3be8c]/20 text-[#a3be8c] border-[#a3be8c]/40'
+                        : q >= 6 ? 'bg-[#ebcb8b]/20 text-[#ebcb8b] border-[#ebcb8b]/40'
+                        : q >= 4 ? 'bg-[#d08770]/20 text-[#d08770] border-[#d08770]/40'
+                        : q > 0  ? 'bg-[#bf616a]/20 text-[#bf616a] border-[#bf616a]/40'
+                        :          'bg-[#4c566a]/20 text-[#4c566a] border-[#4c566a]/30';
+            const shortModel = entry.model.replace(/:latest$/, '');
+            const display = shortModel.length > 18 ? shortModel.slice(0, 16) + '…' : shortModel;
+            return `<div class="flex items-center gap-1.5 py-0.5">
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded border text-[8px] font-bold font-mono ${bgCls}">${q.toFixed(1)}</span>
+              <span class="text-[8px] font-mono text-[#8fbcbb] truncate" title="${escapeHTML(entry.model)}">${escapeHTML(display)}</span>
+            </div>`;
+          }).join('')}`;
+      }).join('')}
+    </div>
   `;
 }
 
