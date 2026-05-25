@@ -40,6 +40,196 @@ let presets = [];
 let selectedImages = [];
 let speedHistory = [];
 
+// ── Searchable select combobox ──────────────────────────────────────────────
+// Wraps a native <select> with a keyboard-searchable dropdown.
+// The hidden <select> stays as the source of truth; all existing .value reads
+// and 'change' event listeners on it continue to work unchanged.
+function makeSearchableSelect(selectEl) {
+  if (!selectEl || selectEl._ssInit) return null;
+  selectEl._ssInit = true;
+
+  const isXs = selectEl.classList.contains('select-xs');
+
+  // Wrapper ---------------------------------------------------------------
+  const wrapper = document.createElement('div');
+  wrapper.className = 'ss-wrapper';
+  selectEl.parentNode.insertBefore(wrapper, selectEl);
+  wrapper.appendChild(selectEl);
+  selectEl.style.display = 'none';
+
+  // Trigger ---------------------------------------------------------------
+  const trigger = document.createElement('div');
+  trigger.className = 'ss-trigger' + (isXs ? ' xs' : '');
+  trigger.tabIndex = 0;
+  trigger.setAttribute('role', 'combobox');
+  trigger.setAttribute('aria-haspopup', 'listbox');
+  trigger.setAttribute('aria-expanded', 'false');
+
+  const triggerText = document.createElement('span');
+  triggerText.className = 'ss-trigger-text';
+
+  const chevron = document.createElement('span');
+  chevron.className = 'ss-chevron';
+  chevron.innerHTML = '<i class="fa-solid fa-chevron-down"></i>';
+
+  trigger.appendChild(triggerText);
+  trigger.appendChild(chevron);
+  wrapper.appendChild(trigger);
+
+  // Panel -----------------------------------------------------------------
+  const panel = document.createElement('div');
+  panel.className = 'ss-panel';
+  panel.setAttribute('role', 'listbox');
+
+  const searchWrap = document.createElement('div');
+  searchWrap.className = 'ss-search-wrap';
+
+  const searchInput = document.createElement('input');
+  searchInput.type = 'text';
+  searchInput.className = 'ss-search';
+  searchInput.placeholder = 'Type to filter…';
+  searchInput.setAttribute('autocomplete', 'off');
+  searchInput.setAttribute('spellcheck', 'false');
+  searchWrap.appendChild(searchInput);
+  panel.appendChild(searchWrap);
+
+  const optList = document.createElement('ul');
+  optList.className = 'ss-list';
+  panel.appendChild(optList);
+  wrapper.appendChild(panel);
+
+  let isOpen = false;
+  let activeIdx = -1;
+
+  function renderOptions(filter) {
+    optList.innerHTML = '';
+    activeIdx = -1;
+    const f = (filter || '').toLowerCase().trim();
+    const all = Array.from(selectEl.options);
+    const visible = f ? all.filter(o => o.text.toLowerCase().includes(f) || o.value.toLowerCase().includes(f)) : all;
+
+    if (visible.length === 0) {
+      const empty = document.createElement('li');
+      empty.className = 'ss-empty';
+      empty.textContent = 'No matches';
+      optList.appendChild(empty);
+      return;
+    }
+
+    visible.forEach(opt => {
+      const li = document.createElement('li');
+      const isSel = opt.value === selectEl.value;
+      li.className = 'ss-option' + (isSel ? ' ss-selected' : '');
+      li.dataset.value = opt.value;
+      li.title = opt.text; // full text tooltip on hover
+      li.setAttribute('role', 'option');
+      li.setAttribute('aria-selected', isSel ? 'true' : 'false');
+
+      // Split "modelname (paramSize)" → name + param badge
+      const paramMatch = opt.text.match(/^(.+?)\s*\((.+?)\)$/);
+      const dispName  = paramMatch ? paramMatch[1] : opt.text;
+      const paramSize = paramMatch && paramMatch[2] !== '?' ? paramMatch[2] : '';
+
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'ss-opt-name';
+      nameSpan.textContent = dispName;
+      li.appendChild(nameSpan);
+
+      if (paramSize) {
+        const paramSpan = document.createElement('span');
+        paramSpan.className = 'ss-opt-param';
+        paramSpan.textContent = paramSize;
+        li.appendChild(paramSpan);
+      }
+
+      li.addEventListener('mousedown', e => {
+        e.preventDefault();
+        selectEl.value = opt.value;
+        selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+        updateTrigger();
+        close();
+      });
+      optList.appendChild(li);
+    });
+  }
+
+  function setActiveItem(idx) {
+    const items = optList.querySelectorAll('.ss-option');
+    items.forEach((el, i) => el.classList.toggle('ss-active', i === idx));
+    if (idx >= 0 && idx < items.length) items[idx].scrollIntoView({ block: 'nearest' });
+    activeIdx = idx;
+  }
+
+  function updateTrigger() {
+    const idx = selectEl.selectedIndex;
+    const opt = idx >= 0 ? selectEl.options[idx] : null;
+    const fullText = (opt && opt.text) ? opt.text : '---';
+    // Show "name (param)" in trigger but strip param from display if it fits better
+    const paramMatch = fullText.match(/^(.+?)\s*\((.+?)\)$/);
+    const dispText  = paramMatch ? paramMatch[1] : fullText;
+    const paramHint = paramMatch && paramMatch[2] !== '?' ? ` (${paramMatch[2]})` : '';
+    triggerText.textContent = dispText;
+    trigger.title = fullText; // tooltip on the whole trigger for full name + param
+  }
+
+  function open() {
+    if (isOpen) return;
+    isOpen = true;
+    panel.classList.add('open');
+    trigger.classList.add('open');
+    chevron.classList.add('open');
+    trigger.setAttribute('aria-expanded', 'true');
+    searchInput.value = '';
+    renderOptions('');
+    const sel = optList.querySelector('.ss-selected');
+    if (sel) sel.scrollIntoView({ block: 'nearest' });
+    requestAnimationFrame(() => searchInput.focus());
+  }
+
+  function close() {
+    if (!isOpen) return;
+    isOpen = false;
+    panel.classList.remove('open');
+    trigger.classList.remove('open');
+    chevron.classList.remove('open');
+    trigger.setAttribute('aria-expanded', 'false');
+    activeIdx = -1;
+  }
+
+  // Events ----------------------------------------------------------------
+  trigger.addEventListener('click', () => isOpen ? close() : open());
+  trigger.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') { e.preventDefault(); open(); }
+  });
+
+  searchInput.addEventListener('input', () => renderOptions(searchInput.value));
+  searchInput.addEventListener('keydown', e => {
+    const items = optList.querySelectorAll('.ss-option');
+    if (e.key === 'Escape') { close(); trigger.focus(); return; }
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActiveItem(Math.min(activeIdx + 1, items.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActiveItem(Math.max(activeIdx - 1, 0)); }
+    else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (activeIdx >= 0 && activeIdx < items.length) items[activeIdx].dispatchEvent(new MouseEvent('mousedown'));
+      else if (items.length === 1) items[0].dispatchEvent(new MouseEvent('mousedown'));
+    }
+  });
+
+  document.addEventListener('click', e => { if (isOpen && !wrapper.contains(e.target)) close(); });
+
+  // Keep display in sync when native value or options change ---------------
+  selectEl.addEventListener('change', () => { updateTrigger(); if (isOpen) renderOptions(searchInput.value); });
+
+  // MutationObserver: fires when innerHTML is replaced (populateModelDropdowns)
+  // Defer one tick so the .value = assignment that follows innerHTML= can run first.
+  new MutationObserver(() => setTimeout(updateTrigger, 0)).observe(selectEl, { childList: true });
+
+  updateTrigger();
+
+  return { open, close, refresh() { updateTrigger(); if (isOpen) renderOptions(searchInput.value); } };
+}
+// ── End searchable select ────────────────────────────────────────────────────
+
 // Initialization
 document.addEventListener('DOMContentLoaded', () => {
   init();
@@ -302,6 +492,20 @@ async function init() {
     activeSystemSubtab = legacySystemTabs[savedWorkspace];
     savedWorkspace = 'system';
   }
+  // Attach searchable combobox to every model dropdown
+  [
+    'chat-model-select',
+    'chat-rag-model-select',
+    'completion-model-select',
+    'builder-base-select',
+    'benchmark-model-select',
+    'optimizer-model-select',
+    'rag-model-select',
+  ].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) makeSearchableSelect(el);
+  });
+
   switchWorkspace(savedWorkspace);
 }
 
@@ -341,6 +545,10 @@ function switchWorkspace(workspace) {
 
   // Tab specific actions
   if (workspace === 'inventory') {
+    // Always clear any lingering cross-node search results so the inventory
+    // shows only the currently active node's models.
+    if (crossNodeSearchQuery) clearCrossNodeSearch(true);
+
     if (!modelsLoaded) {
       // Show any stale data from localStorage immediately while fresh data loads.
       try {
@@ -355,6 +563,10 @@ function switchWorkspace(workspace) {
       } catch { /* corrupt cache — ignore */ }
       // Fetch fresh from server-side cache (instant) then update the table.
       fetchModels();
+    } else {
+      // Models already loaded — re-render to flush any stale DOM state
+      // (e.g. cross-node search results that were just cleared above).
+      renderModels();
     }
   } else if (workspace === 'system') {
     switchSystemSubtab(activeSystemSubtab);
@@ -1193,6 +1405,7 @@ function updateActiveServerUI(srv) {
 
   if (srv) {
     srvName.textContent = srv.name;
+    srvName.title = srv.name;
     const isOnline = srv.status === 'online';
     
     if (isOnline) {
@@ -1208,6 +1421,7 @@ function updateActiveServerUI(srv) {
     }
   } else {
     srvName.textContent = '---';
+    srvName.title = '';
     srvLatency.textContent = '-- ms';
     statusIndicator.className = 'h-2.5 w-2.5 rounded-full bg-[#4c566a] inline-block';
     statusText.textContent = 'NONE';
@@ -1240,6 +1454,8 @@ async function selectServer(id) {
     updateBatchActionsUI();
     clearInspectedModel();
     resetChatSession();
+    // Clear any cross-node search so the inventory shows only the new node's models.
+    if (crossNodeSearchQuery) clearCrossNodeSearch(true);
 
     if (updatedSrv.status === 'online') {
       await fetchModels();
@@ -5976,6 +6192,15 @@ let benchmarkEventSource = null;
 let benchmarkStartTime   = null;
 let currentBenchmarkType = 'standard';
 let currentLbFilter      = 'all';
+let currentScoreFilter   = 'all'; // grade filter: 'S'|'A'|'B'|'C'|'F'|'all'
+
+// Benchmark model-select filters
+let benchUntestedFilter  = false;
+let benchParamSliderIdx  = 7;   // index into PARAM_STEPS; 7 = All
+const PARAM_STEPS  = [0.5, 1, 3, 7, 13, 30, 70, Infinity];
+const PARAM_LABELS = ['≤0.5B', '≤1B', '≤3B', '≤7B', '≤13B', '≤30B', '≤70B', 'All'];
+// Tested model names per benchmark type — populated from leaderboard fetch
+const testedModelsByType = {}; // { standard: Set<name>, embedding: Set<name>, … }
 
 const BENCH_TYPES = ['standard', 'vision', 'embedding', 'longctx', 'reasoning'];
 const BENCH_TYPE_HINTS = {
@@ -6161,22 +6386,80 @@ function highlightBenchLog(rawText) {
 }
 
 // Benchmark model select: filtered by capability
+// Parse a parameter size string like "7B", "13.5B", "670M" → billions (float).
+// Returns null for unknown/unparseable values.
+function parseParamBillions(paramStr) {
+  if (!paramStr || paramStr === '?' || paramStr === 'N/A') return null;
+  const m = paramStr.trim().match(/^([\d.]+)\s*([BbMmKk])?$/);
+  if (!m) return null;
+  const n = parseFloat(m[1]);
+  const unit = (m[2] || 'B').toUpperCase();
+  if (unit === 'M') return n / 1000;
+  if (unit === 'K') return n / 1_000_000;
+  return n; // B or bare number
+}
+
+function onBenchParamSlider(val) {
+  benchParamSliderIdx = parseInt(val, 10);
+  const label = document.getElementById('bench-param-label');
+  if (label) label.textContent = PARAM_LABELS[benchParamSliderIdx] || 'All';
+  populateBenchmarkModelSelect();
+}
+
+async function toggleUntestedFilter() {
+  benchUntestedFilter = !benchUntestedFilter;
+  const btn = document.getElementById('bench-untested-btn');
+  if (btn) btn.classList.toggle('bench-type-btn-active', benchUntestedFilter);
+
+  if (benchUntestedFilter) {
+    // Fetch all benchmark groups to build a complete tested-models map
+    try {
+      const r = await fetch('/api/benchmarks/grouped?type=all');
+      if (r.ok) {
+        const d = await r.json();
+        (d.groups || []).forEach(g => {
+          if (!testedModelsByType[g.benchmark_type]) testedModelsByType[g.benchmark_type] = new Set();
+          testedModelsByType[g.benchmark_type].add(g.model_name);
+        });
+      }
+    } catch (_) { /* silently ignore — filter will just show all */ }
+  }
+
+  populateBenchmarkModelSelect();
+}
+
 function populateBenchmarkModelSelect() {
   const select = document.getElementById('benchmark-model-select');
   if (!select) return;
 
+  // 1. Capability filter (existing)
   let filtered = models;
   if (currentBenchmarkType === 'vision') {
     filtered = models.filter(m => getModelCapabilities(m).includes('vision'));
   } else if (currentBenchmarkType === 'embedding') {
     filtered = models.filter(m => getModelCapabilities(m).includes('embedding'));
   } else {
-    // standard / longctx / reasoning — exclude pure embedding models
     filtered = models.filter(m => getModelCapabilities(m).includes('llm'));
   }
 
+  // 2. Untested filter
+  if (benchUntestedFilter) {
+    const tested = testedModelsByType[currentBenchmarkType] || new Set();
+    filtered = filtered.filter(m => !tested.has(m.name));
+  }
+
+  // 3. Param size filter
+  const maxParams = PARAM_STEPS[benchParamSliderIdx];
+  if (maxParams !== Infinity) {
+    filtered = filtered.filter(m => {
+      const pb = parseParamBillions((m.details && m.details.parameter_size) || '');
+      return pb === null || pb <= maxParams; // unknown size → always include
+    });
+  }
+
   if (filtered.length === 0) {
-    select.innerHTML = '<option value="">-- No compatible models found --</option>';
+    const reason = benchUntestedFilter ? 'untested models' : 'compatible models';
+    select.innerHTML = `<option value="">-- No ${reason} found --</option>`;
     return;
   }
   const currentSelected = select.value || localStorage.getItem('neurollama-bench-model') || '';
@@ -6202,12 +6485,19 @@ function setBenchmarkType(type) {
 
 function setLbFilter(filter) {
   currentLbFilter = filter;
+  currentScoreFilter = 'all'; // clear grade filter when type changes
   localStorage.setItem('neurollama-bench-filter', filter);
   const filters = ['all', ...BENCH_TYPES];
   filters.forEach(f => {
     const btn = document.getElementById(`lb-filter-${f}`);
     if (btn) btn.classList.toggle('bench-type-btn-active', f === filter);
   });
+  fetchBenchmarks();
+}
+
+function setLbScoreFilter(grade) {
+  // Toggle off if clicking the active grade
+  currentScoreFilter = (currentScoreFilter === grade) ? 'all' : grade;
   fetchBenchmarks();
 }
 
@@ -6435,16 +6725,33 @@ async function fetchBenchmarks() {
     if (!response.ok) throw new Error('Failed to fetch benchmark leaderboard');
     const data = await response.json();
 
-    const groupList = data.groups || [];
+    const allGroups = data.groups || [];
     const stats     = data.stats  || {};
+
+    // Keep testedModelsByType current so the untested model filter stays accurate.
+    // Only do a full refresh when the leaderboard is showing all types.
+    if (!currentLbFilter || currentLbFilter === 'all') {
+      BENCH_TYPES.forEach(t => { testedModelsByType[t] = new Set(); });
+      allGroups.forEach(g => {
+        if (!testedModelsByType[g.benchmark_type]) testedModelsByType[g.benchmark_type] = new Set();
+        testedModelsByType[g.benchmark_type].add(g.model_name);
+      });
+      if (benchUntestedFilter) populateBenchmarkModelSelect();
+    }
+
+    // Client-side score-grade filter (applied on top of the server-side type filter)
+    const groupList = (currentScoreFilter && currentScoreFilter !== 'all')
+      ? allGroups.filter(g => g.display_score === currentScoreFilter)
+      : allGroups;
 
     // ── Empty state ──────────────────────────────────────────────────────────
     if (groupList.length === 0) {
-      const label = (currentLbFilter && currentLbFilter !== 'all') ? ` for type "${currentLbFilter}"` : '';
+      const typeLabel  = (currentLbFilter && currentLbFilter !== 'all') ? ` for type "${currentLbFilter}"` : '';
+      const scoreLabel = (currentScoreFilter && currentScoreFilter !== 'all') ? ` with grade "${currentScoreFilter}"` : '';
       tbody.innerHTML = `
         <tr>
           <td colspan="7" class="text-center py-12 text-[#4c566a] italic">
-            No benchmark runs recorded${label}. Select a model on the left to begin.
+            No benchmark runs recorded${typeLabel}${scoreLabel}. Select a model on the left to begin.
           </td>
         </tr>
       `;
@@ -6457,41 +6764,51 @@ async function fetchBenchmarks() {
     const statsBar = document.getElementById('lb-stats-bar');
     if (statsBar && stats.total_runs > 0) {
       const TYPE_META = {
-        standard:  { short:'STD', cls:'text-[#88c0d0]', border:'border-[#88c0d0]/40' },
-        vision:    { short:'VIS', cls:'text-[#b48ead]', border:'border-[#b48ead]'     },
-        embedding: { short:'EMB', cls:'text-[#ebcb8b]', border:'border-[#ebcb8b]/40' },
-        longctx:   { short:'CTX', cls:'text-[#a3be8c]', border:'border-[#a3be8c]/40' },
-        reasoning: { short:'RSN', cls:'text-[#d08770]', border:'border-[#d08770]'     },
+        standard:  { short:'STD', cls:'text-[#88c0d0]', border:'border-[#88c0d0]/40', bg:'bg-[#88c0d0]/8'  },
+        vision:    { short:'VIS', cls:'text-[#b48ead]', border:'border-[#b48ead]/50', bg:'bg-[#b48ead]/8'  },
+        embedding: { short:'EMB', cls:'text-[#ebcb8b]', border:'border-[#ebcb8b]/40', bg:'bg-[#ebcb8b]/8'  },
+        longctx:   { short:'CTX', cls:'text-[#a3be8c]', border:'border-[#a3be8c]/40', bg:'bg-[#a3be8c]/8'  },
+        reasoning: { short:'RSN', cls:'text-[#d08770]', border:'border-[#d08770]/50', bg:'bg-[#d08770]/8'  },
       };
       const SCORE_BADGE = {
         S: 'text-[#a3be8c]', A: 'text-[#88c0d0]',
         B: 'text-[#8fbcbb]', C: 'text-[#ebcb8b]', F: 'text-[#bf616a]',
       };
 
-      const bestChips = (stats.type_bests || []).map(tb => {
-        const meta = TYPE_META[tb.benchmark_type] || { short: tb.benchmark_type.slice(0,3).toUpperCase(), cls:'text-[#4c566a]', border:'border-[#4c566a]' };
-        return `
-          <span class="text-[#4c566a] mx-1">·</span>
-          <span class="border ${meta.border} ${meta.cls} text-[8px] font-mono px-1 py-0.5 rounded mr-1">${meta.short}</span><span class="text-[#e5e9f0] font-semibold truncate max-w-[120px]" style="display:inline-block;vertical-align:middle;" title="${escapeHTML(tb.model_name)}">${escapeHTML(tb.model_name.split(':')[0])}</span><span class="${meta.cls} ml-1 font-bold">${escapeHTML(tb.label)}</span>
-        `;
-      }).join('');
-
+      // Score distribution pills — clickable to filter by grade
       const scoreDist = stats.score_distribution || {};
       const distParts = ['S','A','B','C','F']
         .filter(sc => (scoreDist[sc] || 0) > 0)
-        .map(sc => `<span class="${SCORE_BADGE[sc] || ''} font-mono">${sc}:${scoreDist[sc]}</span>`)
-        .join('<span class="text-[#4c566a]/30 mx-0.5">·</span>');
-      const distHtml = distParts
-        ? `<span class="text-[#4c566a] mx-1">·</span><span class="flex items-center gap-1">${distParts}</span>`
-        : '';
+        .map(sc => {
+          const isActive = currentScoreFilter === sc;
+          const col = SCORE_BADGE[sc] || 'text-[#4c566a]';
+          const activeCls = isActive
+            ? 'ring-1 ring-current bg-current/15 rounded px-1 py-0.5'
+            : 'rounded px-1 py-0.5 hover:bg-current/10 hover:rounded';
+          return `<button onclick="setLbScoreFilter('${sc}')" class="${col} font-mono text-[10px] cursor-pointer transition-colors ${activeCls}" title="${isActive ? 'Clear' : 'Filter by'} grade ${sc}">${sc}:${scoreDist[sc]}</button>`;
+        })
+        .join('<span class="text-[#4c566a]/40 mx-0.5">·</span>');
+
+      // Type-best cards — one per benchmark type, wider with readable model names
+      const bestCards = (stats.type_bests || []).map(tb => {
+        const meta = TYPE_META[tb.benchmark_type] || { short: tb.benchmark_type.slice(0,3).toUpperCase(), cls:'text-[#4c566a]', border:'border-[#4c566a]/40', bg:'bg-[#4c566a]/8' };
+        const modelShort = tb.model_name.split(':')[0];
+        return `
+          <div class="flex items-center gap-1.5 ${meta.bg} border ${meta.border} rounded-md px-2 py-1 shrink-0">
+            <span class="${meta.cls} border ${meta.border} text-[8px] font-mono font-bold px-1 py-0.5 rounded">${meta.short}</span>
+            <span class="text-[#d8dee9] text-[10px] font-mono font-semibold max-w-[150px] truncate" title="${escapeHTML(tb.model_name)}">${escapeHTML(modelShort)}</span>
+            <span class="${meta.cls} text-[10px] font-bold font-mono whitespace-nowrap">${escapeHTML(tb.label)}</span>
+          </div>`;
+      }).join('');
 
       statsBar.innerHTML = `
-        <i class="fa-solid fa-chart-line text-[#4c566a] mr-1.5 text-[9px]"></i>
-        <span class="text-[#4c566a]">${stats.total_runs} run${stats.total_runs !== 1 ? 's' : ''}</span>
-        <span class="text-[#4c566a] mx-1">·</span>
-        <span class="text-[#4c566a]">${stats.unique_models} model${stats.unique_models !== 1 ? 's' : ''}</span>
-        ${bestChips}
-        ${distHtml}
+        <div class="flex items-center gap-3 text-[10px] font-mono text-[#4c566a] mb-2">
+          <span class="flex items-center gap-1"><i class="fa-solid fa-database text-[9px]"></i> ${stats.total_runs} run${stats.total_runs !== 1 ? 's' : ''}</span>
+          <span class="text-[#4c566a]/40">|</span>
+          <span>${stats.unique_models} model${stats.unique_models !== 1 ? 's' : ''}</span>
+          ${distParts ? `<span class="text-[#4c566a]/40">|</span><span class="flex items-center gap-1">${distParts}</span>` : ''}
+        </div>
+        ${bestCards ? `<div class="flex flex-wrap gap-2">${bestCards}</div>` : ''}
       `;
     }
 
@@ -6607,17 +6924,17 @@ async function fetchBenchmarks() {
       html += `
         <tr class="hover:bg-[#3b4252]/20 border-b border-[#4c566a]/20 transition-colors${multiRun ? ' cursor-pointer' : ''}"
             ${multiRun ? `onclick="toggleBenchGroup('${gkey}')"` : ''}>
-          <td class="py-3 text-left font-mono">
-            <div class="flex items-center gap-1.5 flex-wrap">
+          <td class="py-3 text-left font-mono overflow-hidden">
+            <div class="flex items-center gap-1.5 overflow-hidden">
               ${typeBadgeHtml}
-              <span class="font-bold text-[#e5e9f0]">${escapeHTML(group.model_name)}</span>
+              <span class="font-bold text-[#e5e9f0] truncate min-w-0" title="${escapeHTML(group.model_name)}">${escapeHTML(group.model_name)}</span>
               ${runsBadge}
             </div>
             ${noteHtml}
           </td>
-          <td class="py-3 text-left font-mono text-[11px]">
-            <div class="text-[#88c0d0] font-bold">${escapeHTML(serverDisplay || '—')}</div>
-            <div class="text-[9px] text-[#4c566a] truncate max-w-[120px]" title="${escapeHTML(group.server_url || '')}">${escapeHTML(group.server_url || '')}</div>
+          <td class="py-3 text-left font-mono text-[11px] overflow-hidden">
+            <div class="text-[#88c0d0] font-bold truncate" title="${escapeHTML(serverDisplay || '')}">${escapeHTML(serverDisplay || '—')}</div>
+            <div class="text-[9px] text-[#4c566a] truncate" title="${escapeHTML(group.server_url || '')}">${escapeHTML(group.server_url || '')}</div>
           </td>
           ${ttftCell}
           ${metricCell}
@@ -6653,14 +6970,14 @@ async function fetchBenchmarks() {
             ? new Date(run.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
             : '—';
           const newestTag = idx === 0
-            ? `<span class="text-[8px] text-[#a3be8c] font-bold mr-1 uppercase">latest</span>`
+            ? `<span class="text-[8px] text-[#a3be8c] font-bold uppercase tracking-wide bg-[#a3be8c]/15 px-1.5 rounded ml-2">latest</span>`
             : '';
 
           html += `
             <tr id="sub-${gkey}-${idx}" data-group="${gkey}"
                 class="bench-sub-row bg-[#2e3440]/60 border-b border-[#4c566a]/10 text-[11px] hidden">
               <td class="py-2 pl-8 font-mono text-[#4c566a]">
-                ${newestTag}${escapeHTML(runDate)}
+                ${escapeHTML(runDate)}${newestTag}
               </td>
               <td class="text-[10px] text-[#4c566a]">run #${run.id}</td>
               ${rt}
@@ -6806,18 +7123,288 @@ function exportBenchmarksCSV() {
 // --- HYPERPARAMETER OPTIMIZER CONTROLLERS ---
 
 function switchBenchmarkSubtab(tab) {
-  const standardBtn = document.getElementById('benchmark-subtab-standard');
-  const optimizerBtn = document.getElementById('benchmark-subtab-optimizer');
-  const standardContainer = document.getElementById('benchmark-standard-container');
-  const optimizerContainer = document.getElementById('benchmark-optimizer-container');
+  const tabs = ['standard', 'optimizer', 'nodevnode'];
+  tabs.forEach(t => {
+    const btn = document.getElementById(`benchmark-subtab-${t}`);
+    const container = document.getElementById(`benchmark-${t}-container`);
+    if (btn) btn.classList.toggle('bench-subtab-active', t === tab);
+    if (container) container.classList.toggle('hidden', t !== tab);
+  });
+  if (tab === 'optimizer') loadOptimizerHistory();
+  if (tab === 'nodevnode') loadNvnPanel();
+}
 
-  const isStandard = tab === 'standard';
-  if (standardBtn) standardBtn.classList.toggle('bench-subtab-active', isStandard);
-  if (optimizerBtn) optimizerBtn.classList.toggle('bench-subtab-active', !isStandard);
-  if (standardContainer) standardContainer.classList.toggle('hidden', !isStandard);
-  if (optimizerContainer) optimizerContainer.classList.toggle('hidden', isStandard);
+// ── Node vs Node ─────────────────────────────────────────────────────────────
 
-  if (!isStandard) loadOptimizerHistory();
+let nvnType       = 'standard';
+let nvnES         = null;   // EventSource
+let nvnModels     = {};     // { nodeId: [model objects] }
+
+function setNvnType(type) {
+  nvnType = type;
+  ['standard','vision','embedding','longctx','reasoning'].forEach(t => {
+    const btn = document.getElementById(`nvn-type-${t}`);
+    if (btn) btn.classList.toggle('bench-type-btn-active', t === type);
+  });
+}
+
+async function loadNvnPanel() {
+  // Populate node selects from the global servers list
+  const nodeA = document.getElementById('nvn-node-a');
+  const nodeB = document.getElementById('nvn-node-b');
+  if (!nodeA || !nodeB) return;
+
+  const opts = servers.map(s =>
+    `<option value="${escapeHTML(s.id)}">${escapeHTML(s.name)}</option>`
+  ).join('');
+  nodeA.innerHTML = '<option value="">-- Select node --</option>' + opts;
+  nodeB.innerHTML = '<option value="">-- Select node --</option>' + opts;
+
+  // Pre-select active server as Node A if possible
+  const active = servers.find(s => s.isActive);
+  if (active) nodeA.value = active.id;
+  if (servers.length > 1) {
+    const other = servers.find(s => !s.isActive);
+    if (other) nodeB.value = other.id;
+  }
+
+  // Fetch model lists for all nodes so we can show availability
+  await refreshNvnModels();
+  populateNvnModelSelect();
+  updateNvnAvailability();
+
+  // Attach searchable select to nvn-model-select if not already done
+  const modelSel = document.getElementById('nvn-model-select');
+  if (modelSel && !modelSel._ssInit) makeSearchableSelect(modelSel);
+}
+
+async function refreshNvnModels() {
+  try {
+    const r = await fetch('/api/node-models?ids=all');
+    if (!r.ok) return;
+    const d = await r.json();
+    nvnModels = d.servers || {};
+  } catch (_) {}
+}
+
+function populateNvnModelSelect() {
+  const select = document.getElementById('nvn-model-select');
+  if (!select) return;
+
+  // Build a de-duped union of all model names across all cached nodes
+  const seen = new Map(); // name → paramSize
+  Object.values(nvnModels).forEach(modelList => {
+    (modelList || []).forEach(m => {
+      if (!seen.has(m.name)) {
+        const param = (m.details && m.details.parameter_size) || '?';
+        seen.set(m.name, param);
+      }
+    });
+  });
+
+  // Fall back to active-server models array
+  if (seen.size === 0) {
+    models.forEach(m => {
+      const param = (m.details && m.details.parameter_size) || '?';
+      seen.set(m.name, param);
+    });
+  }
+
+  const sorted = [...seen.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  const prev = select.value;
+  select.innerHTML = sorted.map(([name, param]) =>
+    `<option value="${escapeHTML(name)}">${escapeHTML(name)} (${escapeHTML(param)})</option>`
+  ).join('');
+  if (prev && select.querySelector(`option[value="${CSS.escape(prev)}"]`)) select.value = prev;
+}
+
+function nvnNodeHasModel(nodeId, modelName) {
+  const list = nvnModels[nodeId] || [];
+  return list.some(m => m.name === modelName);
+}
+
+function updateNvnAvailability() {
+  const model  = document.getElementById('nvn-model-select')?.value;
+  const nodeAId = document.getElementById('nvn-node-a')?.value;
+  const nodeBId = document.getElementById('nvn-node-b')?.value;
+
+  const setAvail = (elId, nodeId) => {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    if (!nodeId || !model) { el.textContent = '—'; el.className = 'text-[10px] font-mono shrink-0 w-5 text-center text-[#4c566a]'; return; }
+    const has = nvnNodeHasModel(nodeId, model);
+    el.textContent = has ? '✓' : '✗';
+    el.className = `text-[10px] font-mono shrink-0 w-5 text-center ${has ? 'text-[#a3be8c]' : 'text-[#bf616a]'}`;
+  };
+  setAvail('nvn-avail-a', nodeAId);
+  setAvail('nvn-avail-b', nodeBId);
+}
+
+function nvnLog(node, msg) {
+  const log = document.getElementById('nvn-log');
+  if (!log) return;
+  if (log.querySelector('.italic')) log.innerHTML = ''; // clear placeholder
+
+  const nodeColors = { 'Node A': 'text-[#88c0d0]', 'Node B': 'text-[#a3be8c]' };
+  const nodeClass  = nodeColors[node] || 'text-[#8fbcbb]';
+
+  const line = document.createElement('div');
+  line.className = 'flex items-start gap-1.5 leading-snug';
+  line.innerHTML = node
+    ? `<span class="${nodeClass} font-bold shrink-0 w-[52px]">[${node.replace('Node ', '')}]</span><span class="text-[#d8dee9]">${escapeHTML(msg)}</span>`
+    : `<span class="text-[#4c566a] italic col-span-2">${escapeHTML(msg)}</span>`;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
+
+function startNodeVsNode() {
+  const model   = document.getElementById('nvn-model-select')?.value;
+  const nodeAId = document.getElementById('nvn-node-a')?.value;
+  const nodeBId = document.getElementById('nvn-node-b')?.value;
+  const autoPull = document.getElementById('nvn-auto-pull')?.checked;
+
+  if (!model)   { showToast('Select a model', 'warning'); return; }
+  if (!nodeAId) { showToast('Select Node A', 'warning'); return; }
+  if (!nodeBId) { showToast('Select Node B', 'warning'); return; }
+  if (nodeAId === nodeBId) { showToast('Node A and Node B must be different', 'warning'); return; }
+
+  if (nvnES) { nvnES.close(); nvnES = null; }
+
+  const log = document.getElementById('nvn-log');
+  if (log) log.innerHTML = '';
+
+  document.getElementById('nvn-run-btn')?.classList.add('hidden');
+  document.getElementById('nvn-stop-btn')?.classList.remove('hidden');
+  document.getElementById('nvn-results').innerHTML = `
+    <div class="text-center text-[#4c566a] font-mono text-sm">
+      <i class="fa-solid fa-spinner fa-spin text-2xl mb-2 block text-[#88c0d0]"></i>Benchmark running…
+    </div>`;
+
+  const params = new URLSearchParams({ model, nodeA: nodeAId, nodeB: nodeBId, type: nvnType, pull: autoPull ? 'true' : 'false' });
+  nvnES = new EventSource(`/api/benchmarks/node-vs-node?${params}`);
+
+  nvnES.addEventListener('log', e => {
+    try { const d = JSON.parse(e.data); nvnLog(d.node, d.message); } catch (_) {}
+  });
+
+  nvnES.addEventListener('result', e => {
+    try { renderNvnResults(JSON.parse(e.data)); } catch (_) {}
+  });
+
+  nvnES.addEventListener('done', () => {
+    nvnES.close(); nvnES = null;
+    document.getElementById('nvn-run-btn')?.classList.remove('hidden');
+    document.getElementById('nvn-stop-btn')?.classList.add('hidden');
+    refreshNvnModels().then(updateNvnAvailability);
+    fetchBenchmarks(); // refresh leaderboard with new results
+  });
+
+  nvnES.onerror = () => {
+    nvnLog('', 'Connection error — benchmark may have ended.');
+    nvnES?.close(); nvnES = null;
+    document.getElementById('nvn-run-btn')?.classList.remove('hidden');
+    document.getElementById('nvn-stop-btn')?.classList.add('hidden');
+  };
+}
+
+function stopNodeVsNode() {
+  if (nvnES) { nvnES.close(); nvnES = null; }
+  document.getElementById('nvn-run-btn')?.classList.remove('hidden');
+  document.getElementById('nvn-stop-btn')?.classList.add('hidden');
+  nvnLog('', 'Stopped by user.');
+}
+
+function renderNvnResults(data) {
+  const el = document.getElementById('nvn-results');
+  if (!el) return;
+
+  const a = data.node_a || {};
+  const b = data.node_b || {};
+  const bType = data.type || 'standard';
+
+  const isEmbed = bType === 'embedding';
+  const metricLabel = isEmbed ? 'ch/s' : 'TPS';
+  const metricKey   = 'tps'; // server always uses tps field; for embedding it holds cps
+
+  function winner(va, vb, higherIsBetter = true) {
+    if (isNaN(va) || isNaN(vb) || va === 0 || vb === 0) return null;
+    return higherIsBetter ? (va >= vb ? 'A' : 'B') : (va <= vb ? 'A' : 'B');
+  }
+
+  const wTps  = winner(a.tps, b.tps, true);
+  const wTtft = winner(a.ttft_ms, b.ttft_ms, false);
+  const wLat  = winner(a.avg_latency_ms, b.avg_latency_ms, false);
+
+  function metricRow(label, va, vb, fmt, wNode) {
+    const hiA = wNode === 'A' ? 'text-[#a3be8c] font-bold' : 'text-[#d8dee9]';
+    const hiB = wNode === 'B' ? 'text-[#a3be8c] font-bold' : 'text-[#d8dee9]';
+    return `
+      <tr class="border-b border-[#4c566a]/20">
+        <td class="py-2 text-left text-[10px] font-mono text-[#4c566a] uppercase pr-4">${label}</td>
+        <td class="py-2 text-center font-mono text-xs ${hiA}">${fmt(va)}</td>
+        <td class="py-2 text-center font-mono text-xs ${hiB}">${fmt(vb)}</td>
+      </tr>`;
+  }
+
+  const fmt1 = v => v > 0 ? v.toFixed(1) : '—';
+  const fmtMs = v => v > 0 ? `${v.toFixed(0)} ms` : '—';
+
+  const overallWinner = [wTps === 'A', wTtft === 'A', wLat === 'A'].filter(Boolean).length >= 2 ? 'A' :
+                        [wTps === 'B', wTtft === 'B', wLat === 'B'].filter(Boolean).length >= 2 ? 'B' : null;
+
+  const winnerBadge = (node) => overallWinner === node
+    ? `<span class="ml-1.5 text-[8px] bg-[#a3be8c]/20 text-[#a3be8c] border border-[#a3be8c]/40 font-mono px-1.5 py-0.5 rounded uppercase">winner</span>`
+    : '';
+
+  el.innerHTML = `
+    <div class="w-full space-y-4">
+      <!-- Model / type header -->
+      <div class="text-center font-mono text-[10px] text-[#4c566a] uppercase tracking-wider">
+        <span class="text-[#88c0d0] font-bold">${escapeHTML(data.model || '')}</span>
+        &nbsp;·&nbsp;${escapeHTML(bType)}
+      </div>
+
+      <!-- Side-by-side node name headers -->
+      <div class="grid grid-cols-3 text-center text-xs font-tech uppercase">
+        <div></div>
+        <div class="text-[#88c0d0] font-bold truncate px-1">
+          ${escapeHTML(a.node_name || 'Node A')}${winnerBadge('A')}
+          ${a.has_error ? '<div class="text-[#bf616a] text-[9px] normal-case mt-0.5">error</div>' : ''}
+        </div>
+        <div class="text-[#a3be8c] font-bold truncate px-1">
+          ${escapeHTML(b.node_name || 'Node B')}${winnerBadge('B')}
+          ${b.has_error ? '<div class="text-[#bf616a] text-[9px] normal-case mt-0.5">error</div>' : ''}
+        </div>
+      </div>
+
+      <!-- Metrics table -->
+      <table class="w-full">
+        <thead>
+          <tr class="border-b border-[#4c566a]/40">
+            <th class="py-1 text-left text-[9px] font-tech uppercase text-[#4c566a]">Metric</th>
+            <th class="py-1 text-center text-[9px] font-tech uppercase text-[#88c0d0]">${escapeHTML(a.node_name || 'A')}</th>
+            <th class="py-1 text-center text-[9px] font-tech uppercase text-[#a3be8c]">${escapeHTML(b.node_name || 'B')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${!isEmbed ? metricRow('TTFT', a.ttft_ms, b.ttft_ms, fmtMs, wTtft) : ''}
+          ${metricRow(metricLabel, a.tps, b.tps, fmt1, wTps)}
+          ${!isEmbed ? metricRow('Latency', a.avg_latency_ms, b.avg_latency_ms, fmtMs, wLat) : ''}
+        </tbody>
+      </table>
+
+      <!-- Delta row -->
+      ${(wTps && !a.has_error && !b.has_error) ? (() => {
+        const faster = wTps === 'A' ? a : b;
+        const slower = wTps === 'A' ? b : a;
+        const pct = slower.tps > 0 ? ((faster.tps - slower.tps) / slower.tps * 100).toFixed(1) : '?';
+        const fasterName = wTps === 'A' ? (a.node_name || 'Node A') : (b.node_name || 'Node B');
+        return `<div class="text-center font-mono text-[11px] bg-[#a3be8c]/10 border border-[#a3be8c]/30 rounded-lg p-2 text-[#a3be8c]">
+          <i class="fa-solid fa-trophy mr-1 text-[10px]"></i>
+          <strong>${escapeHTML(fasterName)}</strong> is ${pct}% faster in ${metricLabel}
+        </div>`;
+      })() : ''}
+    </div>`;
 }
 
 let optimizerEventSource = null;

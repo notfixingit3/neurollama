@@ -29,7 +29,7 @@
       </div>
       <div>
         <h1 class="text-xl font-bold font-tech tracking-wider text-[#88c0d0] glow-text-blue flex items-center gap-2">
-          NEUROLLAMA <span class="text-xs px-2 py-0.5 bg-[#4c566a] text-[#d8dee9] rounded font-mono">v0.2.10</span>
+          NEUROLLAMA <span class="text-xs px-2 py-0.5 bg-[#4c566a] text-[#d8dee9] rounded font-mono">{{.version}}</span>
         </h1>
         <p class="text-[10px] uppercase font-mono tracking-widest text-[#4c566a] mt-0.5">Control Interface // Epoch 2026</p>
       </div>
@@ -37,17 +37,17 @@
     
     <!-- Active Server Global Status -->
     <div class="flex items-center gap-6 mt-3 sm:mt-0 bg-[#2e3440]/80 border border-[#4c566a]/60 px-4 py-2 rounded-lg font-tech text-xs">
-      <div class="flex items-center gap-2">
-        <span class="text-[#88c0d0]">ACTIVE_SRV:</span>
-        <span id="global-active-server-name" class="text-[#e5e9f0] font-semibold">---</span>
+      <div class="flex items-center gap-2 w-[190px] min-w-0">
+        <span class="text-[#88c0d0] shrink-0">ACTIVE_SRV:</span>
+        <span id="global-active-server-name" class="text-[#e5e9f0] font-semibold truncate min-w-0">---</span>
       </div>
-      <div class="h-4 w-[1px] bg-[#4c566a]"></div>
-      <div class="flex items-center gap-2">
+      <div class="h-4 w-[1px] bg-[#4c566a] shrink-0"></div>
+      <div class="flex items-center gap-2 w-[110px] shrink-0">
         <span class="text-[#88c0d0]">LATENCY:</span>
         <span id="global-active-server-latency" class="text-[#a3be8c]">-- ms</span>
       </div>
-      <div class="h-4 w-[1px] bg-[#4c566a]"></div>
-      <div class="flex items-center gap-2">
+      <div class="h-4 w-[1px] bg-[#4c566a] shrink-0"></div>
+      <div class="flex items-center gap-2 w-[120px] shrink-0">
         <span class="text-[#88c0d0]">STATUS:</span>
         <span class="flex items-center gap-1.5">
           <span id="global-active-server-status-indicator" class="h-2.5 w-2.5 rounded-full bg-[#bf616a] inline-block"></span>
@@ -1313,6 +1313,9 @@
             <button id="benchmark-subtab-optimizer" onclick="switchBenchmarkSubtab('optimizer')" class="bench-subtab">
               <i class="fa-solid fa-sliders mr-1.5"></i>HYPERPARAMETER OPTIMIZER
             </button>
+            <button id="benchmark-subtab-nodevnode" onclick="switchBenchmarkSubtab('nodevnode')" class="bench-subtab">
+              <i class="fa-solid fa-code-compare mr-1.5"></i>NODE VS NODE
+            </button>
           </div>
 
           <!-- SUBTAB 1: STANDARD BENCHMARKS -->
@@ -1350,9 +1353,22 @@
                   </div>
 
                   <div class="form-control w-full">
-                    <label class="label py-1">
+                    <div class="flex items-center justify-between mb-1">
                       <span class="label-text text-[11px] font-mono text-[#4c566a] uppercase">Select Model to Benchmark</span>
-                    </label>
+                      <button id="bench-untested-btn" onclick="toggleUntestedFilter()"
+                              class="bench-type-btn text-[9px] px-2 py-1 flex items-center gap-1"
+                              title="Show only models not yet tested for this benchmark type">
+                        <i class="fa-solid fa-circle-question text-[9px]"></i>Untested only
+                      </button>
+                    </div>
+                    <!-- Param size slider -->
+                    <div class="flex items-center gap-2 mb-2">
+                      <span class="text-[9px] font-mono text-[#4c566a] shrink-0">Max params</span>
+                      <input type="range" id="bench-param-slider" min="0" max="7" step="1" value="7"
+                             oninput="onBenchParamSlider(this.value)"
+                             class="range range-xs range-info flex-1" />
+                      <span id="bench-param-label" class="text-[9px] font-mono text-[#88c0d0] shrink-0 w-10 text-right">All</span>
+                    </div>
                     <div class="space-y-2">
                       <select id="benchmark-model-select" class="select select-sm flex-1 bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none text-[#d8dee9]">
                         <!-- Populated dynamically -->
@@ -1404,9 +1420,18 @@
                   </div>
                 </div>
                 <!-- Stats bar: run count, model count, best performer -->
-                <div id="lb-stats-bar" class="flex items-center gap-1 text-[10px] font-mono mb-3 min-h-[18px] text-[#4c566a]"></div>
+                <div id="lb-stats-bar" class="mb-3"></div>
                 <div class="overflow-x-auto">
-                  <table class="table table-xs w-full text-xs font-mono text-[#d8dee9] border-collapse">
+                  <table class="table table-xs w-full text-xs font-mono text-[#d8dee9] border-collapse table-fixed">
+                    <colgroup>
+                      <col><!-- MODEL: flexible, takes remaining space -->
+                      <col style="width:148px"><!-- SERVER -->
+                      <col style="width:96px"> <!-- TTFT -->
+                      <col style="width:118px"><!-- METRIC -->
+                      <col style="width:96px"> <!-- LATENCY -->
+                      <col style="width:84px"> <!-- SCORE -->
+                      <col style="width:112px"><!-- ACTIONS -->
+                    </colgroup>
                     <thead>
                       <tr class="text-[#88c0d0] border-b border-[#4c566a]/40 select-none">
                         <th class="bg-transparent text-left py-2 font-tech uppercase cursor-pointer hover:text-[#d8dee9]" onclick="setLbSort('model_name')">Model <span id="sort-indicator-model_name" class="text-[#4c566a]"><i class="fa-solid fa-sort text-[9px]"></i></span></th>
@@ -1529,6 +1554,101 @@
               </div>
 
             </div>
+          </div>
+
+          <!-- SUBTAB 3: NODE VS NODE -->
+          <div id="benchmark-nodevnode-container" class="hidden grid grid-cols-1 lg:grid-cols-12 gap-6 pr-1">
+
+            <!-- Left: Controls (4 cols) -->
+            <div class="lg:col-span-4 flex flex-col gap-4">
+              <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col gap-4">
+                <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] pb-2 border-b border-[#4c566a]/40">
+                  <i class="fa-solid fa-code-compare mr-2"></i>Node vs Node
+                </h2>
+
+                <!-- Benchmark type -->
+                <div class="form-control">
+                  <label class="label py-1"><span class="label-text text-[11px] font-mono text-[#4c566a] uppercase">Benchmark Type</span></label>
+                  <div class="flex flex-wrap gap-1.5" id="nvn-type-btns">
+                    <button class="bench-type-btn bench-type-btn-active" id="nvn-type-standard" onclick="setNvnType('standard')"><i class="fa-solid fa-gauge-high mr-1"></i>Std</button>
+                    <button class="bench-type-btn" id="nvn-type-vision"    onclick="setNvnType('vision')"><i class="fa-solid fa-eye mr-1"></i>Vision</button>
+                    <button class="bench-type-btn" id="nvn-type-embedding" onclick="setNvnType('embedding')"><i class="fa-solid fa-layer-group mr-1"></i>Embed</button>
+                    <button class="bench-type-btn" id="nvn-type-longctx"   onclick="setNvnType('longctx')"><i class="fa-solid fa-scroll mr-1"></i>Ctx</button>
+                    <button class="bench-type-btn" id="nvn-type-reasoning" onclick="setNvnType('reasoning')"><i class="fa-solid fa-brain mr-1"></i>Reason</button>
+                  </div>
+                </div>
+
+                <!-- Model select -->
+                <div class="form-control">
+                  <label class="label py-1"><span class="label-text text-[11px] font-mono text-[#4c566a] uppercase">Model</span></label>
+                  <select id="nvn-model-select" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none text-[#d8dee9] w-full" onchange="updateNvnAvailability()">
+                    <option value="">-- Loading models… --</option>
+                  </select>
+                </div>
+
+                <!-- Node A -->
+                <div class="form-control">
+                  <label class="label py-1"><span class="label-text text-[11px] font-mono text-[#4c566a] uppercase">Node A</span></label>
+                  <div class="flex items-center gap-2">
+                    <select id="nvn-node-a" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none text-[#d8dee9] flex-1" onchange="updateNvnAvailability()">
+                      <option value="">-- Select node --</option>
+                    </select>
+                    <span id="nvn-avail-a" class="text-[10px] font-mono shrink-0 w-5 text-center">—</span>
+                  </div>
+                </div>
+
+                <!-- Node B -->
+                <div class="form-control">
+                  <label class="label py-1"><span class="label-text text-[11px] font-mono text-[#4c566a] uppercase">Node B</span></label>
+                  <div class="flex items-center gap-2">
+                    <select id="nvn-node-b" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none text-[#d8dee9] flex-1" onchange="updateNvnAvailability()">
+                      <option value="">-- Select node --</option>
+                    </select>
+                    <span id="nvn-avail-b" class="text-[10px] font-mono shrink-0 w-5 text-center">—</span>
+                  </div>
+                </div>
+
+                <!-- Auto-pull toggle -->
+                <label class="flex items-center gap-2 cursor-pointer select-none">
+                  <input type="checkbox" id="nvn-auto-pull" class="checkbox checkbox-xs checkbox-info" />
+                  <span class="text-[11px] font-mono text-[#4c566a]">Auto-pull if model missing on a node</span>
+                </label>
+
+                <!-- Run / Stop -->
+                <button id="nvn-run-btn" onclick="startNodeVsNode()"
+                        class="btn btn-sm btn-info font-tech uppercase tracking-wide w-full">
+                  <i class="fa-solid fa-play mr-1.5"></i>Compare Nodes
+                </button>
+                <button id="nvn-stop-btn" onclick="stopNodeVsNode()"
+                        class="btn btn-sm btn-outline btn-error font-tech uppercase tracking-wide w-full hidden">
+                  <i class="fa-solid fa-stop mr-1.5"></i>Stop
+                </button>
+
+                <!-- Live log -->
+                <div>
+                  <span class="text-[10px] font-mono text-[#4c566a] uppercase">Live Output</span>
+                  <div id="nvn-log" class="mt-1 min-h-[120px] max-h-52 bg-[#161820] border border-[#4c566a]/40 rounded-lg p-3 text-[11px] font-mono space-y-0.5 overflow-y-auto">
+                    <div class="text-[#4c566a] italic">Select two nodes and a model, then click Compare.</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right: Results (8 cols) -->
+            <div class="lg:col-span-8 flex flex-col">
+              <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col h-full">
+                <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] mb-4 pb-2 border-b border-[#4c566a]/40">
+                  <i class="fa-solid fa-chart-bar mr-2"></i>Comparison Results
+                </h2>
+                <div id="nvn-results" class="flex-1 flex items-center justify-center">
+                  <div class="text-center text-[#4c566a] italic font-mono text-sm">
+                    <i class="fa-solid fa-code-compare text-4xl mb-3 block opacity-20"></i>
+                    Results will appear here after the comparison runs.
+                  </div>
+                </div>
+              </div>
+            </div>
+
           </div>
         </div>
 

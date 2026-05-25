@@ -29,7 +29,7 @@ import (
 	goPDF "github.com/ledongthuc/pdf"
 )
 
-const appVersion = "v0.2.10"
+const appVersion = "v0.2.11"
 
 var (
 	appStartTime = time.Now()
@@ -167,7 +167,8 @@ func main() {
 	// HTML routes
 	r.GET("/", func(c *gin.Context) {
 		c.HTML(http.StatusOK, "index.html", gin.H{
-			"title": "NEUROLLAMA 2026",
+			"title":   "NEUROLLAMA 2026",
+			"version": appVersion,
 		})
 	})
 
@@ -228,8 +229,10 @@ func main() {
 		api.GET("/benchmarks/grouped", getGroupedBenchmarksHandler)
 		api.GET("/benchmarks/export.csv", exportBenchmarksCSVHandler)
 		api.GET("/benchmarks/run", runBenchmarkSSEHandler)
+		api.GET("/benchmarks/node-vs-node", nodeVsNodeBenchmarkHandler)
 		api.PUT("/benchmarks/:id/score", updateBenchmarkScoreHandler)
 		api.DELETE("/benchmarks/:id", deleteBenchmarkHandler)
+		api.GET("/node-models", nodeModelsHandler)
 
 		// Hyperparameter Optimizer
 		api.GET("/optimizer/runs", getOptimizerRunsHandler)
@@ -4321,5 +4324,205 @@ func restoreDBHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message":         "Restore file saved. Restart NEUROLLAMA to apply.",
 		"restartRequired": true,
+	})
+}
+
+// ── Node VS Node benchmark ────────────────────────────────────────────────────
+
+// getServerByID looks up a server from the in-memory config list.
+func getServerByID(id string) (Server, error) {
+	for _, s := range GetServers() {
+		if s.ID == id {
+			return s, nil
+		}
+	}
+	return Server{}, fmt.Errorf("server %q not found", id)
+}
+
+// nodeModelsHandler returns cached model lists for one or more server IDs.
+// GET /api/node-models?ids=id1,id2   (or ids=all)
+func nodeModelsHandler(c *gin.Context) {
+	idsParam := strings.TrimSpace(c.Query("ids"))
+	allowed := map[string]bool{}
+	if idsParam != "" && idsParam != "all" {
+		for _, id := range strings.Split(idsParam, ",") {
+			if id = strings.TrimSpace(id); id != "" {
+				allowed[id] = true
+			}
+		}
+	}
+
+	result := map[string]interface{}{}
+	nodeModelMu.RLock()
+	for nodeID, entry := range nodeModelCache {
+		if len(allowed) > 0 && !allowed[nodeID] {
+			continue
+		}
+		result[nodeID] = entry.models
+	}
+	nodeModelMu.RUnlock()
+
+	c.JSON(http.StatusOK, gin.H{"servers": result})
+}
+
+// nodeVsNodeBenchmarkHandler runs the same benchmark sequentially on two nodes
+// and streams SSE progress + a final comparison result.
+// GET /api/benchmarks/node-vs-node?model=X&nodeA=id1&nodeB=id2&type=standard&pull=true
+func nodeVsNodeBenchmarkHandler(c *gin.Context) {
+	model := c.Query("model")
+	nodeAID := c.Query("nodeA")
+	nodeBID := c.Query("nodeB")
+	benchType := c.DefaultQuery("type", "standard")
+	doPull := c.Query("pull") == "true"
+
+	if model == "" || nodeAID == "" || nodeBID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "model, nodeA, and nodeB are required"})
+		return
+	}
+	if nodeAID == nodeBID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "nodeA and nodeB must be different servers"})
+		return
+	}
+	nodeA, errA := getServerByID(nodeAID)
+	if errA != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "nodeA: " + errA.Error()})
+		return
+	}
+	nodeB, errB := getServerByID(nodeBID)
+	if errB != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "nodeB: " + errB.Error()})
+		return
+	}
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Transfer-Encoding", "chunked")
+
+	ctx := c.Request.Context()
+	LogActivity("benchmark", fmt.Sprintf("Node-vs-Node: %s [%s] — %s vs %s", model, benchType, nodeA.Name, nodeB.Name))
+
+	type NvNResult struct {
+		NodeName string  `json:"node_name"`
+		NodeURL  string  `json:"node_url"`
+		NodeID   string  `json:"node_id"`
+		TTFT     float64 `json:"ttft_ms"`
+		TPS      float64 `json:"tps"`
+		Latency  float64 `json:"avg_latency_ms"`
+		Extra    string  `json:"extra_json"`
+		BenchID  int64   `json:"bench_id"`
+		HasError bool    `json:"has_error"`
+		ErrMsg   string  `json:"error,omitempty"`
+	}
+
+	c.Stream(func(w io.Writer) bool {
+		emit := func(node, msg string) {
+			data, _ := json.Marshal(map[string]string{"node": node, "message": msg})
+			c.SSEvent("log", string(data))
+			c.Writer.Flush()
+		}
+
+		// Check model availability; optionally pull if missing.
+		// Returns true if model is ready on that server.
+		ensureModel := func(srv Server, label string) bool {
+			client := NewOllamaClient(srv)
+			list, err := client.ListModels()
+			if err != nil {
+				emit(label, "⚠ Cannot reach node: "+err.Error())
+				return false
+			}
+			for _, m := range list {
+				if m.Name == model {
+					emit(label, "✓ Model available")
+					return true
+				}
+			}
+			if !doPull {
+				emit(label, "✗ Model not found — enable Auto-Pull to pull it automatically")
+				return false
+			}
+			emit(label, fmt.Sprintf("Pulling %s...", model))
+			stream, pullErr := client.StreamPullModel(ctx, model)
+			if pullErr != nil {
+				emit(label, "Pull failed: "+pullErr.Error())
+				return false
+			}
+			defer stream.Close()
+			lastPct := -1
+			_ = ParsePullProgress(stream, func(p PullProgress) bool {
+				pct := 0
+				if p.Total > 0 {
+					pct = int(float64(p.Completed) / float64(p.Total) * 100)
+				}
+				if pct != lastPct && pct%10 == 0 {
+					emit(label, fmt.Sprintf("Pulling %d%%", pct))
+					lastPct = pct
+				}
+				return true
+			})
+			invalidateNodeModelCache(srv.ID)
+			emit(label, "✓ Pull complete")
+			return true
+		}
+
+		runNode := func(srv Server, label string) NvNResult {
+			res := NvNResult{NodeName: srv.Name, NodeURL: srv.URL, NodeID: srv.ID}
+			client := NewOllamaClient(srv)
+			logFn := func(msg string) { emit(label, msg) }
+			emit(label, fmt.Sprintf("Running %s benchmark...", strings.ToUpper(benchType)))
+
+			var runErr error
+			switch benchType {
+			case "embedding":
+				cps, extra, e := runEmbeddingBenchmarkRun(ctx, client, model, logFn)
+				res.TPS = cps; res.Extra = extra; runErr = e
+			case "longctx":
+				avg, ttft, lat, extra, e := runLongCtxBenchmarkRun(ctx, client, model, logFn)
+				res.TPS = avg; res.TTFT = ttft; res.Latency = lat; res.Extra = extra; runErr = e
+			case "reasoning":
+				_, _, ttft, tps, lat, extra, e := runReasoningBenchmarkRun(ctx, client, model, logFn)
+				res.TTFT = ttft; res.TPS = tps; res.Latency = lat; res.Extra = extra; runErr = e
+			default: // standard / vision
+				prompt := "Explain the difference between machine learning and traditional programming in 3 sentences."
+				ttft, tps, lat, e := runBenchmarkForPrompt(ctx, client, model, prompt, logFn)
+				res.TTFT = ttft; res.TPS = tps; res.Latency = lat; runErr = e
+			}
+			if runErr != nil {
+				res.HasError = true; res.ErrMsg = runErr.Error()
+				emit(label, "✗ Failed: "+runErr.Error())
+				return res
+			}
+			id, _ := SaveBenchmark(model, srv.Name, srv.URL, benchType, res.Extra, res.TTFT, res.TPS, res.Latency)
+			if id > 0 {
+				res.BenchID = id
+				_ = CullBenchmarks(model, srv.URL, benchType, 5)
+			}
+			emit(label, fmt.Sprintf("✓ %.1f TPS  •  %.0f ms TTFT  •  %.0f ms latency", res.TPS, res.TTFT, res.Latency))
+			return res
+		}
+
+		okA := ensureModel(nodeA, "Node A")
+		okB := ensureModel(nodeB, "Node B")
+
+		var resA, resB NvNResult
+		if okA {
+			resA = runNode(nodeA, "Node A")
+		} else {
+			resA = NvNResult{NodeName: nodeA.Name, NodeURL: nodeA.URL, NodeID: nodeA.ID, HasError: true, ErrMsg: "model unavailable"}
+		}
+		if okB {
+			resB = runNode(nodeB, "Node B")
+		} else {
+			resB = NvNResult{NodeName: nodeB.Name, NodeURL: nodeB.URL, NodeID: nodeB.ID, HasError: true, ErrMsg: "model unavailable"}
+		}
+
+		payload, _ := json.Marshal(map[string]interface{}{
+			"model": model, "type": benchType,
+			"node_a": resA, "node_b": resB,
+		})
+		c.SSEvent("result", string(payload))
+		c.SSEvent("done", "Node comparison complete")
+		c.Writer.Flush()
+		return false
 	})
 }
