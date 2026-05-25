@@ -1,6 +1,7 @@
 // State Management
 let servers = [];
 let models = [];
+let modelCtxLengths = {}; // model_name → trained context length (int)
 let selectedModels = new Set();
 let inspectedModel = null;
 let openAccordionModel = null;
@@ -130,6 +131,7 @@ function makeSearchableSelect(selectEl) {
       const paramMatch = opt.text.match(/^(.+?)\s*\((.+?)\)$/);
       const dispName  = paramMatch ? paramMatch[1] : opt.text;
       const paramSize = paramMatch && paramMatch[2] !== '?' ? paramMatch[2] : '';
+      const ctxLabel  = fmtCtx(modelCtxLengths[opt.value]);
 
       const nameSpan = document.createElement('span');
       nameSpan.className = 'ss-opt-name';
@@ -141,6 +143,15 @@ function makeSearchableSelect(selectEl) {
         paramSpan.className = 'ss-opt-param';
         paramSpan.textContent = paramSize;
         li.appendChild(paramSpan);
+      }
+
+      if (ctxLabel) {
+        const ctxSpan = document.createElement('span');
+        ctxSpan.className = 'ss-opt-param';
+        ctxSpan.style.color = '#8fbcbb';
+        ctxSpan.style.borderColor = 'rgba(143,188,187,0.3)';
+        ctxSpan.textContent = ctxLabel;
+        li.appendChild(ctxSpan);
       }
 
       li.addEventListener('mousedown', e => {
@@ -165,12 +176,34 @@ function makeSearchableSelect(selectEl) {
     const idx = selectEl.selectedIndex;
     const opt = idx >= 0 ? selectEl.options[idx] : null;
     const fullText = (opt && opt.text) ? opt.text : '---';
-    // Show "name (param)" in trigger but strip param from display if it fits better
     const paramMatch = fullText.match(/^(.+?)\s*\((.+?)\)$/);
     const dispText  = paramMatch ? paramMatch[1] : fullText;
-    const paramHint = paramMatch && paramMatch[2] !== '?' ? ` (${paramMatch[2]})` : '';
-    triggerText.textContent = dispText;
-    trigger.title = fullText; // tooltip on the whole trigger for full name + param
+    const paramHint = paramMatch && paramMatch[2] !== '?' ? paramMatch[2] : '';
+    const ctxLabel  = opt ? fmtCtx(modelCtxLengths[opt.value]) : '';
+
+    // Build trigger content: name + param badge + ctx badge
+    triggerText.innerHTML = '';
+    const nameNode = document.createElement('span');
+    nameNode.className = 'ss-trigger-text';
+    nameNode.textContent = dispText;
+    triggerText.appendChild(nameNode);
+    if (paramHint) {
+      const pb = document.createElement('span');
+      pb.className = 'ss-opt-param';
+      pb.style.marginLeft = '4px';
+      pb.textContent = paramHint;
+      triggerText.appendChild(pb);
+    }
+    if (ctxLabel) {
+      const cb = document.createElement('span');
+      cb.className = 'ss-opt-param';
+      cb.style.marginLeft = '3px';
+      cb.style.color = '#8fbcbb';
+      cb.style.borderColor = 'rgba(143,188,187,0.3)';
+      cb.textContent = ctxLabel;
+      triggerText.appendChild(cb);
+    }
+    trigger.title = fullText + (ctxLabel ? ` — ${ctxLabel}` : '');
   }
 
   function open() {
@@ -227,7 +260,9 @@ function makeSearchableSelect(selectEl) {
 
   updateTrigger();
 
-  return { open, close, refresh() { updateTrigger(); if (isOpen) renderOptions(searchInput.value); } };
+  const widget = { open, close, refresh() { updateTrigger(); if (isOpen) renderOptions(searchInput.value); } };
+  selectEl._ssWidget = widget; // allow external callers to refresh after data changes
+  return widget;
 }
 // ── End searchable select ────────────────────────────────────────────────────
 
@@ -545,7 +580,10 @@ async function init() {
     'rag-model-select',
     'code-bench-model',
     'code-judge-model-select',
+    'code-bench-ctx',
+    'code-lang-filter',
     'halluc-model',
+    'halluc-max-context',
   ].forEach(id => {
     const el = document.getElementById(id);
     if (el) makeSearchableSelect(el);
@@ -1808,15 +1846,22 @@ function renderNodeSlideout() {
 function toggleNodeSlideout() {
   const panel   = document.getElementById('node-slideout');
   const chevron = document.getElementById('footer-node-chevron');
+  const btn     = document.getElementById('footer-node-btn');
   if (!panel) return;
-  const open = panel.classList.contains('hidden');
-  if (open) {
-    renderNodeSlideout();
-    panel.classList.remove('hidden');
-    if (chevron) chevron.style.transform = 'rotate(180deg)';
+  const isOpen = !panel.classList.contains('hidden');
+  if (isOpen) {
+    closeNodeSlideout();
   } else {
-    panel.classList.add('hidden');
-    if (chevron) chevron.style.transform = '';
+    renderNodeSlideout();
+    // Position the popover just above the trigger button
+    if (btn) {
+      const rect = btn.getBoundingClientRect();
+      panel.style.left   = rect.left + 'px';
+      panel.style.bottom = (window.innerHeight - rect.top + 6) + 'px';
+      panel.style.top    = '';
+    }
+    panel.classList.remove('hidden');
+    if (chevron) chevron.style.transform = 'rotate(180deg)'; // up→down when open
   }
 }
 
@@ -1824,7 +1869,7 @@ function closeNodeSlideout() {
   const panel   = document.getElementById('node-slideout');
   const chevron = document.getElementById('footer-node-chevron');
   if (panel)   panel.classList.add('hidden');
-  if (chevron) chevron.style.transform = '';
+  if (chevron) chevron.style.transform = 'rotate(0deg)'; // restore up arrow
 }
 
 async function selectServer(id) {
@@ -2120,6 +2165,8 @@ async function fetchModels() {
     updateInventorySyncBadge();
     // Keep all model dropdowns in sync regardless of which workspace is active.
     populateModelDropdowns();
+    // Fetch context lengths in the background — widgets re-read on next open.
+    fetchModelCtxLengths();
     // Persist for stale-while-revalidate on next page load.
     try {
       localStorage.setItem('neurollama-model-cache', JSON.stringify({ models, ts: Date.now() }));
@@ -2128,6 +2175,28 @@ async function fetchModels() {
     console.error(error);
     renderModelsEmpty(error.message);
   }
+}
+
+// Fetch trained context lengths for all models and store in modelCtxLengths.
+// Called once after models load; the ss-widget reads from this map at render time.
+async function fetchModelCtxLengths() {
+  try {
+    const res = await fetch('/api/models/ctx-lengths');
+    if (!res.ok) return;
+    modelCtxLengths = await res.json();
+    // Refresh all ss-widgets so ctx badges appear in triggers without needing to reopen.
+    document.querySelectorAll('select[id]').forEach(sel => {
+      if (sel._ssWidget) sel._ssWidget.refresh();
+    });
+  } catch { /* silently ignore */ }
+}
+
+// Format a raw context token count into a human-readable badge string.
+function fmtCtx(n) {
+  if (!n || n <= 0) return '';
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1) + 'M ctx';
+  if (n >= 1024)      return Math.round(n / 1024) + 'K ctx';
+  return n + ' ctx';
 }
 
 function initAccordionRow() {
@@ -7638,7 +7707,7 @@ function switchBenchmarkSubtab(tab) {
   });
   if (tab === 'optimizer') loadOptimizerHistory();
   if (tab === 'nodevnode') loadNvnPanel();
-  if (tab === 'code') { initCodeBenchLangGrid(); fetchCodeBenchRuns(); }
+  if (tab === 'code') { initCodeBenchLangGrid(); fetchCodeBenchRuns(); fetchCodeCheckerStatus(); }
   if (tab === 'hallucination') { fetchHallucinationRuns(); }
 }
 
@@ -8824,6 +8893,52 @@ let codeBenchRuns = [];
 let codeBenchEventSource = null;
 let codeBenchDebug = false;
 let hallucDebug = false;
+let codeBenchTimerInterval = null;
+let codeBenchTimerStart = 0;
+let hallucTimerInterval = null;
+let hallucTimerStart = 0;
+
+function startBenchTimer(type) {
+  const wrapperId = type === 'code' ? 'code-bench-timer' : 'halluc-timer';
+  const displayId = type === 'code' ? 'code-bench-timer-display' : 'halluc-timer-display';
+  const wrapper = document.getElementById(wrapperId);
+  const display = document.getElementById(displayId);
+  if (!wrapper || !display) return;
+
+  if (type === 'code') {
+    if (codeBenchTimerInterval) clearInterval(codeBenchTimerInterval);
+    codeBenchTimerStart = Date.now();
+    codeBenchTimerInterval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - codeBenchTimerStart) / 1000);
+      const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+      const ss = String(elapsed % 60).padStart(2, '0');
+      display.textContent = `${mm}:${ss}`;
+    }, 1000);
+  } else {
+    if (hallucTimerInterval) clearInterval(hallucTimerInterval);
+    hallucTimerStart = Date.now();
+    hallucTimerInterval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - hallucTimerStart) / 1000);
+      const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+      const ss = String(elapsed % 60).padStart(2, '0');
+      display.textContent = `${mm}:${ss}`;
+    }, 1000);
+  }
+
+  display.textContent = '00:00';
+  wrapper.classList.remove('hidden');
+}
+
+function stopBenchTimer(type) {
+  const wrapperId = type === 'code' ? 'code-bench-timer' : 'halluc-timer';
+  const wrapper = document.getElementById(wrapperId);
+  if (type === 'code') {
+    if (codeBenchTimerInterval) { clearInterval(codeBenchTimerInterval); codeBenchTimerInterval = null; }
+  } else {
+    if (hallucTimerInterval) { clearInterval(hallucTimerInterval); hallucTimerInterval = null; }
+  }
+  if (wrapper) wrapper.classList.add('hidden');
+}
 
 function toggleBenchDebug(type) {
   if (type === 'code') {
@@ -8902,14 +9017,18 @@ function startCodeBenchmark() {
   if (stopBtn) stopBtn.classList.remove('hidden');
 
   appendCodeConsole('Connecting to server…');
+  startBenchTimer('code');
 
+  const ctxVal = document.getElementById('code-bench-ctx')?.value || '';
   const params = new URLSearchParams({ model, langs: langs.join(','), judge_model: judgeModel });
+  if (ctxVal) params.set('num_ctx', ctxVal);
   if (codeBenchDebug) params.set('debug', 'true');
   codeBenchEventSource = new EventSource(`/api/benchmarks/code/run?${params}`);
 
   const codeBenchDone = () => {
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-play text-[10px]"></i>RUN CODE BENCHMARK'; }
     if (stopBtn) stopBtn.classList.add('hidden');
+    stopBenchTimer('code');
   };
 
   codeBenchEventSource.addEventListener('status', e => {
@@ -8941,6 +9060,7 @@ function stopCodeBenchmark() {
     codeBenchEventSource.close();
     codeBenchEventSource = null;
   }
+  stopBenchTimer('code');
   appendCodeConsole('⏹ Benchmark stopped by user.');
   const btn = document.getElementById('code-bench-run-btn');
   const stopBtn = document.getElementById('code-bench-stop-btn');
@@ -8997,6 +9117,38 @@ function appendHallucConsole(msg) {
   if (color) div.style.color = color;
   el.appendChild(div);
   el.scrollTop = el.scrollHeight;
+}
+
+async function fetchCodeCheckerStatus() {
+  const el = document.getElementById('code-checker-status');
+  const summary = document.getElementById('code-checker-summary');
+  if (!el) return;
+  try {
+    const res = await fetch('/api/benchmarks/code/checkers');
+    if (!res.ok) throw new Error(res.statusText);
+    const checkers = await res.json();
+
+    const langMeta = Object.fromEntries(CODE_LANGS.map(l => [l.lang, l]));
+    const available = checkers.filter(c => c.available).length;
+    const total = checkers.length;
+    if (summary) summary.textContent = `${available}/${total} available`;
+
+    el.innerHTML = checkers.map(c => {
+      const meta = langMeta[c.lang] || { icon: 'fa-solid fa-code', label: c.lang };
+      const dot = c.available
+        ? `<span class="text-[#a3be8c]"><i class="fa-solid fa-circle text-[6px]"></i></span>`
+        : `<span class="text-[#bf616a]"><i class="fa-solid fa-circle text-[6px]"></i></span>`;
+      const binaryLine = c.binary ? `\nTool: ${c.binary}` : '\nTool: built-in';
+      const tip = c.available
+        ? `${meta.label || c.lang}: checker available${binaryLine}`
+        : `${meta.label || c.lang}: not installed${binaryLine}\nInstall: ${c.install_hint || 'not available'}`;
+      return `<span title="${escapeHTML(tip)}"
+        class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-mono cursor-default
+               ${c.available ? 'bg-[#a3be8c]/10 text-[#a3be8c] border border-[#a3be8c]/20' : 'bg-[#bf616a]/10 text-[#bf616a] border border-[#bf616a]/20'}">
+        ${dot}<i class="${meta.icon} text-[8px]"></i>${escapeHTML(meta.label || c.lang)}
+      </span>`;
+    }).join('');
+  } catch { /* silently skip if endpoint unavailable */ }
 }
 
 async function fetchCodeBenchRuns() {
@@ -9058,56 +9210,68 @@ function renderLangLeaderboard() {
                        : q >= 4 ? 'bg-[#d08770]/20 text-[#d08770] border-[#d08770]/40'
                        : q > 0  ? 'bg-[#bf616a]/20 text-[#bf616a] border-[#bf616a]/40'
                        :          'bg-[#4c566a]/20 text-[#4c566a] border-[#4c566a]/30';
-  const modelShort = m => { const s = m.replace(/:latest$/, ''); return s.length > 14 ? s.slice(0,12)+'…' : s; };
 
   // Build icon + label lookup from CODE_LANGS
   const langMeta = Object.fromEntries(CODE_LANGS.map(l => [l.lang, l]));
   const activeLangs = ['python','go','javascript','typescript','node','bash','sh','rust','php','ruby','c','sql']
     .filter(l => top3[l]);
 
-  // Inline medal chips: 🥇[score] model · 🥈[score] model · 🥉[score] model  — all on one line
-  const inlineMedals = (arr) => {
-    if (!arr || arr.length === 0) return `<span class="text-[8px] text-[#4c566a]">—</span>`;
-    return arr.map((e, i) => {
-      const q = e.quality_score;
-      const bc = badgeCls(q);
-      const nm = modelShort(e.model);
-      return `<span class="inline-flex items-center gap-0.5 shrink-0">
-        <span class="text-[9px]">${MEDAL[i]}</span>
-        <span class="inline-flex px-1 py-px rounded border text-[8px] font-bold font-mono ${bc}">${q.toFixed(1)}</span>
-        <span class="text-[8px] font-mono text-[#8fbcbb]" title="${escapeHTML(e.model)}">${escapeHTML(nm)}</span>
-      </span>`;
-    }).join('<span class="text-[#4c566a] text-[8px] mx-1">·</span>');
+  // One fixed-width cell per medal slot — CSS truncates the model name, title shows full
+  const medalCell = (arr, i) => {
+    const e = arr?.[i];
+    if (!e) return `<div></div>`;
+    const q = e.quality_score;
+    const bc = badgeCls(q);
+    const nm = e.model.replace(/:latest$/, '');
+    return `<div class="flex items-center gap-0.5 overflow-hidden">
+      <span class="shrink-0 text-[9px]">${MEDAL[i]}</span>
+      <span class="shrink-0 inline-flex items-center justify-center px-1 py-px rounded border text-[8px] font-bold font-mono ${bc}" style="min-width:27px">${q.toFixed(1)}</span>
+      <span class="text-[8px] font-mono text-[#8fbcbb] overflow-hidden text-ellipsis whitespace-nowrap flex-1" title="${escapeHTML(e.model)}">${escapeHTML(nm)}</span>
+    </div>`;
+  };
+
+  // Each language row: fixed lang col (70px) + 3 equal medal cols (1fr each)
+  const langRow = (lang, node) => {
+    const meta = langMeta[lang] || { icon: '', label: lang };
+    const arr  = top3[lang]?.[node] || [];
+    return `<div style="display:grid;grid-template-columns:70px 1fr 1fr 1fr;gap:0 4px;align-items:center;" class="py-0.5">
+      <span class="flex items-center gap-1 text-[9px] font-mono text-[#d8dee9] font-semibold overflow-hidden">
+        <i class="${meta.icon} text-[#88c0d0] text-[8px] shrink-0"></i>
+        <span class="truncate">${meta.label}</span>
+      </span>
+      ${medalCell(arr, 0)}${medalCell(arr, 1)}${medalCell(arr, 2)}
+    </div>`;
   };
 
   if (nodes.length === 1) {
     const node = nodes[0];
-    // Single-node: 2-col list, each row = icon + lang + inline medals on one line
+    // Single-node: 2-col layout, each col is a stack of fixed-width rows
+    const half = Math.ceil(activeLangs.length / 2);
+    const left  = activeLangs.slice(0, half);
+    const right = activeLangs.slice(half);
     el.innerHTML = `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 20px;">
-        ${activeLangs.map(lang => {
-          const meta = langMeta[lang] || { icon: '', label: lang };
-          return `<div class="flex items-center gap-2 py-0.5 min-w-0">
-            <span class="shrink-0 w-14 flex items-center gap-1 text-[9px] font-mono text-[#d8dee9] font-semibold">
-              <i class="${meta.icon} text-[#88c0d0] text-[8px]"></i>${meta.label}
-            </span>
-            <span class="flex items-center gap-0 flex-wrap min-w-0">${inlineMedals(top3[lang]?.[node])}</span>
-          </div>`;
-        }).join('')}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 20px;">
+        <div>${left.map(l => langRow(l, node)).join('')}</div>
+        <div>${right.map(l => langRow(l, node)).join('')}</div>
       </div>`;
   } else {
-    // Multi-node: lang col + one col per node, medals stacked but compact
+    // Multi-node: lang col + one sub-section per node
     el.innerHTML = `
-      <div style="display:grid;grid-template-columns:6rem ${nodes.map(()=>'1fr').join(' ')};gap:2px 12px;align-items:center;">
+      <div style="display:grid;grid-template-columns:6rem ${nodes.map(()=>'1fr').join(' ')};gap:2px 12px;align-items:start;">
         <div></div>
-        ${nodes.map(n => `<div class="text-[8px] font-tech uppercase text-[#88c0d0] tracking-wider">${escapeHTML(n)}</div>`).join('')}
+        ${nodes.map(n => `<div class="text-[8px] font-tech uppercase text-[#88c0d0] tracking-wider pb-1">${escapeHTML(n)}</div>`).join('')}
         ${activeLangs.map(lang => {
           const meta = langMeta[lang] || { icon: '', label: lang };
           return `
             <div class="flex items-center gap-1 py-0.5 text-[9px] font-mono text-[#d8dee9] font-semibold">
-              <i class="${meta.icon} text-[#88c0d0] text-[8px]"></i>${meta.label}
+              <i class="${meta.icon} text-[#88c0d0] text-[8px] shrink-0"></i>${meta.label}
             </div>
-            ${nodes.map(node => `<div class="flex items-center gap-0 flex-wrap">${inlineMedals(top3[lang]?.[node])}</div>`).join('')}`;
+            ${nodes.map(node => {
+              const arr = top3[lang]?.[node] || [];
+              return `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0 3px;" class="py-0.5">
+                ${[0,1,2].map(i => medalCell(arr, i)).join('')}
+              </div>`;
+            }).join('')}`;
         }).join('')}
       </div>`;
   }
@@ -9198,7 +9362,7 @@ function renderCodeBenchResults() {
   });
   groupList.sort((a, b) => (b[0].created_at || '').localeCompare(a[0].created_at || ''));
 
-  const codeRow = (r, isLatest, gIdx, hasOlder) => {
+  const codeRow = (r, isLatest, gIdx, hasOlder, isOlder = false) => {
     let q = r.avg_quality_score;
     if (langFilter) {
       try {
@@ -9213,10 +9377,16 @@ function renderCodeBenchResults() {
            <i id="code-grp-icon-${gIdx}" class="fa-solid fa-chevron-right text-[8px]"></i>
          </button>`
       : `<span class="inline-block w-3 mr-1"></span>`;
+    const modelCell = isOlder
+      ? `<span class="text-[#4c566a] mr-1 select-none">└</span><span class="text-[#8fbcbb]">${escapeHTML(r.model_name)}</span>`
+      : `${chevron}<span class="text-[#d8dee9] font-semibold">${escapeHTML(r.model_name)}</span>`;
+    const trBase = isOlder
+      ? `code-hist-older-${gIdx} hidden bg-[#242933]/50 hover:bg-[#242933]/80`
+      : (r.id === selectedCodeRunId ? 'bg-[#3b4252]/40' : 'hover:bg-[#3b4252]/30');
     return `
-      <tr class="hover:bg-[#3b4252]/30 cursor-pointer border-b border-[#4c566a]/10 ${r.id === selectedCodeRunId ? 'bg-[#3b4252]/40' : ''}"
+      <tr class="${trBase} cursor-pointer border-b border-[#4c566a]/10"
           onclick="showCodeBenchDetail(${r.id})">
-        <td class="text-[#d8dee9] font-semibold">${chevron}${escapeHTML(r.model_name)}</td>
+        <td>${modelCell}</td>
         <td class="text-[#4c566a]">${escapeHTML(r.server_name || '—')}</td>
         <td class="text-[#8fbcbb]">${escapeHTML(r.judge_model)}</td>
         <td class="text-[#d8dee9]">${langCount}</td>
@@ -9232,19 +9402,8 @@ function renderCodeBenchResults() {
   let rows = '';
   groupList.forEach((group, gIdx) => {
     const [latest, ...older] = group;
-    rows += codeRow(latest, true, gIdx, older.length > 0);
-    if (older.length > 0) {
-      rows += `
-        <tr id="code-hist-group-${gIdx}" class="hidden">
-          <td colspan="10" class="p-0 border-b border-[#4c566a]/20">
-            <table class="table table-xs w-full font-mono text-[10px]">
-              <tbody class="bg-[#242933]/50">
-                ${older.map(r => codeRow(r, false, gIdx, false)).join('')}
-              </tbody>
-            </table>
-          </td>
-        </tr>`;
-    }
+    rows += codeRow(latest, true, gIdx, older.length > 0, false);
+    older.forEach(r => { rows += codeRow(r, false, gIdx, false, true); });
   });
 
   histEl.innerHTML = `
@@ -9261,10 +9420,11 @@ function renderCodeBenchResults() {
 }
 
 function toggleCodeHistGroup(gIdx) {
-  const row = document.getElementById(`code-hist-group-${gIdx}`);
   const icon = document.getElementById(`code-grp-icon-${gIdx}`);
-  if (!row) return;
-  const nowHidden = row.classList.toggle('hidden');
+  const rows = document.querySelectorAll(`.code-hist-older-${gIdx}`);
+  if (!rows.length) return;
+  const nowHidden = rows[0].classList.toggle('hidden');
+  rows.forEach(r => r.classList.toggle('hidden', nowHidden));
   if (icon) icon.className = `fa-solid fa-chevron-${nowHidden ? 'right' : 'down'} text-[8px]`;
 }
 
@@ -9385,6 +9545,7 @@ function startHallucinationTest() {
   if (stopBtn) stopBtn.classList.remove('hidden');
 
   appendHallucConsole('Connecting to server…');
+  startBenchTimer('halluc');
 
   const params = new URLSearchParams({ model, max_context_k: maxK });
   if (customFiller) params.set('custom_filler', customFiller);
@@ -9395,6 +9556,7 @@ function startHallucinationTest() {
   const hallucDone = () => {
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-play text-[10px]"></i>RUN HALLUCINATION TEST'; }
     if (stopBtn) stopBtn.classList.add('hidden');
+    stopBenchTimer('halluc');
   };
 
   hallucinationEventSource.addEventListener('status', e => {
@@ -9446,6 +9608,7 @@ function stopHallucinationTest() {
     hallucinationEventSource.close();
     hallucinationEventSource = null;
   }
+  stopBenchTimer('halluc');
   appendHallucConsole('⏹ Test stopped by user.');
   const btn = document.getElementById('halluc-run-btn');
   const stopBtn = document.getElementById('halluc-stop-btn');
@@ -9536,17 +9699,23 @@ function renderHallucinationHistory() {
   const recallCls = p => p >= 80 ? 'text-[#a3be8c]' : p >= 50 ? 'text-[#ebcb8b]' : 'text-[#bf616a]';
   const hallucCls = p => p > 30 ? 'text-[#bf616a]' : p > 10 ? 'text-[#d08770]' : 'text-[#a3be8c]';
 
-  const hallucRow = (r, isLatest, gIdx, hasOlder) => {
+  const hallucRow = (r, isLatest, gIdx, hasOlder, isOlder = false) => {
     const chevron = isLatest && hasOlder
       ? `<button onclick="event.stopPropagation(); toggleHallucHistGroup(${gIdx})"
            class="mr-1 text-[#4c566a] hover:text-[#88c0d0] transition-colors">
            <i id="halluc-grp-icon-${gIdx}" class="fa-solid fa-chevron-right text-[8px]"></i>
          </button>`
       : `<span class="inline-block w-3 mr-1"></span>`;
+    const modelCell = isOlder
+      ? `<span class="text-[#4c566a] mr-1 select-none">└</span><span class="text-[#8fbcbb]">${escapeHTML(r.model_name)}</span>`
+      : `${chevron}<span class="text-[#d8dee9] font-semibold">${escapeHTML(r.model_name)}</span>`;
+    const trBase = isOlder
+      ? `halluc-hist-older-${gIdx} hidden bg-[#242933]/50 hover:bg-[#242933]/80`
+      : 'hover:bg-[#3b4252]/30';
     return `
-      <tr class="hover:bg-[#3b4252]/30 cursor-pointer border-b border-[#4c566a]/10"
+      <tr class="${trBase} cursor-pointer border-b border-[#4c566a]/10"
           onclick="showHallucinationDetail(${r.id})">
-        <td class="text-[#d8dee9] font-semibold">${chevron}${escapeHTML(r.model_name)}</td>
+        <td>${modelCell}</td>
         <td class="text-[#4c566a]">${escapeHTML(r.server_name || '—')}</td>
         <td class="text-[#88c0d0]">${fmtK(r.max_context_k)}</td>
         <td class="font-bold ${recallCls(r.recall_pct)}">${r.recall_pct.toFixed(1)}%</td>
@@ -9560,19 +9729,8 @@ function renderHallucinationHistory() {
   let rows = '';
   groupList.forEach((group, gIdx) => {
     const [latest, ...older] = group;
-    rows += hallucRow(latest, true, gIdx, older.length > 0);
-    if (older.length > 0) {
-      rows += `
-        <tr id="halluc-hist-group-${gIdx}" class="hidden">
-          <td colspan="8" class="p-0 border-b border-[#4c566a]/20">
-            <table class="table table-xs w-full font-mono text-[10px]">
-              <tbody class="bg-[#242933]/50">
-                ${older.map(r => hallucRow(r, false, gIdx, false)).join('')}
-              </tbody>
-            </table>
-          </td>
-        </tr>`;
-    }
+    rows += hallucRow(latest, true, gIdx, older.length > 0, false);
+    older.forEach(r => { rows += hallucRow(r, false, gIdx, false, true); });
   });
 
   el.innerHTML = `
@@ -9589,10 +9747,11 @@ function renderHallucinationHistory() {
 }
 
 function toggleHallucHistGroup(gIdx) {
-  const row = document.getElementById(`halluc-hist-group-${gIdx}`);
   const icon = document.getElementById(`halluc-grp-icon-${gIdx}`);
-  if (!row) return;
-  const nowHidden = row.classList.toggle('hidden');
+  const rows = document.querySelectorAll(`.halluc-hist-older-${gIdx}`);
+  if (!rows.length) return;
+  const nowHidden = rows[0].classList.toggle('hidden');
+  rows.forEach(r => r.classList.toggle('hidden', nowHidden));
   if (icon) icon.className = `fa-solid fa-chevron-${nowHidden ? 'right' : 'down'} text-[8px]`;
 }
 

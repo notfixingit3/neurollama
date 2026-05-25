@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.2.10-bf616a?style=for-the-badge&logo=git&logoColor=white" alt="Version v0.2.10" />
+  <img src="https://img.shields.io/badge/version-v0.2.16-bf616a?style=for-the-badge&logo=git&logoColor=white" alt="Version v0.2.16" />
   <a href="https://golang.org/"><img src="https://img.shields.io/badge/Go-1.26.3-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go Version" /></a>
   <a href="https://tailwindcss.com/"><img src="https://img.shields.io/badge/Tailwind_CSS-4.3%2B-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white" alt="Tailwind CSS" /></a>
   <a href="https://daisyui.com/"><img src="https://img.shields.io/badge/daisyUI-5.5%2B-5A0EF8?style=for-the-badge&logo=daisyui&logoColor=white" alt="DaisyUI" /></a>
@@ -24,7 +24,7 @@
 
 **NEUROLLAMA** is a lightweight, self-hosted web control panel that provides a beautiful, techy interface to connect, monitor, and query your Ollama instances. Styled using the **Nord Palette** and built with **Go (Gin)** and **Tailwind CSS/daisyUI**, it is designed to look like a futuristic command console.
 
-With NEUROLLAMA, you can connect to multiple local or remote servers, inspect which models are currently loaded in memory, inspect model parameters/configs, build new models using custom Modelfiles, run diagnostics, benchmark models across multiple test types, and chat with models inside a premium Terminal Emulator Playground.
+With NEUROLLAMA you can manage multiple Ollama nodes, inspect VRAM telemetry, benchmark models across five test types plus two dedicated deep-eval suites, run multi-language code generation tests with live syntax checking, probe hallucination resistance, chat with a premium terminal playground, build custom models, and more — all from a single binary with zero runtime dependencies.
 
 ---
 
@@ -38,59 +38,121 @@ With NEUROLLAMA, you can connect to multiple local or remote servers, inspect wh
 
 ## ⚡ Key Features
 
-- **🌐 Multi-Node Registry**: Register, edit, test, and swap between multiple local or remote Ollama server nodes. Credential values are redacted from API responses, and real-time background telemetry shows active server latency, online status, and version. Set a manual GPU VRAM capacity per node — used to scale VRAM bars and the loaded model indicator when Ollama's API cannot report it.
+### 🌐 Multi-Node Registry
+Register, edit, test, and hot-swap between multiple local or remote Ollama server nodes. Credential values are redacted from API responses. Real-time background telemetry shows active-server latency, online status, and version channel (STABLE / PRE-REL). Set a manual GPU VRAM capacity per node to anchor telemetry bars when Ollama's API cannot report it.
 
-- **📦 Model Hub & Inventory**:
-  - View all installed models with parameters, size, and serialization details.
-  - Capability badges (**VIS** / **EMB**) on inventory rows and catalog cards — detected from model family metadata and name heuristics.
-  - Inspect full Modelfiles, templates, parameters, system prompts, and sanitized external model cards with raw/source view controls.
-  - Unified **Model Hub** panel: pull directly from the **Ollama Library** or **Hugging Face** (GGUFs) with real-time download speed and progress bars. Browse a curated 35-model catalog filterable by category, source, and capabilities.
-  - Batch select and delete multiple models.
+The **Node selector** lives in the footer status bar as a bordered pill badge — click it and a popover appears directly above the button showing all registered nodes with their status, Ollama version, latency, and a one-click **SET** button.
 
-- **💬 TTY0 Chat Playground**:
-  - Custom terminal-style playground to interact with your models.
-  - Save, load, and edit custom **System Prompt Presets** persisted to SQLite.
-  - Real-time parameter controls: Temperature, Context Limit, Top K, Top P, Seed, Repeat Penalty, hardware allocation, and generation limits.
-  - Stop in-flight generations and restore the last failed prompt for quick retry.
-  - **🧠 Render Thinking Toggle**: Instantly hide/show reasoning tracks (`<think>` blocks) from DeepSeek R1 and other reasoning models.
+### 📦 Model Hub & Inventory
+- View all installed models with parameters, size, quantization, and serialization details.
+- **Trained context-length badge** shown in every model dropdown: e.g. `128K ctx`, `40K ctx`. Sourced from Ollama's `/api/show` model info in parallel at startup.
+- Capability badges (**VIS** / **EMB**) on inventory rows and catalog cards — detected from model-family metadata and name heuristics.
+- Inspect full Modelfiles, templates, parameters, system prompts, and sanitized model cards with raw/source view controls.
+- Unified **Model Hub** panel: pull directly from the **Ollama Library** or **Hugging Face** (GGUFs) with real-time download speed and progress bars. Browse a curated 35-model catalog filterable by category, source, and capabilities.
+- Batch-select and delete multiple models.
 
-- **🛠️ Model Builder**:
-  - Create new customized models using a simple graphical interface.
-  - Automatically compiles a Modelfile from your base model, system prompt, temperature, and custom parameters.
-  - Real-time build progress logs stream directly to the UI, with cancellation support.
+### 💬 TTY0 Chat Playground
+- Custom terminal-style playground to interact with your models.
+- Save, load, and edit custom **System Prompt Presets** persisted to SQLite.
+- Real-time parameter controls: Temperature, Context Limit, Top K, Top P, Seed, Repeat Penalty, hardware allocation, and generation limits.
+- Stop in-flight generations and restore the last failed prompt for quick retry.
+- **🧠 Render Thinking Toggle**: hide/show reasoning tracks (`<think>` blocks) from DeepSeek R1, QwQ, and other reasoning models.
+- Searchable model select with param-size badge and trained context-length badge inline.
 
-- **📼 Memory Telemetry**:
-  - View which models Ollama currently has loaded, their sizes, and GPU VRAM vs system RAM allocation — sourced from Ollama's `/api/ps` endpoint.
-  - Live canvas chart tracking **Host CPU**, **Host RAM**, and **Ollama VRAM** over time. Chart scale is anchored to the node's configured VRAM capacity when set.
-  - **Loaded model indicator** pinned to the footer status bar: shows model name, parameter size, quantization level, and VRAM used/total (e.g. `gemma3 12B Q4_K_M · 5.9G/24G`). Includes a one-click eject button with confirmation.
-  - SYS RAM row shows **"Local Ollama only"** when the active node is remote, since that metric is only meaningful on the host machine.
-  - ⚠️ **Remote node limitation**: Ollama's API does not expose total VRAM capacity or GPU utilization. For remote servers, loaded model sizes are shown accurately but VRAM percentage bars are relative to any manually configured VRAM value (or hidden if none is set).
+### 🛠️ Model Builder
+- Create new customized models using a graphical interface — compiles a Modelfile from your base model, system prompt, temperature, and custom parameters.
+- Real-time build-progress logs stream to the UI with cancellation support.
 
-- **📈 Benchmarks**:
-  - Five benchmark types: **Standard** (TPS), **Vision** (multimodal TPS), **Embedding** (chunks/sec), **Long-Context** (TPS + degradation %), and **Reasoning** (accuracy %).
-  - Model select is automatically filtered to models that match the selected benchmark type (vision models for Vision, embedding models for Embed, etc.).
-  - Sortable leaderboard with clickable column headers, per-type filtering, letter score ratings, and inline notes.
-  - **Retest** button (↻) on each leaderboard row: switches to Benchmark tab, pre-selects the correct type and model, and starts the run automatically.
-  - Hyperparameter Optimizer for tuning inference parameters.
+### 📼 Memory Telemetry
+- View which models Ollama currently has loaded, their sizes, and GPU VRAM vs system RAM allocation.
+- Live canvas chart tracking **Host CPU**, **Host RAM**, and **Ollama VRAM** over time, anchored to the node's configured VRAM capacity.
+- **Loaded model indicator** pinned to the footer: shows model name, param size, quantization, and VRAM used/total (e.g. `gemma3 12B Q4_K_M · 5.9G/24G`). One-click eject with confirmation.
+- SYS RAM row shows **"Local Ollama only"** when the active node is remote.
 
-- **⚙️ Settings**:
-  - **Model Update Scheduler**: configure automatic background checks for model updates at custom intervals. Logs are streamed live.
+### 📈 Standard Benchmarks
+Five benchmark types: **Standard** (TPS), **Vision** (multimodal TPS), **Embedding** (chunks/sec), **Long-Context** (TPS + degradation %), and **Reasoning** (accuracy %).
 
-- **🩺 Preflight Diagnostics**:
-  - Validate SQLite, data directory writability, static assets, active Ollama reachability, model inventory access, settings, and streaming route readiness.
+- Model select auto-filtered to match the selected benchmark type.
+- Sortable leaderboard with clickable headers, per-type filtering, letter-score ratings (S/A/B/C/D/F), and inline notes.
+- **Retest** button on each leaderboard row: switches tab, pre-selects model and type, and starts the run.
+- Models are automatically evicted from VRAM after every benchmark run so the next model starts with a clean slate.
 
-- **📐 Fixed Layout**:
-  - Header and footer are always visible — workspace content scrolls independently between them.
-  - Instantly toggle Node Registry, Chat History, and Config sidebars to optimize screen width. Layout settings persist in local browser storage.
+### 💻 Code Benchmark
+Evaluate a model's code-generation capability across up to 12 languages simultaneously:
+
+**Python · Go · JavaScript · TypeScript · Node.js · Bash · sh · PHP · Ruby · Rust · C · SQL**
+
+- Each language receives a real algorithmic task (not toy examples). The model writes the solution; a syntax checker validates it; a second AI judge scores quality 1–10.
+- **Syntax Checker Status Panel**: live green/red badges in the config area show which checkers are available on your system. Hover any badge for the exact binary name and install command.
+- **Context Window (num_ctx) selector**: choose from Model Default → 4K → 128K. Defaults to 16K to prevent KV-cache bloat across 12 sequential runs.
+- **Language filter**: run only the languages you care about.
+- **Leaderboard**: top-3 models per language shown with 🥇🥈🥉 medals; full run history with expandable per-language detail rows.
+- **Stopwatch timer** in the console header during active runs.
+- Models are unloaded from VRAM after each full run.
+
+#### Syntax checker dependencies
+The following optional binaries extend checker coverage:
+
+| Language | Binary | Install |
+|---|---|---|
+| Python | `python3` | `brew install python` / [python.org](https://python.org) |
+| Go | built-in | always available |
+| JavaScript | `node` | `brew install node` / [nodejs.org](https://nodejs.org) |
+| TypeScript | `deno` | `brew install deno` / [deno.com](https://deno.com) |
+| Node.js | `node` | same as JavaScript |
+| Bash | `bash` | pre-installed on macOS/Linux |
+| sh (POSIX) | `sh` | pre-installed on macOS/Linux |
+| PHP | `php` | `brew install php` / [php.net](https://php.net) |
+| Ruby | `ruby` | `brew install ruby` / [ruby-lang.org](https://ruby-lang.org) |
+| Rust | `rustc` | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` / [rustup.rs](https://rustup.rs) |
+| C | `gcc` | `brew install gcc` / `xcode-select --install` / `apt install build-essential` |
+| SQL | `sqlfluff` | `pip install sqlfluff` / `brew install sqlfluff` / [sqlfluff.com](https://sqlfluff.com) |
+
+> Languages without their checker binary will still run generation and AI-judge scoring — syntax validation is simply skipped with a console note.
+
+### 🧠 Hallucination Benchmark
+Probe a model's resistance to confabulation by testing fact-recall across increasing context-window sizes.
+
+- Feed the model a knowledge document, then ask factual questions about it at progressively larger context lengths (up to a configurable max).
+- Each answer is classified as **PASS** (correct recall), **HALLUCINATION** (plausible but wrong), or **REFUSAL** (model declined to answer).
+- **Heat-map grid**: rows = questions, columns = context sizes — colour-coded green/red/amber at a glance.
+- **Leaderboard**: ranked by maximum context at which the model maintained accurate recall.
+- **Stopwatch timer** in the console header during active runs.
+
+### 🔍 Hyperparameter Optimizer
+Sweep inference parameters (temperature, top-k, top-p, repeat-penalty, etc.) over a configurable search space and score each combination. Useful for tuning a model for a specific task without manual trial-and-error.
+
+### 📚 RAG (Retrieval-Augmented Generation)
+- Upload PDF or text documents, chunk and index them into a local SQLite-backed vector store.
+- Query the knowledge base with similarity search and inject retrieved context directly into chat.
+
+### ⚙️ Settings
+- **Model Update Scheduler**: configure automatic background checks for model updates at custom intervals with live log streaming.
+
+### 🩺 Preflight Diagnostics
+Validate SQLite, data-directory writability, static assets, active Ollama reachability, model inventory access, settings, and streaming route readiness — all from one panel.
+
+---
+
+## 🎨 UI / UX Details
+
+- **Searchable select widget** on all model dropdowns: type to filter, keyboard-navigable, shows param-size badge + trained context-length badge inline.
+- **Fixed layout**: header and footer always visible — workspace content scrolls independently.
+- Instantly toggle Node Registry, Chat History, and Config sidebars; preferences persist in localStorage.
+- Nord colour palette throughout: Polar Night backgrounds, Snow Storm text, Frost blue accents.
 
 ---
 
 ## 🛠️ Tech Stack
 
-* **Backend**: Go 1.26.3 (powered by [Gin Web Framework](https://github.com/gin-gonic/gin))
-* **Database**: SQLite3 (via `modernc.org/sqlite` for CGO-free compilations)
-* **Frontend**: Vanilla HTML5/JS (ES6), Tailwind CSS v4, daisyUI v5 (Nord theme), FontAwesome icons
-* **Streaming**: Fetch API + EventSource/SSE for model downloads, builds, benchmarks, and telemetry
+| Layer | Technology |
+|---|---|
+| Backend | Go 1.26.3, [Gin](https://github.com/gin-gonic/gin) |
+| Database | SQLite via `modernc.org/sqlite` (CGO-free) |
+| Frontend | Vanilla HTML5/JS (ES6), no framework |
+| CSS | Tailwind CSS v4 (standalone CLI), DaisyUI v5, Nord theme |
+| Icons | Font Awesome 6 |
+| Streaming | Fetch API + Server-Sent Events (SSE) |
 
 ---
 
@@ -98,50 +160,61 @@ With NEUROLLAMA, you can connect to multiple local or remote servers, inspect wh
 
 ### Prerequisites
 
-* [Go](https://go.dev/doc/install) 1.26.3.
-* A running [Ollama](https://ollama.com/) instance (ensure the server has origin permissions enabled if running remotely; typically start Ollama with `OLLAMA_ORIGINS="*" ollama serve`).
-* **Node.js is not required.** CSS is pre-compiled and committed. See [Rebuilding CSS](#rebuilding-css) only if you modify styles.
+- [Go](https://go.dev/doc/install) 1.26.3+
+- A running [Ollama](https://ollama.com/) instance. For remote nodes, start Ollama with:
+  ```bash
+  OLLAMA_ORIGINS="*" ollama serve
+  ```
+- **Node.js is not required.** CSS is pre-compiled and committed. See [Rebuilding CSS](#rebuilding-css) only if you modify styles.
 
 ### Installation
 
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/notfixingit3/neurollama.git
-   cd neurollama
-   ```
+```bash
+git clone https://github.com/notfixingit3/neurollama.git
+cd neurollama
+go build -o neurollama .
+./neurollama
+```
 
-2. **Compile the Go binary**:
-   ```bash
-   go build -o neurollama .
-   ```
+Open **`http://localhost:8080`** in your browser.
 
-3. **Run the server**:
-   ```bash
-   ./neurollama
-   ```
-   The application will start on: **`http://localhost:8080`**
+### Pre-built binaries
+
+Download the latest release binary for your platform from the [Releases](https://github.com/notfixingit3/neurollama/releases) page:
+
+| Platform | Binary |
+|---|---|
+| macOS Apple Silicon | `neurollama-darwin-arm64` |
+| macOS Intel | `neurollama-darwin-amd64` |
+| Linux x86-64 | `neurollama-linux-amd64` |
+| Linux ARM64 | `neurollama-linux-arm64` |
+
+```bash
+chmod +x neurollama-*
+./neurollama-darwin-arm64   # example
+```
 
 ---
 
 ## 🎨 Rebuilding CSS
 
-The compiled `static/css/output.css` is committed to the repo — you only need this if you modify `tailwind/input.css` or templates.
+The compiled `static/css/output.css` is committed — only rebuild if you modify `tailwind/input.css` or templates.
 
-CSS is built using the [Tailwind CSS v4 standalone CLI](https://tailwindcss.com/blog/standalone-cli) — **no Node.js or npm required**.
+Uses the [Tailwind CSS v4 standalone CLI](https://tailwindcss.com/blog/standalone-cli) — **no Node.js or npm required**.
 
 **One-time binary download (macOS arm64):**
 ```bash
 curl -sL https://github.com/tailwindlabs/tailwindcss/releases/download/v4.3.0/tailwindcss-macos-arm64 -o tailwindcss && chmod +x tailwindcss
 ```
 
-For other platforms replace `macos-arm64` with `macos-x64`, `linux-x64`, `linux-arm64`, or `windows-x64.exe`.
+Replace `macos-arm64` with `macos-x64`, `linux-x64`, `linux-arm64`, or `windows-x64.exe` for other platforms.
 
 **Build:**
 ```bash
 ./tailwindcss -i tailwind/input.css -o static/css/output.css --minify
 ```
 
-**Watch mode (auto-rebuild on save):**
+**Watch mode:**
 ```bash
 ./tailwindcss -i tailwind/input.css -o static/css/output.css --watch
 ```
@@ -150,14 +223,36 @@ For other platforms replace `macos-arm64` with `macos-x64`, `linux-x64`, `linux-
 
 ## ⚙️ Configuration & Data Storage
 
-- **SQLite Database**: App configurations, servers registry, chat history, RAG index metadata, diagnostics settings, and prompt presets are stored in `data/neurollama.db` (created automatically on first launch).
-- **Legacy Database Migration**: If `data/ollama-manager.db` exists and `data/neurollama.db` does not, NEUROLLAMA renames the old database file on startup.
-- **Server Credentials**: Bearer tokens, Basic Auth passwords, and custom header values are stored locally for node access but are redacted from normal server-list API responses.
-- **Environment Variables**:
-  - `PORT`: Set a custom port for the server (defaults to `8080`).
-    ```bash
-    PORT=9000 ./neurollama
-    ```
+- **SQLite Database**: stored in `data/neurollama.db` (created automatically on first launch). Holds server registry, chat history, RAG index metadata, benchmark results, and prompt presets.
+- **Legacy migration**: if `data/ollama-manager.db` exists and `data/neurollama.db` does not, NEUROLLAMA renames the old file on startup.
+- **Credentials**: bearer tokens, Basic Auth passwords, and custom header values are stored locally and redacted from API responses.
+- **Custom port**:
+  ```bash
+  PORT=9000 ./neurollama
+  ```
+
+---
+
+## 🐳 Docker
+
+The Dockerfile uses a two-stage build. No Node/npm steps — CSS is pre-compiled.
+
+```dockerfile
+# builder
+FROM golang:1.26-alpine AS builder
+WORKDIR /app
+COPY . .
+RUN go build -ldflags="-s -w" -o neurollama .
+
+# runtime
+FROM alpine:latest
+WORKDIR /app
+COPY --from=builder /app/neurollama .
+COPY --from=builder /app/templates ./templates
+COPY --from=builder /app/static ./static
+EXPOSE 8080
+CMD ["./neurollama"]
+```
 
 ---
 
@@ -166,14 +261,16 @@ For other platforms replace `macos-arm64` with `macos-x64`, `linux-x64`, `linux-
 All commit messages must end with a random Scooby-Doo quote. This is non-negotiable.
 
 ```
-feat: add VRAM telemetry panel
+feat: add hallucination benchmark heat-map
 
 "Zoinks!"
 ```
 
-## 💬 Support & Contributions
+---
 
-If you find this manager helpful, feel free to submit pull requests, open issues, or buy me a coffee!
+## 💬 Support
+
+If you find NEUROLLAMA helpful, feel free to open issues, submit pull requests, or buy me a coffee!
 
 <p align="left">
   <a href="https://buymeacoffee.com/notfixingit" target="_blank">
@@ -185,4 +282,4 @@ If you find this manager helpful, feel free to submit pull requests, open issues
 
 ## 📄 License
 
-This project is licensed under the [MIT License](LICENSE) - see the LICENSE file for details.
+This project is licensed under the [MIT License](LICENSE).

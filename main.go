@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -31,7 +32,7 @@ import (
 	goPDF "github.com/ledongthuc/pdf"
 )
 
-const appVersion = "v0.2.15"
+const appVersion = "v0.2.16"
 
 var (
 	appStartTime = time.Now()
@@ -352,6 +353,7 @@ func main() {
 		api.POST("/models/copy", copyModelHandler)       // POST clone model
 		api.GET("/models/pull", pullModelSSEHandler)     // GET /api/models/pull?name=llama3 (SSE)
 		api.GET("/models/card", getModelCardHandler)     // GET /api/models/card?name=llama3
+		api.GET("/models/ctx-lengths", modelCtxLengthsHandler) // GET /api/models/ctx-lengths
 
 		// Handlers for v0.0.2
 		api.GET("/models/active", getActiveModelsHandler)
@@ -400,6 +402,7 @@ func main() {
 		// Code benchmark
 		api.GET("/benchmarks/code", getCodeBenchmarksHandler)
 		api.GET("/benchmarks/code/run", runCodeBenchmarkSSEHandler)
+		api.GET("/benchmarks/code/checkers", codeSyntaxCheckersHandler)
 		api.DELETE("/benchmarks/code/:id", deleteCodeBenchmarkHandler)
 
 		// Hallucination
@@ -911,6 +914,65 @@ func getModelDetailHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, details)
+}
+
+// modelCtxLengthsHandler returns a map of model_name → trained context length
+// by fanning out parallel /api/show calls for every model on the active server.
+func modelCtxLengthsHandler(c *gin.Context) {
+	activeSrv, err := GetActiveServer()
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{}) // graceful empty response
+		return
+	}
+	client := NewOllamaClient(activeSrv)
+
+	modelList, err := client.ListModels()
+	if err != nil || len(modelList) == 0 {
+		c.JSON(http.StatusOK, gin.H{})
+		return
+	}
+
+	type result struct {
+		name string
+		ctx  int64
+	}
+	ch := make(chan result, len(modelList))
+	var wg sync.WaitGroup
+	for _, m := range modelList {
+		wg.Add(1)
+		go func(name string) {
+			defer wg.Done()
+			details, err := client.GetModelDetails(name)
+			if err != nil {
+				ch <- result{name, 0}
+				return
+			}
+			// Context length is stored as {family}.context_length in model_info
+			var ctxLen int64
+			for k, v := range details.ModelInfo {
+				if strings.HasSuffix(k, ".context_length") {
+					switch n := v.(type) {
+					case float64:
+						ctxLen = int64(n)
+					case int64:
+						ctxLen = n
+					}
+					break
+				}
+			}
+			ch <- result{name, ctxLen}
+		}(m.Name)
+	}
+	wg.Wait()
+	close(ch)
+
+	out := make(map[string]int64, len(modelList))
+	for r := range ch {
+		if r.ctx > 0 {
+			out[r.name] = r.ctx
+		}
+	}
+	c.JSON(http.StatusOK, out)
 }
 
 // deleteModelsHandler deletes a batch of models
@@ -3089,6 +3151,47 @@ func stripThinkBlocks(s string) string {
 	return strings.TrimSpace(s)
 }
 
+// ansiRE matches ANSI terminal escape sequences (colours, cursor movement, etc.)
+var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+// stripANSI removes ANSI escape codes so raw checker output is readable in our console.
+func stripANSI(s string) string { return ansiRE.ReplaceAllString(s, "") }
+
+// nodeBuiltins is the set of bare Node.js core module names that Deno requires
+// to be prefixed with "node:" (e.g. "timers" → "node:timers").
+var nodeBuiltins = map[string]bool{
+	"assert": true, "async_hooks": true, "buffer": true, "child_process": true,
+	"cluster": true, "console": true, "crypto": true, "dgram": true, "dns": true,
+	"domain": true, "events": true, "fs": true, "http": true, "http2": true,
+	"https": true, "inspector": true, "module": true, "net": true, "os": true,
+	"path": true, "perf_hooks": true, "process": true, "punycode": true,
+	"querystring": true, "readline": true, "repl": true, "stream": true,
+	"string_decoder": true, "timers": true, "tls": true, "tty": true, "url": true,
+	"util": true, "v8": true, "vm": true, "worker_threads": true, "zlib": true,
+}
+
+// tsImportRE captures the leading quote character and the module specifier in
+// TypeScript/JS import-from and require() statements.
+var tsImportRE = regexp.MustCompile(`(from\s+["']|require\(["'])([a-z][a-z0-9_./-]*)`)
+
+// normalizeNodeImports rewrites bare Node.js built-in imports to their "node:"
+// prefixed form so Deno's type-checker accepts them without error.
+func normalizeNodeImports(code string) string {
+	return tsImportRE.ReplaceAllStringFunc(code, func(m string) string {
+		sub := tsImportRE.FindStringSubmatch(m)
+		if len(sub) < 3 {
+			return m
+		}
+		lead, mod := sub[1], sub[2]
+		// Check top-level name only (e.g. "fs" from "fs/promises")
+		base := strings.SplitN(mod, "/", 2)[0]
+		if nodeBuiltins[base] {
+			return lead + "node:" + mod
+		}
+		return m
+	})
+}
+
 // judgeCodePrompt builds a structured LLM-as-judge prompt for a code evaluation.
 func judgeCodePrompt(lang, task, code string) string {
 	return fmt.Sprintf(`You are a strict code quality evaluator. Rate the following %s code that was written for this task: "%s"
@@ -3574,7 +3677,7 @@ func checkCodeSyntax(lang, code string) (bool, string) {
 		defer cancel()
 		out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
 		if err != nil {
-			return false, strings.TrimSpace(string(out))
+			return false, stripANSI(strings.TrimSpace(string(out)))
 		}
 		return true, ""
 	}
@@ -3610,7 +3713,8 @@ func checkCodeSyntax(lang, code string) (bool, string) {
 		return runCmd(5*time.Second, "node", "--check", path)
 
 	case "typescript":
-		path, cleanup, err := writeTemp(".ts", code)
+		// Normalize bare Node.js built-in imports → "node:" prefix before Deno sees them
+		path, cleanup, err := writeTemp(".ts", normalizeNodeImports(code))
 		if err != nil {
 			return true, "check unavailable"
 		}
@@ -3619,7 +3723,7 @@ func checkCodeSyntax(lang, code string) (bool, string) {
 		if _, lookErr := exec.LookPath("deno"); lookErr == nil {
 			return runCmd(15*time.Second, "deno", "check", "--no-remote", path)
 		}
-		// tsc not found and deno not found — skip
+		// deno not found — skip
 		return true, "skipped"
 
 	case "bash":
@@ -3654,14 +3758,134 @@ func checkCodeSyntax(lang, code string) (bool, string) {
 		defer cleanup()
 		return runCmd(5*time.Second, "ruby", "-c", path)
 
+	case "rust":
+		if _, lookErr := exec.LookPath("rustc"); lookErr != nil {
+			return true, "skipped"
+		}
+		path, cleanup, err := writeTemp(".rs", code)
+		if err != nil {
+			return true, "check unavailable"
+		}
+		defer cleanup()
+		// --edition 2021 --crate-type lib avoids needing a main() fn
+		return runCmd(20*time.Second, "rustc", "--edition", "2021", "--crate-type", "lib", "--emit=metadata", "-o", os.DevNull, path)
+
+	case "c":
+		compiler := ""
+		for _, cc := range []string{"gcc", "clang", "cc"} {
+			if _, lookErr := exec.LookPath(cc); lookErr == nil {
+				compiler = cc
+				break
+			}
+		}
+		if compiler == "" {
+			return true, "skipped"
+		}
+		path, cleanup, err := writeTemp(".c", code)
+		if err != nil {
+			return true, "check unavailable"
+		}
+		defer cleanup()
+		return runCmd(10*time.Second, compiler, "-fsyntax-only", "-x", "c", path)
+
+	case "sql":
+		if _, lookErr := exec.LookPath("sqlfluff"); lookErr != nil {
+			return true, "skipped"
+		}
+		path, cleanup, err := writeTemp(".sql", code)
+		if err != nil {
+			return true, "check unavailable"
+		}
+		defer cleanup()
+		return runCmd(15*time.Second, "sqlfluff", "parse", "--dialect", "ansi", path)
+
 	default:
-		// rust, c, sql — no fast in-process checker; skip and rely on judge
 		return true, "skipped"
 	}
 }
 
+// syntaxCheckerTools describes each language's syntax checker binary and how to get it.
+var syntaxCheckerTools = []struct {
+	Lang        string
+	Binary      string // exact binary name users should search for / install
+	InstallHint string // human-readable install instructions
+	SkipMsg     string // console message when binary is missing
+}{
+	{"python",     "python3",  "brew install python  |  python.org",                                        "install python3 to enable"},
+	{"go",         "",         "built-in — no install needed",                                              ""},
+	{"javascript", "node",     "brew install node  |  nodejs.org",                                          "install node to enable"},
+	{"typescript", "deno",     "brew install deno  |  deno.com",                                            "install deno to enable"},
+	{"node",       "node",     "brew install node  |  nodejs.org",                                          "install node to enable"},
+	{"bash",       "bash",     "pre-installed on macOS/Linux",                                              "install bash to enable"},
+	{"sh",         "sh",       "pre-installed on macOS/Linux",                                              "install sh to enable"},
+	{"php",        "php",      "brew install php  |  php.net",                                              "install php to enable"},
+	{"ruby",       "ruby",     "brew install ruby  |  ruby-lang.org",                                       "install ruby to enable"},
+	{"rust",       "rustc",    "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh  |  rustup.rs", "install rustc (rustup) to enable"},
+	{"c",          "gcc",      "brew install gcc  |  xcode-select --install  |  apt install build-essential", "install gcc or clang to enable"},
+	{"sql",        "sqlfluff", "pip install sqlfluff  |  brew install sqlfluff  |  sqlfluff.com",           "install sqlfluff to enable"},
+}
+
+// checkerAvailable reports whether the syntax checker for a given language is present.
+func checkerAvailable(lang string) bool {
+	if lang == "go" || lang == "sql" {
+		return lang == "go" // go is always available (in-process); sql never is
+	}
+	for _, t := range syntaxCheckerTools {
+		if t.Lang == lang {
+			if t.Binary == "" {
+				return false
+			}
+			_, err := exec.LookPath(t.Binary)
+			return err == nil
+		}
+	}
+	return false
+}
+
+// checkerSkipMsg returns a human-readable "skipped — <hint>" message.
+func checkerSkipMsg(lang string) string {
+	for _, t := range syntaxCheckerTools {
+		if t.Lang == lang && t.SkipMsg != "" {
+			return "skipped — " + t.SkipMsg
+		}
+	}
+	return "skipped"
+}
+
+// codeSyntaxCheckersHandler returns availability of each syntax checker tool.
+func codeSyntaxCheckersHandler(c *gin.Context) {
+	type checkerInfo struct {
+		Lang        string `json:"lang"`
+		Available   bool   `json:"available"`
+		Binary      string `json:"binary,omitempty"`
+		InstallHint string `json:"install_hint,omitempty"`
+	}
+	var result []checkerInfo
+	for _, t := range syntaxCheckerTools {
+		avail := false
+		switch t.Lang {
+		case "go":
+			avail = true
+		case "sql":
+			avail = false
+		default:
+			if t.Binary != "" {
+				_, err := exec.LookPath(t.Binary)
+				avail = err == nil
+			}
+		}
+		result = append(result, checkerInfo{
+			Lang:        t.Lang,
+			Available:   avail,
+			Binary:      t.Binary,
+			InstallHint: t.InstallHint,
+		})
+	}
+	c.JSON(http.StatusOK, result)
+}
+
 // runCodeBenchmarkRun tests a list of languages, returning per-language results.
-func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judgeModel string, langs []string, logFunc func(string), debug bool) ([]map[string]interface{}, error) {
+func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judgeModel string, langs []string, numCtx int, logFunc func(string), debug bool) ([]map[string]interface{}, error) {
 	// Build a lookup map for the requested languages
 	taskMap := make(map[string]struct{ Label, Task, Prompt string })
 	for _, t := range codeBenchTasks {
@@ -3684,10 +3908,16 @@ func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judge
 			Model:  model,
 			Prompt: t.Prompt,
 			Stream: true,
-			Options: map[string]interface{}{
-				"temperature": 0.0,
-				"num_predict": 1500, // extra headroom for thinking-model reasoning tokens
-			},
+			Options: func() map[string]interface{} {
+				o := map[string]interface{}{
+					"temperature": 0.0,
+					"num_predict": 1500,
+				}
+				if numCtx > 0 {
+					o["num_ctx"] = numCtx
+				}
+				return o
+			}(),
 		}
 
 		start := time.Now()
@@ -3747,14 +3977,16 @@ func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judge
 		// Strip think blocks that some reasoning models leak into the response field
 		generatedCode = stripThinkBlocks(generatedCode)
 
-		// Strip markdown code fences if present
+		// Strip markdown code fences if present — extract only the first code block
 		if idx := strings.Index(generatedCode, "```"); idx != -1 {
-			// extract content between first ``` and last ```
 			inner := generatedCode[idx+3:]
+			// skip optional language tag on the opening fence line (e.g. ```ruby)
 			if nl := strings.Index(inner, "\n"); nl != -1 {
 				inner = inner[nl+1:]
 			}
-			if end := strings.LastIndex(inner, "```"); end != -1 {
+			// take content up to the first closing fence only (not last —
+			// models sometimes emit multiple blocks with prose between them)
+			if end := strings.Index(inner, "```"); end != -1 {
 				inner = inner[:end]
 			}
 			generatedCode = strings.TrimSpace(inner)
@@ -3772,7 +4004,7 @@ func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judge
 		// --- Pass 2: Syntax check ---
 		syntaxOK, syntaxMsg := checkCodeSyntax(lang, generatedCode)
 		if syntaxMsg == "skipped" {
-			logFunc(fmt.Sprintf("[%s] Syntax check: skipped (no checker for %s)", t.Label, lang))
+			logFunc(fmt.Sprintf("[%s] Syntax check: %s", t.Label, checkerSkipMsg(lang)))
 		} else if syntaxOK {
 			logFunc(fmt.Sprintf("[%s] Syntax check: PASS", t.Label))
 		} else {
@@ -3790,14 +4022,19 @@ func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judge
 			Model:  judgeTarget,
 			Prompt: judgeCodePrompt(t.Label, t.Task, generatedCode),
 			Stream: true,
-			Options: map[string]interface{}{
-				"temperature": 0.0,
-				// Thinking models (e.g. gemma4:e4b) exhaust their token budget on
-				// internal reasoning before emitting visible output. 200 returned
-				// done_reason:"length" with 0 output bytes. Use 2048 so the model
-				// can think AND write the JSON score.
-				"num_predict": 2048,
-			},
+			Options: func() map[string]interface{} {
+				o := map[string]interface{}{
+					"temperature": 0.0,
+					// Thinking models exhaust their token budget on internal reasoning
+					// before emitting visible output — 2048 gives them room to think
+					// AND write the JSON score.
+					"num_predict": 2048,
+				}
+				if numCtx > 0 {
+					o["num_ctx"] = numCtx
+				}
+				return o
+			}(),
 		}
 
 		jStream, jErr := client.StreamGenerate(ctx, judgeReq)
@@ -3928,6 +4165,10 @@ func runCodeBenchmarkSSEHandler(c *gin.Context) {
 	for i, l := range langs {
 		langs[i] = strings.TrimSpace(l)
 	}
+	numCtx := 16384
+	if v, err := strconv.Atoi(c.Query("num_ctx")); err == nil && v > 0 {
+		numCtx = v
+	}
 
 	activeSrv, err := GetActiveServer()
 	if err != nil {
@@ -3970,9 +4211,13 @@ func runCodeBenchmarkSSEHandler(c *gin.Context) {
 		if debug {
 			emit("[DBG] Debug mode enabled")
 		}
-		emit(fmt.Sprintf("Starting code benchmark: %s | %d languages | judge: %s", model, len(langs), judgeModel))
+		ctxLabel := "model default"
+		if numCtx > 0 {
+			ctxLabel = fmt.Sprintf("%dK", numCtx/1024)
+		}
+		emit(fmt.Sprintf("Starting code benchmark: %s | %d languages | judge: %s | ctx: %s", model, len(langs), judgeModel, ctxLabel))
 
-		results, runErr := runCodeBenchmarkRun(ctx, client, model, judgeModel, langs, emit, debug)
+		results, runErr := runCodeBenchmarkRun(ctx, client, model, judgeModel, langs, numCtx, emit, debug)
 		if runErr != nil {
 			c.SSEvent("error", runErr.Error())
 			c.Writer.Flush()

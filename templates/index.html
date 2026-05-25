@@ -1781,6 +1781,17 @@
                   </div>
                 </div>
 
+                <!-- Syntax checker status -->
+                <div class="form-control">
+                  <div class="flex items-center justify-between mb-1">
+                    <label class="label py-0"><span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">Syntax Checkers</span></label>
+                    <span id="code-checker-summary" class="text-[9px] font-mono text-[#4c566a]"></span>
+                  </div>
+                  <div id="code-checker-status" class="flex flex-wrap gap-1">
+                    <!-- populated by JS -->
+                  </div>
+                </div>
+
                 <!-- Judge model -->
                 <div class="form-control">
                   <label class="label py-1"><span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">Judge Model</span></label>
@@ -1791,6 +1802,20 @@
                   <div id="code-judge-model-wrap" class="hidden">
                     <select id="code-judge-model-select" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full"></select>
                   </div>
+                </div>
+
+                <!-- Context window -->
+                <div class="form-control">
+                  <label class="label py-1"><span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">Context Window (num_ctx)</span></label>
+                  <select id="code-bench-ctx" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                    <option value="">Model default</option>
+                    <option value="4096">4K</option>
+                    <option value="8192">8K</option>
+                    <option value="16384" selected>16K</option>
+                    <option value="32768">32K</option>
+                    <option value="65536">64K</option>
+                    <option value="131072">128K</option>
+                  </select>
                 </div>
 
                 <label class="flex items-center gap-1.5 cursor-pointer select-none">
@@ -1824,10 +1849,15 @@
               <div class="tech-panel rounded-xl p-3 flex flex-col gap-2">
                 <div class="flex items-center justify-between">
                   <h3 class="text-[10px] font-tech font-bold uppercase text-[#4c566a] tracking-wider">Console</h3>
-                  <button onclick="copyConsole('code-bench-console')" title="Copy to clipboard"
-                    class="text-[9px] font-mono text-[#4c566a] hover:text-[#88c0d0] transition-colors flex items-center gap-1">
-                    <i class="fa-regular fa-copy"></i>Copy
-                  </button>
+                  <div class="flex items-center gap-2">
+                    <span id="code-bench-timer" class="hidden font-mono text-[9px] text-[#ebcb8b] tabular-nums">
+                      <i class="fa-regular fa-clock text-[8px] mr-0.5"></i><span id="code-bench-timer-display">00:00</span>
+                    </span>
+                    <button onclick="copyConsole('code-bench-console')" title="Copy to clipboard"
+                      class="text-[9px] font-mono text-[#4c566a] hover:text-[#88c0d0] transition-colors flex items-center gap-1">
+                      <i class="fa-regular fa-copy"></i>Copy
+                    </button>
+                  </div>
                 </div>
                 <div id="code-bench-console" class="font-mono text-[9px] text-[#a3be8c] overflow-y-auto h-44 space-y-0.5 leading-relaxed"></div>
               </div>
@@ -1970,10 +2000,15 @@
               <div class="tech-panel rounded-xl p-3 flex flex-col gap-2">
                 <div class="flex items-center justify-between">
                   <h3 class="text-[10px] font-tech font-bold uppercase text-[#4c566a] tracking-wider">Console</h3>
-                  <button onclick="copyConsole('halluc-console')" title="Copy to clipboard"
-                    class="text-[9px] font-mono text-[#4c566a] hover:text-[#88c0d0] transition-colors flex items-center gap-1">
-                    <i class="fa-regular fa-copy"></i>Copy
-                  </button>
+                  <div class="flex items-center gap-2">
+                    <span id="halluc-timer" class="hidden font-mono text-[9px] text-[#ebcb8b] tabular-nums">
+                      <i class="fa-regular fa-clock text-[8px] mr-0.5"></i><span id="halluc-timer-display">00:00</span>
+                    </span>
+                    <button onclick="copyConsole('halluc-console')" title="Copy to clipboard"
+                      class="text-[9px] font-mono text-[#4c566a] hover:text-[#88c0d0] transition-colors flex items-center gap-1">
+                      <i class="fa-regular fa-copy"></i>Copy
+                    </button>
+                  </div>
                 </div>
                 <div id="halluc-console" class="font-mono text-[9px] text-[#a3be8c] overflow-y-auto h-44 space-y-0.5 leading-relaxed"></div>
               </div>
@@ -2218,14 +2253,14 @@
     <div class="flex items-center gap-4">
       <span>© 2026 NEUROLLAMA // MIT License</span>
       <span class="hidden md:inline text-[#4c566a]">//</span>
-      <!-- Dynamic node channel badge + slide-out trigger -->
+      <!-- Dynamic node channel badge + popover trigger -->
       <button id="footer-node-btn" onclick="toggleNodeSlideout()"
-              class="hidden md:flex items-center gap-1.5 hover:text-[#d8dee9] transition-colors group"
-              title="Node channel — click to switch nodes">
-        <span class="text-[#4c566a] group-hover:text-[#d8dee9]/60 transition-colors">NODE:</span>
-        <span id="footer-node-channel-dot" class="h-2 w-2 rounded-full bg-[#4c566a] shrink-0"></span>
-        <span id="footer-node-channel-text" class="font-semibold text-[#4c566a]">—</span>
-        <i id="footer-node-chevron" class="fa-solid fa-chevron-down text-[7px] text-[#4c566a] transition-transform"></i>
+              class="hidden md:flex items-center gap-1.5 px-2 py-0.5 rounded border border-[#4c566a]/40 hover:border-[#88c0d0]/50 hover:bg-[#3b4252]/40 transition-all group"
+              title="Active node — click to switch">
+        <span class="text-[#4c566a] group-hover:text-[#88c0d0] transition-colors text-[9px] uppercase tracking-wider">NODE:</span>
+        <span id="footer-node-channel-dot" class="h-1.5 w-1.5 rounded-full bg-[#4c566a] shrink-0"></span>
+        <span id="footer-node-channel-text" class="font-semibold text-[#4c566a] group-hover:text-[#d8dee9] transition-colors">—</span>
+        <i id="footer-node-chevron" class="fa-solid fa-chevron-up text-[7px] text-[#4c566a] group-hover:text-[#88c0d0] transition-all ml-0.5"></i>
       </button>
     </div>
     <!-- Loaded model indicator -->
@@ -2259,18 +2294,17 @@
     </div>
   </footer>
 
-  <!-- Node Selector Slide-out (anchored above footer left) -->
+  <!-- Node Selector Popover (anchored just above footer trigger button via JS) -->
   <div id="node-slideout"
-       class="hidden fixed top-20 left-4 z-50 w-72 bg-[#242933] border border-[#4c566a]/80 rounded-xl shadow-2xl font-mono text-xs overflow-hidden">
-    <div class="flex items-center justify-between px-4 py-2.5 border-b border-[#4c566a]/40 bg-[#2e3440]/60">
-      <span class="text-[#88c0d0] font-tech text-[10px] uppercase tracking-widest">
-        <i class="fa-solid fa-server mr-1.5 text-[9px]"></i>Select Node
-      </span>
-      <button onclick="closeNodeSlideout()" class="text-[#4c566a] hover:text-[#d8dee9] transition-colors text-xs">
+       class="hidden fixed z-50 w-72 bg-[#242933] border border-[#4c566a]/80 rounded-xl shadow-2xl font-mono text-xs overflow-hidden">
+    <div class="flex items-center gap-2 px-3 py-2 border-b border-[#4c566a]/40 bg-[#2e3440]/60">
+      <i class="fa-solid fa-server text-[#88c0d0] text-[9px]"></i>
+      <span class="text-[#88c0d0] font-tech text-[10px] uppercase tracking-widest flex-1">Select Node</span>
+      <button onclick="closeNodeSlideout()" class="text-[#4c566a] hover:text-[#d8dee9] transition-colors text-xs leading-none">
         <i class="fa-solid fa-xmark"></i>
       </button>
     </div>
-    <div id="node-slideout-list" class="p-2 space-y-1 max-h-72 overflow-y-auto"></div>
+    <div id="node-slideout-list" class="p-2 space-y-1 max-h-64 overflow-y-auto"></div>
   </div>
 
   <!-- Modals -->
