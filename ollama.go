@@ -53,6 +53,7 @@ type PullProgress struct {
 	Digest    string `json:"digest,omitempty"`
 	Total     int64  `json:"total,omitempty"`
 	Completed int64  `json:"completed,omitempty"`
+	Error     string `json:"error,omitempty"` // non-empty when Ollama streams an inline error
 }
 
 type authTransport struct {
@@ -302,7 +303,9 @@ func (c *OllamaClient) StreamPullModel(ctx context.Context, name string) (io.Rea
 	return resp.Body, nil
 }
 
-// ParsePullProgress reads lines from the stream reader and parses them
+// ParsePullProgress reads lines from the stream reader and parses them.
+// Ollama may stream an inline {"error":"..."} object instead of a progress update;
+// this is treated as a fatal error and returned immediately.
 func ParsePullProgress(reader io.Reader, handler func(PullProgress) bool) error {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
@@ -316,6 +319,11 @@ func ParsePullProgress(reader io.Reader, handler func(PullProgress) bool) error 
 		if err := json.Unmarshal(line, &progress); err != nil {
 			// If it's not valid JSON, we just skip or log
 			continue
+		}
+
+		// Ollama signals failure by streaming {"error":"<msg>"} inline.
+		if progress.Error != "" {
+			return fmt.Errorf("%s", progress.Error)
 		}
 
 		if !handler(progress) {

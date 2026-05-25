@@ -10,7 +10,7 @@
   <!-- Font Awesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <!-- Tailwind Output -->
-  <link rel="stylesheet" href="/static/css/output.css?v=0.0.10">
+  <link rel="stylesheet" href="/static/css/output.css?v={{.version}}">
   <!-- Marked Markdown Parser -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
   <!-- PDF.js library for client-side PDF parsing (vendored locally — no CDN dependency) -->
@@ -97,14 +97,14 @@
         <button id="ws-tab-completion" onclick="switchWorkspace('completion')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
           <i class="fa-solid fa-align-left text-[10px]"></i> COMPLETION
         </button>
+        <button id="ws-tab-rag" onclick="switchWorkspace('rag')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
+          <i class="fa-solid fa-file-shield text-[10px]"></i> RAG
+        </button>
         <button id="ws-tab-builder" onclick="switchWorkspace('builder')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
           <i class="fa-solid fa-wrench text-[10px]"></i> BUILDER
         </button>
-	        <button id="ws-tab-benchmark" onclick="switchWorkspace('benchmark')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
+        <button id="ws-tab-benchmark" onclick="switchWorkspace('benchmark')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
           <i class="fa-solid fa-gauge-high text-[10px]"></i> BENCHMARKS
-        </button>
-        <button id="ws-tab-rag" onclick="switchWorkspace('rag')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
-          <i class="fa-solid fa-file-shield text-[10px]"></i> RAG
         </button>
         <button id="ws-tab-fleet" onclick="switchWorkspace('fleet')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
           <i class="fa-solid fa-network-wired text-[10px]"></i> FLEET
@@ -118,93 +118,20 @@
       <div>
 
         <!-- PANEL 1: INVENTORY & TELEMETRY -->
-        <div id="ws-panel-inventory" class="ws-panel flex flex-col gap-6">
-          <div class="flex flex-col gap-6">
-            <!-- Model Hub (unified pull + catalog) -->
-            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col flex-shrink-0">
+        <div id="ws-panel-inventory" class="ws-panel flex flex-col gap-4">
 
-              <!-- Header + source toggle -->
-              <div class="flex items-center justify-between mb-3">
-                <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
-                  <i class="fa-solid fa-compass mr-2"></i>Model Hub
-                </h2>
-                <div class="flex gap-1">
-                  <button id="pull-src-ollama" onclick="setPullSource('ollama')" class="bench-type-btn bench-type-btn-active">
-                    <i class="fa-solid fa-box mr-1"></i>Ollama
-                  </button>
-                  <button id="pull-src-hf" onclick="setPullSource('hf')" class="bench-type-btn">
-                    <i class="fa-brands fa-python mr-1"></i>HuggingFace
-                  </button>
-                </div>
-              </div>
+          <!-- Inventory sub-tab nav -->
+          <div class="bg-[#242933]/60 p-1 border border-[#4c566a]/40 flex w-fit shrink-0 gap-1 rounded-xl">
+            <button id="inventory-subtab-models" onclick="switchInventorySubtab('models')" class="bench-subtab bench-subtab-active">
+              <i class="fa-solid fa-tags mr-1.5"></i>INVENTORY
+            </button>
+            <button id="inventory-subtab-hub" onclick="switchInventorySubtab('hub')" class="bench-subtab">
+              <i class="fa-solid fa-compass mr-1.5"></i>MODEL HUB
+            </button>
+          </div>
 
-              <!-- Pull form -->
-              <form id="pull-model-form" onsubmit="handlePullModel(event)" class="flex gap-2 mb-3">
-                <div class="relative flex-1">
-                  <input type="text" id="pull-model-name"
-                         placeholder="e.g. llama3:8b, mistral, qwen2.5:1.5b"
-                         class="input input-sm w-full bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none" />
-                </div>
-                <button type="submit" id="pull-btn" class="btn btn-sm btn-info font-tech tracking-wider gap-1 text-xs">
-                  <i class="fa-solid fa-download"></i> PULL
-                </button>
-              </form>
-
-              <!-- Pull progress dashboard -->
-              <div id="pull-progress-container" class="hidden mb-3 p-3 bg-[#242933]/80 border border-[#4c566a]/60 rounded-lg font-mono text-xs space-y-2">
-                <div class="flex justify-between items-center text-[11px]">
-                  <span class="text-[#88c0d0] font-semibold flex items-center gap-1.5">
-                    <i class="fa-solid fa-circle-notch animate-spin text-[#88c0d0]"></i>
-                    <span id="pull-status-label">PULLING MANIFEST</span>
-                  </span>
-                  <span id="pull-percent" class="text-[#88c0d0] font-bold">0%</span>
-                </div>
-                <div class="progress-cyber w-full h-2 rounded-full overflow-hidden">
-                  <div id="pull-progress-bar" class="progress-cyber-bar h-full w-[0%]"></div>
-                </div>
-                <div class="flex justify-between text-[10px] text-[#4c566a] items-center">
-                  <span id="pull-speed">-- MB/s</span>
-                  <span id="pull-bytes">-- MB / -- MB</span>
-                </div>
-                <div class="mt-2">
-                  <div class="text-[9px] uppercase tracking-wider text-[#4c566a] mb-1">Telemetry // Speed History</div>
-                  <canvas id="pull-speed-canvas" class="w-full bg-[#2e3440]/30 border border-[#4c566a]/30 rounded h-16"></canvas>
-                </div>
-                <div class="flex justify-end mt-2">
-                  <button type="button" onclick="abortPullModel()" class="btn btn-xs btn-outline btn-error font-tech text-[9px] px-2.5 h-6 min-h-0 uppercase">
-                    <i class="fa-solid fa-circle-stop mr-1"></i> Abort Pull
-                  </button>
-                </div>
-              </div>
-
-              <!-- Catalog: source + category filter row -->
-              <div class="border-t border-[#4c566a]/20 pt-2.5 flex flex-col gap-2">
-                <div class="flex items-center justify-between gap-2 flex-wrap">
-                  <span class="text-[10px] font-tech uppercase text-[#88c0d0]">Popular Models</span>
-                  <input type="text" id="catalog-filter" placeholder="Search catalog..."
-                         oninput="filterCatalog()"
-                         class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-[9px] w-36 focus:border-[#88c0d0] focus:outline-none" />
-                </div>
-                <!-- Category chips -->
-                <div class="flex flex-wrap gap-1 scrollbar-none">
-                  <button class="bench-type-btn bench-type-btn-active" id="cat-all"        onclick="setCatalogCategory('all')">All</button>
-                  <button class="bench-type-btn" id="cat-General"     onclick="setCatalogCategory('General')">General</button>
-                  <button class="bench-type-btn" id="cat-Reasoning"   onclick="setCatalogCategory('Reasoning')">Reasoning</button>
-                  <button class="bench-type-btn" id="cat-Vision"      onclick="setCatalogCategory('Vision')">Vision</button>
-                  <button class="bench-type-btn" id="cat-Code"        onclick="setCatalogCategory('Code')">Code</button>
-                  <button class="bench-type-btn" id="cat-Embedding"   onclick="setCatalogCategory('Embedding')">Embed</button>
-                  <button class="bench-type-btn" id="cat-Large"       onclick="setCatalogCategory('Large')">Large / MoE</button>
-                  <button class="bench-type-btn" id="cat-Lightweight" onclick="setCatalogCategory('Lightweight')">Lightweight</button>
-                </div>
-              </div>
-
-              <!-- Catalog grid (scrollable) -->
-              <div id="catalog-grid" class="overflow-y-auto max-h-64 grid grid-cols-1 sm:grid-cols-2 gap-2 pr-1 text-xs mt-2 scrollbar-none">
-                <!-- Injected via JS -->
-              </div>
-            </div>
-
-            <!-- Models Registry List panel -->
+          <!-- SUBTAB 1: MODEL INVENTORY -->
+          <div id="inventory-models-container">
             <div class="tech-panel tech-header-accent rounded-xl min-h-[220px] flex flex-col p-4">
               <div class="flex justify-between items-center mb-3 pb-2 border-b border-[#4c566a]/40">
                 <div class="flex items-center gap-2">
@@ -289,6 +216,99 @@
               </div>
             </div>
           </div>
+
+          <!-- SUBTAB 2: MODEL HUB -->
+          <div id="inventory-hub-container" class="hidden">
+            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col gap-4">
+
+              <!-- Header + source toggle -->
+              <div class="flex items-center justify-between pb-2 border-b border-[#4c566a]/40">
+                <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
+                  <i class="fa-solid fa-compass mr-2"></i>Model Hub
+                </h2>
+                <div class="flex gap-1">
+                  <button id="pull-src-ollama" onclick="setPullSource('ollama')" class="bench-type-btn bench-type-btn-active">
+                    <i class="fa-solid fa-box mr-1"></i>Ollama
+                  </button>
+                  <button id="pull-src-hf" onclick="setPullSource('hf')" class="bench-type-btn">
+                    <i class="fa-brands fa-python mr-1"></i>HuggingFace
+                  </button>
+                </div>
+              </div>
+
+              <!-- Pull form -->
+              <form id="pull-model-form" onsubmit="handlePullModel(event)" class="flex gap-2">
+                <div class="relative flex-1">
+                  <input type="text" id="pull-model-name"
+                         placeholder="e.g. llama3:8b, mistral, qwen2.5:1.5b"
+                         class="input input-sm w-full bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none" />
+                </div>
+                <button type="submit" id="pull-btn" class="btn btn-sm btn-info font-tech tracking-wider gap-1 text-xs">
+                  <i class="fa-solid fa-download"></i> PULL
+                </button>
+              </form>
+
+              <!-- HF compatibility notice (shown only when HF source active) -->
+              <div id="hf-compat-note" class="hidden flex items-start gap-2 text-[10px] font-mono text-[#ebcb8b] bg-[#ebcb8b]/8 border border-[#ebcb8b]/30 rounded-lg px-3 py-2">
+                <i class="fa-solid fa-triangle-exclamation mt-0.5 shrink-0"></i>
+                <span>HuggingFace pulls require Ollama with working HF registry access. If pull fails with a <em>realm host mismatch</em> error, your Ollama version may have a known auth bug — upgrade Ollama on the target node to fix it. Public GGUFs at <code class="text-[#d8dee9]">hf.co/user/repo:quant</code> format are supported.</span>
+              </div>
+
+              <!-- Pull progress dashboard -->
+              <div id="pull-progress-container" class="hidden p-3 bg-[#242933]/80 border border-[#4c566a]/60 rounded-lg font-mono text-xs space-y-2">
+                <div class="flex justify-between items-center text-[11px]">
+                  <span class="text-[#88c0d0] font-semibold flex items-center gap-1.5">
+                    <i class="fa-solid fa-circle-notch animate-spin text-[#88c0d0]"></i>
+                    <span id="pull-status-label">PULLING MANIFEST</span>
+                  </span>
+                  <span id="pull-percent" class="text-[#88c0d0] font-bold">0%</span>
+                </div>
+                <div class="progress-cyber w-full h-2 rounded-full overflow-hidden">
+                  <div id="pull-progress-bar" class="progress-cyber-bar h-full w-[0%]"></div>
+                </div>
+                <div class="flex justify-between text-[10px] text-[#4c566a] items-center">
+                  <span id="pull-speed">-- MB/s</span>
+                  <span id="pull-bytes">-- MB / -- MB</span>
+                </div>
+                <div class="mt-2">
+                  <div class="text-[9px] uppercase tracking-wider text-[#4c566a] mb-1">Telemetry // Speed History</div>
+                  <canvas id="pull-speed-canvas" class="w-full bg-[#2e3440]/30 border border-[#4c566a]/30 rounded h-16"></canvas>
+                </div>
+                <div class="flex justify-end mt-2">
+                  <button type="button" onclick="abortPullModel()" class="btn btn-xs btn-outline btn-error font-tech text-[9px] px-2.5 h-6 min-h-0 uppercase">
+                    <i class="fa-solid fa-circle-stop mr-1"></i> Abort Pull
+                  </button>
+                </div>
+              </div>
+
+              <!-- Catalog: category filter + search -->
+              <div class="flex flex-col gap-2 pt-1 border-t border-[#4c566a]/20">
+                <div class="flex items-center justify-between gap-2 flex-wrap">
+                  <span class="text-[10px] font-tech uppercase text-[#88c0d0]">Popular Models</span>
+                  <input type="text" id="catalog-filter" placeholder="Search catalog..."
+                         oninput="filterCatalog()"
+                         class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-[9px] w-40 focus:border-[#88c0d0] focus:outline-none" />
+                </div>
+                <!-- Category chips -->
+                <div class="flex flex-wrap gap-1 scrollbar-none">
+                  <button class="bench-type-btn bench-type-btn-active" id="cat-all"        onclick="setCatalogCategory('all')">All</button>
+                  <button class="bench-type-btn" id="cat-General"     onclick="setCatalogCategory('General')">General</button>
+                  <button class="bench-type-btn" id="cat-Reasoning"   onclick="setCatalogCategory('Reasoning')">Reasoning</button>
+                  <button class="bench-type-btn" id="cat-Vision"      onclick="setCatalogCategory('Vision')">Vision</button>
+                  <button class="bench-type-btn" id="cat-Code"        onclick="setCatalogCategory('Code')">Code</button>
+                  <button class="bench-type-btn" id="cat-Embedding"   onclick="setCatalogCategory('Embedding')">Embed</button>
+                  <button class="bench-type-btn" id="cat-Large"       onclick="setCatalogCategory('Large')">Large / MoE</button>
+                  <button class="bench-type-btn" id="cat-Lightweight" onclick="setCatalogCategory('Lightweight')">Lightweight</button>
+                </div>
+              </div>
+
+              <!-- Catalog grid -->
+              <div id="catalog-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 pr-1 text-xs">
+                <!-- Injected via JS -->
+              </div>
+            </div>
+          </div>
+
         </div>
 
         <!-- PANEL 2: PLAYGROUND (CHAT) -->
@@ -964,10 +984,7 @@
         <!-- PANEL: SYSTEM (sub-tab bar; sub-panels are ws-panel-memory/settings/diagnostics) -->
         <div id="ws-panel-system" class="ws-panel hidden mb-4">
           <div class="bg-[#242933]/60 p-1 border border-[#4c566a]/40 flex w-fit shrink-0 gap-1 rounded-xl flex-wrap">
-            <button id="system-subtab-memory" onclick="switchSystemSubtab('memory')" class="bench-subtab bench-subtab-active">
-              <i class="fa-solid fa-memory mr-1.5"></i>MEMORY
-            </button>
-            <button id="system-subtab-settings" onclick="switchSystemSubtab('settings')" class="bench-subtab">
+            <button id="system-subtab-settings" onclick="switchSystemSubtab('settings')" class="bench-subtab bench-subtab-active">
               <i class="fa-solid fa-gear mr-1.5"></i>SETTINGS
             </button>
             <button id="system-subtab-diagnostics" onclick="switchSystemSubtab('diagnostics')" class="bench-subtab">
@@ -976,11 +993,14 @@
             <button id="system-subtab-activity" onclick="switchSystemSubtab('activity')" class="bench-subtab">
               <i class="fa-solid fa-timeline mr-1.5"></i>ACTIVITY
             </button>
-            <button id="system-subtab-about" onclick="switchSystemSubtab('about')" class="bench-subtab">
-              <i class="fa-solid fa-circle-info mr-1.5"></i>ABOUT
+            <button id="system-subtab-memory" onclick="switchSystemSubtab('memory')" class="bench-subtab">
+              <i class="fa-solid fa-memory mr-1.5"></i>MEMORY
             </button>
             <button id="system-subtab-data" onclick="switchSystemSubtab('data')" class="bench-subtab">
               <i class="fa-solid fa-database mr-1.5"></i>DATA
+            </button>
+            <button id="system-subtab-about" onclick="switchSystemSubtab('about')" class="bench-subtab">
+              <i class="fa-solid fa-circle-info mr-1.5"></i>ABOUT
             </button>
           </div>
         </div>
@@ -2193,6 +2213,6 @@
   </div>
 
   <!-- App Script -->
-  <script src="/static/js/app.js?v=0.1.1"></script>
+  <script src="/static/js/app.js?v={{.version}}"></script>
 </body>
 </html>

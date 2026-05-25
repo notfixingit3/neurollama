@@ -12,7 +12,8 @@ let modelCardViewMode = 'safe';
 
 // New State for v0.0.2
 let activeWorkspace = 'inventory';
-let activeSystemSubtab = 'memory'; // sub-tab active inside the System workspace
+let activeSystemSubtab    = 'settings';  // sub-tab active inside the System workspace
+let activeInventorySubtab = 'models';    // sub-tab active inside the Inventory workspace
 let modelsLoaded = false; // lazy-load guard — only fetch on first Inventory tab visit
 
 // Inventory pagination (client-side)
@@ -483,9 +484,11 @@ async function init() {
     }
   } catch { /* corrupt cache — ignore */ }
 
+  // Restore inventory + system sub-tabs
+  activeInventorySubtab = localStorage.getItem('neurollama-inventory-subtab') || 'models';
   // Restore system sub-tab, then handle legacy workspace values
   // (old saves of 'memory' / 'diagnostics' / 'settings' redirect to 'system')
-  activeSystemSubtab = localStorage.getItem('neurollama-system-subtab') || 'memory';
+  activeSystemSubtab = localStorage.getItem('neurollama-system-subtab') || 'settings';
   let savedWorkspace = localStorage.getItem('active-workspace') || 'inventory';
   const legacySystemTabs = { memory: 'memory', diagnostics: 'diagnostics', settings: 'settings' };
   if (legacySystemTabs[savedWorkspace]) {
@@ -545,6 +548,9 @@ function switchWorkspace(workspace) {
 
   // Tab specific actions
   if (workspace === 'inventory') {
+    // Restore the last-used inventory sub-tab (models or hub)
+    switchInventorySubtab(activeInventorySubtab);
+
     // Always clear any lingering cross-node search results so the inventory
     // shows only the currently active node's models.
     if (crossNodeSearchQuery) clearCrossNodeSearch(true);
@@ -588,6 +594,23 @@ function switchWorkspace(workspace) {
     loadRAGDocuments();
   } else if (workspace === 'fleet') {
     fetchFleetOverview();
+  }
+}
+
+function switchInventorySubtab(tab) {
+  activeInventorySubtab = tab;
+  localStorage.setItem('neurollama-inventory-subtab', tab);
+  ['models', 'hub'].forEach(t => {
+    const btn = document.getElementById(`inventory-subtab-${t}`);
+    const container = document.getElementById(`inventory-${t}-container`);
+    if (btn) btn.classList.toggle('bench-subtab-active', t === tab);
+    if (container) container.classList.toggle('hidden', t !== tab);
+  });
+  // Ensure catalog renders and HF note state is synced when hub is opened
+  if (tab === 'hub') {
+    renderCatalog();
+    const hfNote = document.getElementById('hf-compat-note');
+    if (hfNote) hfNote.classList.toggle('hidden', currentPullSource !== 'hf');
   }
 }
 
@@ -2237,9 +2260,18 @@ function handlePullModel(event) {
   });
 
   currentEventSource.addEventListener('error', (e) => {
-    showToast(`Failed to pull model '${modelName}'`, 'error');
-    console.error('SSE Error:', e);
-    recordStreamFailure('model pull', `Failed to pull ${modelName}`, { model: modelName, node: activeServerLabel() });
+    // e.data is present for named SSE "error" events from the server;
+    // native EventSource connection errors have no e.data.
+    const errDetail = e.data ? e.data : 'Connection error';
+    const toastMsg = e.data
+      ? `Pull failed: ${e.data}`
+      : `Failed to pull model '${modelName}' — connection error`;
+    showToast(toastMsg, 'error');
+    // Also surface error text in the progress status label
+    const lbl = document.getElementById('pull-status-label');
+    if (lbl) lbl.textContent = `ERROR: ${errDetail.substring(0, 90)}`;
+    console.error('SSE pull error:', errDetail, e);
+    recordStreamFailure('model pull', `Failed to pull ${modelName}: ${errDetail}`, { model: modelName, node: activeServerLabel() });
     resetPullUI();
   });
 
@@ -4187,6 +4219,9 @@ function setPullSource(source) {
       : 'e.g. llama3:8b, mistral, qwen2.5:1.5b';
     input.value = '';
   }
+  // Show / hide the HF compatibility notice
+  const hfNote = document.getElementById('hf-compat-note');
+  if (hfNote) hfNote.classList.toggle('hidden', source !== 'hf');
 }
 
 function setCatalogCategory(cat) {
@@ -4280,23 +4315,29 @@ function filterCatalog() {
 }
 
 function pullCatalogModel(name, source) {
-  // Switch source toggle to match the model's origin
+  // Switch source toggle to match the model's origin (before setting the value,
+  // because setPullSource clears the input field)
   if (source && source !== currentPullSource) {
     setPullSource(source);
   }
 
+  // Make sure we're on the hub sub-tab so the form + progress are visible
+  if (activeInventorySubtab !== 'hub') switchInventorySubtab('hub');
+
   const pullInput = document.getElementById('pull-model-name');
   if (!pullInput) return;
-
   pullInput.value = name;
-  pullInput.scrollIntoView({ behavior: 'smooth' });
 
+  // Brief visual flash on the form
   const form = document.getElementById('pull-model-form');
   if (form) {
-    form.classList.add('border-[#88c0d0]');
-    setTimeout(() => form.classList.remove('border-[#88c0d0]'), 800);
-    form.dispatchEvent(new Event('submit'));
+    form.classList.add('ring-1', 'ring-[#88c0d0]');
+    setTimeout(() => form.classList.remove('ring-1', 'ring-[#88c0d0]'), 600);
   }
+
+  // Call the pull handler directly — avoids dispatching a non-cancelable submit
+  // event whose preventDefault() would be silently ignored by the browser.
+  handlePullModel({ preventDefault: () => {} });
 }
 
 // handleHfPull removed — HF pulls now go through the unified Model Hub form.
