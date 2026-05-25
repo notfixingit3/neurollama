@@ -3064,6 +3064,31 @@ var codeBenchTasks = []struct {
 	},
 }
 
+// stripThinkBlocks removes <think>…</think> (and <thinking>…</thinking>) blocks
+// emitted by reasoning/thinking models (DeepSeek-R1, Gemma4 thinking variants, etc.)
+// before we try to extract structured output from a response.
+func stripThinkBlocks(s string) string {
+	for _, pair := range [][2]string{
+		{"<think>", "</think>"},
+		{"<thinking>", "</thinking>"},
+	} {
+		open, close := pair[0], pair[1]
+		for {
+			start := strings.Index(s, open)
+			if start == -1 {
+				break
+			}
+			end := strings.Index(s[start:], close)
+			if end == -1 {
+				s = s[:start] // unclosed tag — drop from here to end
+				break
+			}
+			s = s[:start] + s[start+end+len(close):]
+		}
+	}
+	return strings.TrimSpace(s)
+}
+
 // judgeCodePrompt builds a structured LLM-as-judge prompt for a code evaluation.
 func judgeCodePrompt(lang, task, code string) string {
 	return fmt.Sprintf(`You are a strict code quality evaluator. Rate the following %s code that was written for this task: "%s"
@@ -3661,7 +3686,7 @@ func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judge
 			Stream: true,
 			Options: map[string]interface{}{
 				"temperature": 0.0,
-				"num_predict": 512,
+				"num_predict": 1500, // extra headroom for thinking-model reasoning tokens
 			},
 		}
 
@@ -3691,10 +3716,15 @@ func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judge
 			}
 			var chunk struct {
 				Response string `json:"response"`
+				Thinking string `json:"thinking"` // Ollama thinking-model field
 				Done     bool   `json:"done"`
 			}
 			if json.Unmarshal(line, &chunk) == nil {
-				if !gotFirst && chunk.Response != "" {
+				// Count thinking tokens toward TPS (they consume time / VRAM)
+				if chunk.Thinking != "" {
+					toks++
+				}
+				if !gotFirst && (chunk.Response != "" || chunk.Thinking != "") {
 					firstTok = time.Since(start)
 					gotFirst = true
 					logFunc(fmt.Sprintf("[%s] ⚡ First token: %.0fms", t.Label, float64(firstTok.Milliseconds())))
@@ -3709,6 +3739,9 @@ func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judge
 
 		genDur := time.Since(start)
 		generatedCode := strings.TrimSpace(codeBuilder.String())
+
+		// Strip think blocks that some reasoning models leak into the response field
+		generatedCode = stripThinkBlocks(generatedCode)
 
 		// Strip markdown code fences if present
 		if idx := strings.Index(generatedCode, "```"); idx != -1 {
@@ -3776,6 +3809,7 @@ func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judge
 				}
 				var chunk struct {
 					Response string `json:"response"`
+					Thinking string `json:"thinking"`
 				}
 				if json.Unmarshal(line, &chunk) == nil {
 					jBuilder.WriteString(chunk.Response)
@@ -3783,8 +3817,9 @@ func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judge
 			}
 			_ = jStream.Close()
 
-			raw := strings.TrimSpace(jBuilder.String())
-			// Extract JSON from response (may have extra text)
+			// Strip <think>…</think> blocks emitted by reasoning models before JSON extraction
+			raw := stripThinkBlocks(strings.TrimSpace(jBuilder.String()))
+			// Extract JSON object from response (may have surrounding prose)
 			if start := strings.Index(raw, "{"); start != -1 {
 				if end := strings.LastIndex(raw, "}"); end > start {
 					raw = raw[start : end+1]
