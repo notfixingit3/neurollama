@@ -8827,17 +8827,13 @@ let hallucDebug = false;
 
 function toggleBenchDebug(type) {
   if (type === 'code') {
-    codeBenchDebug = !codeBenchDebug;
-    const btn = document.getElementById('code-debug-btn');
-    if (btn) btn.classList.toggle('text-[#ebcb8b]', codeBenchDebug);
-    if (btn) btn.classList.toggle('text-[#4c566a]', !codeBenchDebug);
-    showToast('Code benchmark debug ' + (codeBenchDebug ? 'ON' : 'OFF'), codeBenchDebug ? 'warning' : 'info');
+    const cb = document.getElementById('code-debug-cb');
+    codeBenchDebug = cb ? cb.checked : !codeBenchDebug;
+    showToast('Code debug logging ' + (codeBenchDebug ? 'ON' : 'OFF'), codeBenchDebug ? 'warning' : 'info');
   } else {
-    hallucDebug = !hallucDebug;
-    const btn = document.getElementById('halluc-debug-btn');
-    if (btn) btn.classList.toggle('text-[#ebcb8b]', hallucDebug);
-    if (btn) btn.classList.toggle('text-[#4c566a]', !hallucDebug);
-    showToast('Hallucination debug ' + (hallucDebug ? 'ON' : 'OFF'), hallucDebug ? 'warning' : 'info');
+    const cb = document.getElementById('halluc-debug-cb');
+    hallucDebug = cb ? cb.checked : !hallucDebug;
+    showToast('Hallucination debug logging ' + (hallucDebug ? 'ON' : 'OFF'), hallucDebug ? 'warning' : 'info');
   }
 }
 let selectedCodeRunId = null;
@@ -9111,18 +9107,30 @@ function renderHallucLeaderboard() {
     return;
   }
 
-  // Best recall per model+node combo, keep global top 3
+  // Rank by highest context_k where at least one cell has status='recall'.
+  // This is the true NIAH metric: "how deep can this model actually find the needle?"
   const byModel = new Map();
   hallucinationRuns.forEach(r => {
     const key = `${r.model_name}|||${r.server_name || '(local)'}`;
+    let cells = [];
+    try { cells = JSON.parse(r.extra_json).cells || []; } catch {}
+    const maxRecallCtx = cells.reduce((max, c) =>
+      c.status === 'recall' && c.context_k > max ? c.context_k : max, 0);
     const cur = byModel.get(key);
-    if (!cur || r.recall_pct > cur.recall_pct) {
-      byModel.set(key, { model: r.model_name, node: r.server_name || '(local)',
-        recall_pct: r.recall_pct, hallucination_pct: r.hallucination_pct, max_context_k: r.max_context_k });
+    if (!cur || maxRecallCtx > cur.maxRecallCtx ||
+        (maxRecallCtx === cur.maxRecallCtx && r.recall_pct > cur.recall_pct)) {
+      byModel.set(key, {
+        model: r.model_name, node: r.server_name || '(local)',
+        maxRecallCtx,
+        recall_pct: r.recall_pct, hallucination_pct: r.hallucination_pct,
+      });
     }
   });
 
-  const top3h = [...byModel.values()].sort((a, b) => b.recall_pct - a.recall_pct).slice(0, 3);
+  const top3h = [...byModel.values()]
+    .sort((a, b) => b.maxRecallCtx - a.maxRecallCtx || b.recall_pct - a.recall_pct)
+    .slice(0, 3);
+
   if (top3h.length === 0) { panel.classList.add('hidden'); return; }
   panel.classList.remove('hidden');
 
@@ -9135,10 +9143,10 @@ function renderHallucLeaderboard() {
       ${top3h.map((e, i) => `
         <div class="flex items-center gap-2 py-0.5">
           <span class="text-[11px] shrink-0">${MEDAL[i]}</span>
-          <span class="font-bold text-[9px] font-mono ${recallCls(e.recall_pct)}">${e.recall_pct.toFixed(1)}%</span>
+          <span class="font-bold text-[9px] font-mono text-[#88c0d0]">${e.maxRecallCtx > 0 ? fmtK(e.maxRecallCtx) : '—'}</span>
+          <span class="text-[8px] font-mono ${recallCls(e.recall_pct)}">${e.recall_pct.toFixed(1)}%</span>
           <span class="text-[8px] font-mono text-[#d8dee9]">${escapeHTML(modelShort(e.model))}</span>
           <span class="text-[8px] font-mono text-[#4c566a]">${escapeHTML(e.node)}</span>
-          <span class="text-[8px] font-mono text-[#88c0d0]">${fmtK(e.max_context_k)}</span>
         </div>`).join('')}
     </div>`;
 }

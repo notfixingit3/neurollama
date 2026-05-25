@@ -1793,6 +1793,11 @@
                   </div>
                 </div>
 
+                <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                  <input type="checkbox" id="code-debug-cb" onchange="toggleBenchDebug('code')" class="checkbox checkbox-xs checkbox-warning">
+                  <span class="text-[9px] font-mono text-[#4c566a]"><i class="fa-solid fa-bug text-[8px] mr-0.5"></i>Debug logging</span>
+                </label>
+
                 <div class="flex gap-2">
                   <button id="code-bench-run-btn" onclick="startCodeBenchmark()" class="btn btn-sm btn-outline btn-info font-tech tracking-wider flex-1 gap-2 hover:tech-glow-blue">
                     <i class="fa-solid fa-play text-[10px]"></i>RUN CODE BENCHMARK
@@ -1819,16 +1824,10 @@
               <div class="tech-panel rounded-xl p-3 flex flex-col gap-2">
                 <div class="flex items-center justify-between">
                   <h3 class="text-[10px] font-tech font-bold uppercase text-[#4c566a] tracking-wider">Console</h3>
-                  <div class="flex items-center gap-2">
-                    <button id="code-debug-btn" onclick="toggleBenchDebug('code')" title="Toggle debug logging"
-                      class="text-[9px] font-mono text-[#4c566a] hover:text-[#ebcb8b] transition-colors flex items-center gap-1">
-                      <i class="fa-solid fa-bug text-[8px]"></i>DBG
-                    </button>
-                    <button onclick="copyConsole('code-bench-console')" title="Copy to clipboard"
-                      class="text-[9px] font-mono text-[#4c566a] hover:text-[#88c0d0] transition-colors flex items-center gap-1">
-                      <i class="fa-regular fa-copy"></i>Copy
-                    </button>
-                  </div>
+                  <button onclick="copyConsole('code-bench-console')" title="Copy to clipboard"
+                    class="text-[9px] font-mono text-[#4c566a] hover:text-[#88c0d0] transition-colors flex items-center gap-1">
+                    <i class="fa-regular fa-copy"></i>Copy
+                  </button>
                 </div>
                 <div id="code-bench-console" class="font-mono text-[9px] text-[#a3be8c] overflow-y-auto h-44 space-y-0.5 leading-relaxed"></div>
               </div>
@@ -1923,6 +1922,11 @@
                   </div>
                 </details>
 
+                <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                  <input type="checkbox" id="halluc-debug-cb" onchange="toggleBenchDebug('halluc')" class="checkbox checkbox-xs checkbox-warning">
+                  <span class="text-[9px] font-mono text-[#4c566a]"><i class="fa-solid fa-bug text-[8px] mr-0.5"></i>Debug logging</span>
+                </label>
+
                 <div class="flex gap-2">
                   <button id="halluc-run-btn" onclick="startHallucinationTest()" class="btn btn-sm btn-outline btn-warning font-tech tracking-wider flex-1 gap-2">
                     <i class="fa-solid fa-play text-[10px]"></i>RUN HALLUCINATION TEST
@@ -1966,16 +1970,10 @@
               <div class="tech-panel rounded-xl p-3 flex flex-col gap-2">
                 <div class="flex items-center justify-between">
                   <h3 class="text-[10px] font-tech font-bold uppercase text-[#4c566a] tracking-wider">Console</h3>
-                  <div class="flex items-center gap-2">
-                    <button id="halluc-debug-btn" onclick="toggleBenchDebug('halluc')" title="Toggle debug logging"
-                      class="text-[9px] font-mono text-[#4c566a] hover:text-[#ebcb8b] transition-colors flex items-center gap-1">
-                      <i class="fa-solid fa-bug text-[8px]"></i>DBG
-                    </button>
-                    <button onclick="copyConsole('halluc-console')" title="Copy to clipboard"
-                      class="text-[9px] font-mono text-[#4c566a] hover:text-[#88c0d0] transition-colors flex items-center gap-1">
-                      <i class="fa-regular fa-copy"></i>Copy
-                    </button>
-                  </div>
+                  <button onclick="copyConsole('halluc-console')" title="Copy to clipboard"
+                    class="text-[9px] font-mono text-[#4c566a] hover:text-[#88c0d0] transition-colors flex items-center gap-1">
+                    <i class="fa-regular fa-copy"></i>Copy
+                  </button>
                 </div>
                 <div id="halluc-console" class="font-mono text-[9px] text-[#a3be8c] overflow-y-auto h-44 space-y-0.5 leading-relaxed"></div>
               </div>
