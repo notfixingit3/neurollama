@@ -3679,6 +3679,7 @@ func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judge
 				if !gotFirst && chunk.Response != "" {
 					firstTok = time.Since(start)
 					gotFirst = true
+					logFunc(fmt.Sprintf("[%s] ⚡ First token: %.0fms", t.Label, float64(firstTok.Milliseconds())))
 				}
 				if chunk.Response != "" {
 					toks++
@@ -3853,17 +3854,22 @@ func runCodeBenchmarkSSEHandler(c *gin.Context) {
 	LogActivity("benchmark", fmt.Sprintf("Code benchmark started: %s (%d languages)", model, len(langs)))
 
 	c.Stream(func(w io.Writer) bool {
-		c.SSEvent("status", fmt.Sprintf("Starting code benchmark: %s | %d languages | judge: %s", model, len(langs), judgeModel))
-
-		results, runErr := runCodeBenchmarkRun(ctx, client, model, judgeModel, langs, func(msg string) {
+		emit := func(msg string) {
 			c.SSEvent("status", msg)
-		})
+			c.Writer.Flush()
+		}
+
+		emit(fmt.Sprintf("Starting code benchmark: %s | %d languages | judge: %s", model, len(langs), judgeModel))
+
+		results, runErr := runCodeBenchmarkRun(ctx, client, model, judgeModel, langs, emit)
 		if runErr != nil {
 			c.SSEvent("error", runErr.Error())
+			c.Writer.Flush()
 			return false
 		}
 		if len(results) == 0 {
 			c.SSEvent("error", "No language results produced")
+			c.Writer.Flush()
 			return false
 		}
 
@@ -3924,10 +3930,11 @@ func runCodeBenchmarkSSEHandler(c *gin.Context) {
 		id, saveErr := SaveCodeBenchmarkRun(run)
 		if saveErr != nil {
 			c.SSEvent("error", fmt.Sprintf("Save failed: %v", saveErr))
+			c.Writer.Flush()
 			return false
 		}
 
-		c.SSEvent("status", fmt.Sprintf("Code benchmark complete. Avg quality: %.1f/10 | Avg TPS: %.1f | Score: %s", avgQ, avgTPS, overallScore))
+		emit(fmt.Sprintf("✓ Complete — Avg quality: %.1f/10 | Avg TPS: %.1f | Score: %s | Syntax: %d/%d", avgQ, avgTPS, overallScore, passSyntax, len(results)))
 
 		doneBytes, _ := json.Marshal(map[string]interface{}{
 			"id":                   id,
@@ -3941,6 +3948,7 @@ func runCodeBenchmarkSSEHandler(c *gin.Context) {
 			"extra_json":           string(extraBytes),
 		})
 		c.SSEvent("done", string(doneBytes))
+		c.Writer.Flush()
 		return false
 	})
 }
@@ -4018,7 +4026,12 @@ func runHallucinationSSEHandler(c *gin.Context) {
 	}
 
 	c.Stream(func(w io.Writer) bool {
-		c.SSEvent("status", fmt.Sprintf("Starting hallucination test: %s | max context: %dk | %d cells", model, maxK, total))
+		hemit := func(msg string) {
+			c.SSEvent("status", msg)
+			c.Writer.Flush()
+		}
+
+		hemit(fmt.Sprintf("Starting hallucination test: %s | max context: %dk | %d cells", model, maxK, total))
 
 		type cell struct {
 			ContextK        int     `json:"context_k"`
@@ -4039,12 +4052,13 @@ func runHallucinationSSEHandler(c *gin.Context) {
 				select {
 				case <-ctx.Done():
 					c.SSEvent("error", "Cancelled")
+					c.Writer.Flush()
 					return false
 				default:
 				}
 
 				done++
-				c.SSEvent("status", fmt.Sprintf("[%d/%d] Context: %dk | Position: %d%%...", done, total, k, pos))
+				hemit(fmt.Sprintf("[%d/%d] Context: %dk | Position: %d%%...", done, total, k, pos))
 
 				prompt := buildPrompt(k, pos)
 				numCtx := k * 1024
@@ -4063,10 +4077,11 @@ func runHallucinationSSEHandler(c *gin.Context) {
 				start := time.Now()
 				stream, streamErr := client.StreamGenerate(ctx, req)
 				if streamErr != nil {
-					c.SSEvent("status", fmt.Sprintf("  Failed: %v", streamErr))
+					hemit(fmt.Sprintf("  ✗ Failed: %v", streamErr))
 					cells = append(cells, cell{ContextK: k, PositionPct: pos, Pass: false, Response: "ERROR: " + streamErr.Error()})
 					continue
 				}
+				hemit(fmt.Sprintf("  Waiting for first token..."))
 
 				var firstTok time.Duration
 				var gotFirst bool
@@ -4086,6 +4101,7 @@ func runHallucinationSSEHandler(c *gin.Context) {
 						if !gotFirst && chunk.Response != "" {
 							firstTok = time.Since(start)
 							gotFirst = true
+							hemit(fmt.Sprintf("  ⚡ First token: %.0fms", float64(firstTok.Milliseconds())))
 						}
 						respBuilder.WriteString(chunk.Response)
 					}
@@ -4130,7 +4146,7 @@ func runHallucinationSSEHandler(c *gin.Context) {
 						status = "REFUSAL"
 					}
 				}
-				c.SSEvent("status", fmt.Sprintf("  %s → %q", status, response))
+				hemit(fmt.Sprintf("  %s → %q", status, response))
 
 				// Stream cell result to JS for live heat-map update
 				cellBytes, _ := json.Marshal(map[string]interface{}{
@@ -4142,6 +4158,7 @@ func runHallucinationSSEHandler(c *gin.Context) {
 					"ttft_ms":          float64(firstTok.Milliseconds()),
 				})
 				c.SSEvent("cell", string(cellBytes))
+				c.Writer.Flush()
 
 				cells = append(cells, cell{
 					ContextK: k, PositionPct: pos,
@@ -4181,10 +4198,11 @@ func runHallucinationSSEHandler(c *gin.Context) {
 		id, saveErr := SaveHallucinationRun(halRun)
 		if saveErr != nil {
 			c.SSEvent("error", fmt.Sprintf("Save failed: %v", saveErr))
+			c.Writer.Flush()
 			return false
 		}
 
-		c.SSEvent("status", fmt.Sprintf("Hallucination test complete. Recall: %.1f%% | Hallucinations: %.1f%%", recallPct, hallPct))
+		hemit(fmt.Sprintf("✓ Complete — Recall: %.1f%% | Hallucinations: %.1f%%", recallPct, hallPct))
 
 		doneBytes, _ := json.Marshal(map[string]interface{}{
 			"id":                id,
@@ -4195,6 +4213,7 @@ func runHallucinationSSEHandler(c *gin.Context) {
 			"extra_json":        string(extraBytes),
 		})
 		c.SSEvent("done", string(doneBytes))
+		c.Writer.Flush()
 		return false
 	})
 }

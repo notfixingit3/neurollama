@@ -8877,21 +8877,21 @@ function startCodeBenchmark() {
   if (codeBenchEventSource) { codeBenchEventSource.close(); codeBenchEventSource = null; }
 
   const consoleEl = document.getElementById('code-bench-console');
-  if (consoleEl) consoleEl.innerHTML = '';
+  if (consoleEl) {
+    consoleEl.innerHTML = '';
+    consoleEl.closest('.tech-panel')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
 
   const btn = document.getElementById('code-bench-run-btn');
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-[10px]"></i> RUNNING…'; }
+
+  appendCodeConsole('Connecting to server…');
 
   const params = new URLSearchParams({ model, langs: langs.join(','), judge_model: judgeModel });
   codeBenchEventSource = new EventSource(`/api/benchmarks/code/run?${params}`);
 
   codeBenchEventSource.addEventListener('status', e => {
-    if (consoleEl) {
-      const div = document.createElement('div');
-      div.textContent = e.data;
-      consoleEl.appendChild(div);
-      consoleEl.scrollTop = consoleEl.scrollHeight;
-    }
+    appendCodeConsole(e.data);
   });
 
   codeBenchEventSource.addEventListener('error', e => {
@@ -8918,11 +8918,21 @@ function startCodeBenchmark() {
   };
 }
 
+function consoleLineColor(msg) {
+  if (/error|fail|✗/i.test(msg))           return '#bf616a'; // red
+  if (/✓|complete|pass|quality:/i.test(msg)) return '#a3be8c'; // green
+  if (/⚡|first token/i.test(msg))           return '#ebcb8b'; // amber
+  if (/hallucination/i.test(msg))            return '#d08770'; // orange
+  return null;
+}
+
 function appendCodeConsole(msg) {
   const el = document.getElementById('code-bench-console');
   if (!el) return;
   const div = document.createElement('div');
   div.textContent = msg;
+  const color = consoleLineColor(msg);
+  if (color) div.style.color = color;
   el.appendChild(div);
   el.scrollTop = el.scrollHeight;
 }
@@ -8932,6 +8942,8 @@ function appendHallucConsole(msg) {
   if (!el) return;
   const div = document.createElement('div');
   div.textContent = msg;
+  const color = consoleLineColor(msg);
+  if (color) div.style.color = color;
   el.appendChild(div);
   el.scrollTop = el.scrollHeight;
 }
@@ -9106,7 +9118,10 @@ function startHallucinationTest() {
 
   liveHeatmapCells = {};
   const consoleEl = document.getElementById('halluc-console');
-  if (consoleEl) consoleEl.innerHTML = '';
+  if (consoleEl) {
+    consoleEl.innerHTML = '';
+    consoleEl.closest('.tech-panel')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
 
   const heatmapPanel = document.getElementById('halluc-heatmap-panel');
   if (heatmapPanel) heatmapPanel.classList.remove('hidden');
@@ -9115,18 +9130,15 @@ function startHallucinationTest() {
   const btn = document.getElementById('halluc-run-btn');
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-[10px]"></i> RUNNING…'; }
 
+  appendHallucConsole('Connecting to server…');
+
   const params = new URLSearchParams({ model, max_context_k: maxK });
   if (customFiller) params.set('custom_filler', customFiller);
 
   hallucinationEventSource = new EventSource(`/api/benchmarks/hallucination/run?${params}`);
 
   hallucinationEventSource.addEventListener('status', e => {
-    if (consoleEl) {
-      const div = document.createElement('div');
-      div.textContent = e.data;
-      consoleEl.appendChild(div);
-      consoleEl.scrollTop = consoleEl.scrollHeight;
-    }
+    appendHallucConsole(e.data);
   });
 
   hallucinationEventSource.addEventListener('cell', e => {
