@@ -3571,13 +3571,26 @@ func checkCodeSyntax(lang, code string) (bool, string) {
 		defer cleanup()
 		return runCmd(5*time.Second, "python3", "-m", "py_compile", path)
 
-	case "javascript", "node", "typescript":
+	case "javascript", "node":
 		path, cleanup, err := writeTemp(".js", code)
 		if err != nil {
 			return true, "check unavailable"
 		}
 		defer cleanup()
 		return runCmd(5*time.Second, "node", "--check", path)
+
+	case "typescript":
+		path, cleanup, err := writeTemp(".ts", code)
+		if err != nil {
+			return true, "check unavailable"
+		}
+		defer cleanup()
+		// deno has native TS support; --no-remote prevents network fetches
+		if _, lookErr := exec.LookPath("deno"); lookErr == nil {
+			return runCmd(15*time.Second, "deno", "check", "--no-remote", path)
+		}
+		// tsc not found and deno not found — skip
+		return true, "skipped"
 
 	case "bash":
 		path, cleanup, err := writeTemp(".sh", code)
@@ -3612,7 +3625,7 @@ func checkCodeSyntax(lang, code string) (bool, string) {
 		return runCmd(5*time.Second, "ruby", "-c", path)
 
 	default:
-		// rust, c, sql, typescript (no tsc) — skip syntax check, rely on judge
+		// rust, c, sql — no fast in-process checker; skip and rely on judge
 		return true, "skipped"
 	}
 }
