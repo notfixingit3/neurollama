@@ -7604,7 +7604,7 @@ function exportBenchmarksCSV() {
 // --- HYPERPARAMETER OPTIMIZER CONTROLLERS ---
 
 function switchBenchmarkSubtab(tab) {
-  const tabs = ['standard', 'optimizer', 'nodevnode'];
+  const tabs = ['standard', 'optimizer', 'nodevnode', 'code', 'hallucination'];
   tabs.forEach(t => {
     const btn = document.getElementById(`benchmark-subtab-${t}`);
     const container = document.getElementById(`benchmark-${t}-container`);
@@ -7613,6 +7613,8 @@ function switchBenchmarkSubtab(tab) {
   });
   if (tab === 'optimizer') loadOptimizerHistory();
   if (tab === 'nodevnode') loadNvnPanel();
+  if (tab === 'code') { initCodeBenchLangGrid(); populateCodeBenchModelSelects(); fetchCodeBenchRuns(); }
+  if (tab === 'hallucination') { populateCodeBenchModelSelects(); fetchHallucinationRuns(); }
 }
 
 // ── Node vs Node ─────────────────────────────────────────────────────────────
@@ -8773,5 +8775,475 @@ async function runRAGSimilarityQuery() {
       </div>
     `;
     showToast(error.message, 'error');
+  }
+}
+
+// ── Code Benchmark ────────────────────────────────────────────────────────────
+
+const CODE_LANGS = [
+  { lang: 'python',     label: 'Python',      icon: 'fa-brands fa-python' },
+  { lang: 'go',         label: 'Go',          icon: 'fa-brands fa-golang' },
+  { lang: 'javascript', label: 'JavaScript',  icon: 'fa-brands fa-js' },
+  { lang: 'typescript', label: 'TypeScript',  icon: 'fa-solid fa-t' },
+  { lang: 'node',       label: 'Node.js',     icon: 'fa-brands fa-node-js' },
+  { lang: 'bash',       label: 'Bash',        icon: 'fa-solid fa-terminal' },
+  { lang: 'sh',         label: 'sh (POSIX)',  icon: 'fa-solid fa-hashtag' },
+  { lang: 'rust',       label: 'Rust',        icon: 'fa-brands fa-rust' },
+  { lang: 'php',        label: 'PHP',         icon: 'fa-brands fa-php' },
+  { lang: 'ruby',       label: 'Ruby',        icon: 'fa-solid fa-gem' },
+  { lang: 'c',          label: 'C',           icon: 'fa-solid fa-c' },
+  { lang: 'sql',        label: 'SQL',         icon: 'fa-solid fa-database' },
+];
+
+let codeBenchRuns = [];
+let codeBenchEventSource = null;
+let selectedCodeRunId = null;
+
+function initCodeBenchLangGrid() {
+  const grid = document.getElementById('code-bench-lang-grid');
+  if (!grid) return;
+  grid.innerHTML = CODE_LANGS.map(l => `
+    <label class="flex items-center gap-1.5 cursor-pointer group">
+      <input type="checkbox" class="code-lang-cb checkbox checkbox-xs border-[#4c566a]" value="${l.lang}" checked>
+      <span class="text-[10px] font-mono text-[#d8dee9] group-hover:text-[#88c0d0]">
+        <i class="${l.icon} mr-0.5 text-[#88c0d0]"></i>${l.label}
+      </span>
+    </label>
+  `).join('');
+}
+
+function toggleAllCodeLangs() {
+  const cbs = document.querySelectorAll('.code-lang-cb');
+  const anyChecked = [...cbs].some(cb => cb.checked);
+  cbs.forEach(cb => { cb.checked = !anyChecked; });
+}
+
+function toggleJudgeModelSelect() {
+  const cb = document.getElementById('code-judge-different');
+  const sel = document.getElementById('code-judge-model-select');
+  if (!cb || !sel) return;
+  sel.classList.toggle('hidden', !cb.checked);
+}
+
+function populateCodeBenchModelSelects() {
+  const modelNames = models.map(m => m.name);
+  const selects = ['code-bench-model', 'code-judge-model-select', 'halluc-model'];
+  selects.forEach(id => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    const cur = sel.value;
+    sel.innerHTML = modelNames.length
+      ? modelNames.map(n => `<option value="${escapeHTML(n)}">${escapeHTML(n)}</option>`).join('')
+      : '<option value="">No models available</option>';
+    if (cur && modelNames.includes(cur)) sel.value = cur;
+  });
+}
+
+function startCodeBenchmark() {
+  const model = document.getElementById('code-bench-model')?.value;
+  if (!model) { showToast('Select a model first', 'warning'); return; }
+
+  const langs = [...document.querySelectorAll('.code-lang-cb:checked')].map(cb => cb.value);
+  if (langs.length === 0) { showToast('Select at least one language', 'warning'); return; }
+
+  const diffJudge = document.getElementById('code-judge-different')?.checked;
+  const judgeModel = diffJudge ? (document.getElementById('code-judge-model-select')?.value || 'same') : 'same';
+
+  if (codeBenchEventSource) { codeBenchEventSource.close(); codeBenchEventSource = null; }
+
+  const consoleEl = document.getElementById('code-bench-console');
+  if (consoleEl) consoleEl.innerHTML = '';
+
+  const btn = document.getElementById('code-bench-run-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-[10px]"></i> RUNNING…'; }
+
+  const params = new URLSearchParams({ model, langs: langs.join(','), judge_model: judgeModel });
+  codeBenchEventSource = new EventSource(`/api/benchmarks/code/run?${params}`);
+
+  codeBenchEventSource.addEventListener('status', e => {
+    if (consoleEl) {
+      const div = document.createElement('div');
+      div.textContent = e.data;
+      consoleEl.appendChild(div);
+      consoleEl.scrollTop = consoleEl.scrollHeight;
+    }
+  });
+
+  codeBenchEventSource.addEventListener('error', e => {
+    appendCodeConsole('ERROR: ' + e.data);
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-play text-[10px]"></i>RUN CODE BENCHMARK'; }
+    codeBenchEventSource?.close();
+  });
+
+  codeBenchEventSource.addEventListener('done', async e => {
+    codeBenchEventSource?.close();
+    codeBenchEventSource = null;
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-play text-[10px]"></i>RUN CODE BENCHMARK'; }
+    await fetchCodeBenchRuns();
+  });
+
+  codeBenchEventSource.onerror = () => {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-play text-[10px]"></i>RUN CODE BENCHMARK'; }
+    codeBenchEventSource?.close();
+  };
+}
+
+function appendCodeConsole(msg) {
+  const el = document.getElementById('code-bench-console');
+  if (!el) return;
+  const div = document.createElement('div');
+  div.textContent = msg;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+async function fetchCodeBenchRuns() {
+  try {
+    const res = await fetch('/api/benchmarks/code');
+    if (!res.ok) throw new Error(res.statusText);
+    codeBenchRuns = await res.json();
+    renderCodeBenchResults();
+  } catch (e) {
+    showToast('Failed to load code benchmark runs: ' + e.message, 'error');
+  }
+}
+
+function renderCodeBenchResults() {
+  const histEl = document.getElementById('code-bench-history');
+  if (!histEl) return;
+
+  const langFilter = document.getElementById('code-lang-filter')?.value || '';
+
+  let runs = codeBenchRuns;
+  if (langFilter) {
+    runs = runs.filter(r => r.languages && r.languages.split(',').includes(langFilter));
+  }
+
+  if (runs.length === 0) {
+    histEl.innerHTML = '<div class="text-center text-[#4c566a] text-xs font-mono py-8">No runs match the current filter.</div>';
+    return;
+  }
+
+  const scoreColor = s => ({ S: 'text-[#a3be8c]', A: 'text-[#88c0d0]', B: 'text-[#ebcb8b]', C: 'text-[#d08770]', F: 'text-[#bf616a]' }[s] || 'text-[#4c566a]');
+
+  histEl.innerHTML = `
+    <table class="table table-xs w-full font-mono text-[10px]">
+      <thead>
+        <tr class="text-[#4c566a] uppercase text-[9px]">
+          <th>Model</th><th>Server</th><th>Judge</th>
+          <th>Langs</th><th>Quality</th><th>Avg TPS</th><th>Syntax</th><th>Score</th><th>Date</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${runs.map(r => {
+          const langCount = r.languages ? r.languages.split(',').length : 0;
+          let qualityForFilter = r.avg_quality_score;
+          if (langFilter) {
+            try {
+              const ex = JSON.parse(r.extra_json);
+              const langResult = (ex.languages || []).find(l => l.lang === langFilter);
+              if (langResult) qualityForFilter = langResult.quality_score || 0;
+            } catch { /* ignore */ }
+          }
+          return `
+          <tr class="hover:bg-[#3b4252]/30 cursor-pointer border-b border-[#4c566a]/10 ${r.id === selectedCodeRunId ? 'bg-[#3b4252]/40' : ''}"
+              onclick="showCodeBenchDetail(${r.id})">
+            <td class="text-[#d8dee9] font-semibold">${escapeHTML(r.model_name)}</td>
+            <td class="text-[#4c566a]">${escapeHTML(r.server_name || '—')}</td>
+            <td class="text-[#8fbcbb]">${escapeHTML(r.judge_model)}</td>
+            <td class="text-[#d8dee9]">${langCount}</td>
+            <td class="text-[#ebcb8b] font-semibold">${qualityForFilter.toFixed(1)}/10</td>
+            <td>${r.avg_tps.toFixed(1)}</td>
+            <td class="${r.langs_passing_syntax === r.langs_total ? 'text-[#a3be8c]' : 'text-[#bf616a]'}">${r.langs_passing_syntax}/${r.langs_total}</td>
+            <td class="font-bold ${scoreColor(r.overall_score)}">${r.overall_score}</td>
+            <td class="text-[#4c566a]">${r.created_at ? r.created_at.slice(0, 16) : ''}</td>
+            <td><button onclick="event.stopPropagation(); deleteCodeBenchRun(${r.id})" class="btn btn-ghost btn-xs text-[#bf616a] p-1"><i class="fa-solid fa-trash-can text-[9px]"></i></button></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+function showCodeBenchDetail(id) {
+  selectedCodeRunId = id;
+  renderCodeBenchResults();
+
+  const run = codeBenchRuns.find(r => r.id === id);
+  if (!run) return;
+
+  const detailPanel = document.getElementById('code-bench-detail');
+  const detailBody = document.getElementById('code-bench-detail-body');
+  if (!detailPanel || !detailBody) return;
+
+  let langs = [];
+  try {
+    const ex = JSON.parse(run.extra_json);
+    langs = ex.languages || [];
+  } catch { /* ignore */ }
+
+  const langFilter = document.getElementById('code-lang-filter')?.value || '';
+  const displayLangs = langFilter ? langs.filter(l => l.lang === langFilter) : langs;
+
+  const scoreBar = (val, max = 10) => {
+    const pct = Math.round(val / max * 100);
+    const color = val >= 8 ? '#a3be8c' : val >= 6 ? '#ebcb8b' : val >= 4 ? '#d08770' : '#bf616a';
+    return `<div class="w-full bg-[#2e3440] rounded-full h-1.5"><div class="h-1.5 rounded-full" style="width:${pct}%;background:${color}"></div></div>`;
+  };
+
+  detailBody.innerHTML = `
+    <div class="text-[10px] font-mono text-[#4c566a] mb-3">
+      Model: <span class="text-[#d8dee9]">${escapeHTML(run.model_name)}</span> |
+      Judge: <span class="text-[#8fbcbb]">${escapeHTML(run.judge_model)}</span> |
+      Ollama: <span class="text-[#d8dee9]">${escapeHTML(run.ollama_version || '?')}</span> |
+      Server: <span class="text-[#d8dee9]">${escapeHTML(run.server_name || '?')}</span>
+    </div>
+    <div class="space-y-2">
+      ${displayLangs.map(l => {
+        const j = l.judge || {};
+        const syntaxBadge = l.syntax_msg === 'skipped'
+          ? '<span class="text-[#4c566a]">—</span>'
+          : l.syntax_ok
+            ? '<span class="text-[#a3be8c]">✓ PASS</span>'
+            : '<span class="text-[#bf616a]">✗ FAIL</span>';
+        return `
+        <details class="group bg-[#2e3440]/40 border border-[#4c566a]/30 rounded-lg overflow-hidden">
+          <summary class="flex items-center justify-between p-2 cursor-pointer hover:bg-[#3b4252]/40 list-none">
+            <div class="flex items-center gap-3">
+              <span class="text-[#88c0d0] font-semibold text-[10px] w-24">${escapeHTML(l.label || l.lang)}</span>
+              <span class="text-[#a3be8c] font-bold">${(l.quality_score || 0).toFixed(1)}/10</span>
+              <div class="w-20">${scoreBar(l.quality_score || 0)}</div>
+              <span class="text-[#4c566a]">TPS: ${(l.tps || 0).toFixed(1)}</span>
+              <span>Syntax: ${syntaxBadge}</span>
+            </div>
+            <i class="fa-solid fa-chevron-down text-[8px] text-[#4c566a] group-open:rotate-180 transition-transform"></i>
+          </summary>
+          <div class="p-3 border-t border-[#4c566a]/20 space-y-2">
+            <div class="grid grid-cols-3 gap-2 text-[9px] font-mono">
+              <div>Correctness: <span class="text-[#ebcb8b]">${(j.correctness || 0).toFixed(1)}</span><br>${scoreBar(j.correctness || 0)}</div>
+              <div>Completeness: <span class="text-[#ebcb8b]">${(j.completeness || 0).toFixed(1)}</span><br>${scoreBar(j.completeness || 0)}</div>
+              <div>Style: <span class="text-[#ebcb8b]">${(j.style || 0).toFixed(1)}</span><br>${scoreBar(j.style || 0)}</div>
+            </div>
+            <div class="text-[9px] font-mono text-[#d8dee9] italic">"${escapeHTML(j.brief_critique || '')}"</div>
+            ${l.code_snippet ? `<pre class="text-[8px] font-mono text-[#a3be8c] bg-[#1e2330] rounded p-2 overflow-x-auto max-h-40 whitespace-pre-wrap">${escapeHTML(l.code_snippet)}</pre>` : ''}
+          </div>
+        </details>`;
+      }).join('')}
+    </div>
+  `;
+
+  detailPanel.classList.remove('hidden');
+}
+
+async function deleteCodeBenchRun(id) {
+  if (!confirm('Delete this code benchmark run?')) return;
+  try {
+    const res = await fetch(`/api/benchmarks/code/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error((await res.json()).error);
+    if (selectedCodeRunId === id) {
+      selectedCodeRunId = null;
+      document.getElementById('code-bench-detail')?.classList.add('hidden');
+    }
+    await fetchCodeBenchRuns();
+    showToast('Run deleted', 'success');
+  } catch (e) {
+    showToast('Delete failed: ' + e.message, 'error');
+  }
+}
+
+// ── Hallucination Benchmark ───────────────────────────────────────────────────
+
+let hallucinationRuns = [];
+let hallucinationEventSource = null;
+let liveHeatmapCells = {};
+
+function startHallucinationTest() {
+  const model = document.getElementById('halluc-model')?.value;
+  if (!model) { showToast('Select a model first', 'warning'); return; }
+  const maxK = parseInt(document.getElementById('halluc-max-context')?.value || '32');
+  const customFiller = document.getElementById('halluc-custom-filler')?.value?.trim() || '';
+
+  if (hallucinationEventSource) { hallucinationEventSource.close(); hallucinationEventSource = null; }
+
+  liveHeatmapCells = {};
+  const consoleEl = document.getElementById('halluc-console');
+  if (consoleEl) consoleEl.innerHTML = '';
+
+  const heatmapPanel = document.getElementById('halluc-heatmap-panel');
+  if (heatmapPanel) heatmapPanel.classList.remove('hidden');
+  renderLiveHeatmap(maxK);
+
+  const btn = document.getElementById('halluc-run-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-[10px]"></i> RUNNING…'; }
+
+  const params = new URLSearchParams({ model, max_context_k: maxK });
+  if (customFiller) params.set('custom_filler', customFiller);
+
+  hallucinationEventSource = new EventSource(`/api/benchmarks/hallucination/run?${params}`);
+
+  hallucinationEventSource.addEventListener('status', e => {
+    if (consoleEl) {
+      const div = document.createElement('div');
+      div.textContent = e.data;
+      consoleEl.appendChild(div);
+      consoleEl.scrollTop = consoleEl.scrollHeight;
+    }
+  });
+
+  hallucinationEventSource.addEventListener('cell', e => {
+    try {
+      const cell = JSON.parse(e.data);
+      const key = `${cell.context_k}_${cell.position_pct}`;
+      liveHeatmapCells[key] = cell;
+      updateHeatmapCell(cell);
+    } catch { /* ignore */ }
+  });
+
+  hallucinationEventSource.addEventListener('done', async e => {
+    hallucinationEventSource?.close();
+    hallucinationEventSource = null;
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-play text-[10px]"></i>RUN HALLUCINATION TEST'; }
+    await fetchHallucinationRuns();
+  });
+
+  hallucinationEventSource.onerror = () => {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-play text-[10px]"></i>RUN HALLUCINATION TEST'; }
+    hallucinationEventSource?.close();
+  };
+}
+
+function renderLiveHeatmap(maxK) {
+  const heatmapEl = document.getElementById('halluc-heatmap');
+  if (!heatmapEl) return;
+
+  const allSizes = [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 5120, 10240];
+  const sizes = allSizes.filter(s => s <= maxK);
+  const positions = [10, 50, 90];
+
+  const formatK = k => k >= 1024 ? `${k/1024}M` : `${k}k`;
+
+  let html = `<table class="w-full text-[9px] font-mono border-collapse">
+    <thead><tr>
+      <th class="text-[#4c566a] pr-3 text-right pb-1">Context</th>
+      ${positions.map(p => `<th class="text-[#4c566a] text-center pb-1 px-2">Pos ${p}%</th>`).join('')}
+    </tr></thead>
+    <tbody>
+      ${sizes.map(k => `
+        <tr>
+          <td class="text-[#88c0d0] pr-3 text-right py-1 whitespace-nowrap">${formatK(k)}</td>
+          ${positions.map(p => {
+            const key = `${k}_${p}`;
+            const cell = liveHeatmapCells[key];
+            return `<td class="px-2 py-1 text-center">
+              <div id="heatmap-cell-${key}" class="halluc-cell ${cell ? (cell.pass ? 'halluc-cell-pass' : cell.is_hallucination ? 'halluc-cell-halluc' : 'halluc-cell-refusal') : 'halluc-cell-pending'}"
+                title="${cell ? escapeHTML(cell.response || '') : 'Pending'}">
+                ${cell ? (cell.pass ? '✓' : cell.is_hallucination ? '✗' : '?') : '·'}
+              </div>
+            </td>`;
+          }).join('')}
+        </tr>`).join('')}
+    </tbody>
+  </table>`;
+  heatmapEl.innerHTML = html;
+}
+
+function updateHeatmapCell(cell) {
+  const key = `${cell.context_k}_${cell.position_pct}`;
+  const el = document.getElementById(`heatmap-cell-${key}`);
+  if (!el) return;
+
+  el.className = `halluc-cell ${cell.pass ? 'halluc-cell-pass' : cell.is_hallucination ? 'halluc-cell-halluc' : 'halluc-cell-refusal'}`;
+  el.textContent = cell.pass ? '✓' : cell.is_hallucination ? '✗' : '?';
+  el.title = cell.response || '';
+}
+
+async function fetchHallucinationRuns() {
+  try {
+    const res = await fetch('/api/benchmarks/hallucination');
+    if (!res.ok) throw new Error(res.statusText);
+    hallucinationRuns = await res.json();
+    renderHallucinationHistory();
+  } catch (e) {
+    showToast('Failed to load hallucination runs: ' + e.message, 'error');
+  }
+}
+
+function renderHallucinationHistory() {
+  const el = document.getElementById('halluc-history');
+  if (!el) return;
+
+  if (!hallucinationRuns || hallucinationRuns.length === 0) {
+    el.innerHTML = '<div class="text-center text-[#4c566a] text-xs font-mono py-8">No hallucination tests yet.</div>';
+    return;
+  }
+
+  el.innerHTML = `
+    <table class="table table-xs w-full font-mono text-[10px]">
+      <thead>
+        <tr class="text-[#4c566a] uppercase text-[9px]">
+          <th>Model</th><th>Server</th><th>Max Ctx</th>
+          <th>Recall</th><th>Hallucinations</th><th>Filler</th><th>Date</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${hallucinationRuns.map(r => `
+          <tr class="hover:bg-[#3b4252]/30 cursor-pointer border-b border-[#4c566a]/10"
+              onclick="showHallucinationDetail(${r.id})">
+            <td class="text-[#d8dee9] font-semibold">${escapeHTML(r.model_name)}</td>
+            <td class="text-[#4c566a]">${escapeHTML(r.server_name || '—')}</td>
+            <td class="text-[#88c0d0]">${r.max_context_k >= 1024 ? r.max_context_k/1024 + 'M' : r.max_context_k + 'k'}</td>
+            <td class="font-bold ${r.recall_pct >= 80 ? 'text-[#a3be8c]' : r.recall_pct >= 50 ? 'text-[#ebcb8b]' : 'text-[#bf616a]'}">${r.recall_pct.toFixed(1)}%</td>
+            <td class="${r.hallucination_pct > 30 ? 'text-[#bf616a]' : r.hallucination_pct > 10 ? 'text-[#d08770]' : 'text-[#a3be8c]'}">${r.hallucination_pct.toFixed(1)}%</td>
+            <td class="text-[#4c566a]">${escapeHTML(r.filler_source)}</td>
+            <td class="text-[#4c566a]">${r.created_at ? r.created_at.slice(0,16) : ''}</td>
+            <td><button onclick="event.stopPropagation(); deleteHallucinationRun(${r.id})" class="btn btn-ghost btn-xs text-[#bf616a] p-1"><i class="fa-solid fa-trash-can text-[9px]"></i></button></td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+function showHallucinationDetail(id) {
+  const run = hallucinationRuns.find(r => r.id === id);
+  if (!run) return;
+
+  let cells = [];
+  let maxK = run.max_context_k;
+  try {
+    const ex = JSON.parse(run.extra_json);
+    cells = ex.cells || [];
+  } catch { /* ignore */ }
+
+  liveHeatmapCells = {};
+  cells.forEach(cell => {
+    liveHeatmapCells[`${cell.context_k}_${cell.position_pct}`] = cell;
+  });
+
+  const heatmapPanel = document.getElementById('halluc-heatmap-panel');
+  if (heatmapPanel) heatmapPanel.classList.remove('hidden');
+
+  renderLiveHeatmap(maxK);
+
+  const statsEl = document.getElementById('halluc-stats');
+  if (statsEl) {
+    statsEl.innerHTML = `
+      <span class="text-[#a3be8c]">Recall: ${run.recall_pct.toFixed(1)}%</span>
+      <span class="text-[#bf616a]">Hallucinations: ${run.hallucination_pct.toFixed(1)}%</span>
+      <span class="text-[#4c566a]">Model: ${escapeHTML(run.model_name)}</span>
+      <span class="text-[#4c566a]">Ollama: ${escapeHTML(run.ollama_version || '?')}</span>
+    `;
+  }
+}
+
+async function deleteHallucinationRun(id) {
+  if (!confirm('Delete this hallucination run?')) return;
+  try {
+    const res = await fetch(`/api/benchmarks/hallucination/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error((await res.json()).error);
+    await fetchHallucinationRuns();
+    showToast('Run deleted', 'success');
+  } catch (e) {
+    showToast('Delete failed: ' + e.message, 'error');
   }
 }

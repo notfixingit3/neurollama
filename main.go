@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	goparser "go/parser"
+	"go/token"
 	"image"
 	"image/color"
 	"image/png"
@@ -29,7 +31,7 @@ import (
 	goPDF "github.com/ledongthuc/pdf"
 )
 
-const appVersion = "v0.2.13"
+const appVersion = "v0.2.14"
 
 var (
 	appStartTime = time.Now()
@@ -394,6 +396,16 @@ func main() {
 		api.DELETE("/benchmarks/nvn-matches/:id", deleteNvnMatchHandler)
 		api.PUT("/benchmarks/:id/score", updateBenchmarkScoreHandler)
 		api.DELETE("/benchmarks/:id", deleteBenchmarkHandler)
+
+		// Code benchmark
+		api.GET("/benchmarks/code", getCodeBenchmarksHandler)
+		api.GET("/benchmarks/code/run", runCodeBenchmarkSSEHandler)
+		api.DELETE("/benchmarks/code/:id", deleteCodeBenchmarkHandler)
+
+		// Hallucination
+		api.GET("/benchmarks/hallucination", getHallucinationRunsHandler)
+		api.GET("/benchmarks/hallucination/run", runHallucinationSSEHandler)
+		api.DELETE("/benchmarks/hallucination/:id", deleteHallucinationRunHandler)
 		api.GET("/node-models", nodeModelsHandler)
 
 		// Hyperparameter Optimizer
@@ -2995,6 +3007,132 @@ var reasoningQuestions = []struct{ prompt, answer string }{
 // ctxFillerUnit is ~133 tokens per repetition (100 words).
 const ctxFillerUnit = "Artificial intelligence is transforming industries through machine learning, neural networks, and natural language processing systems. Researchers develop new architectures like transformers that process sequential data using attention mechanisms, enabling models to capture long-range dependencies in text. Deep learning models trained on massive datasets can now perform tasks previously thought to require human intelligence, including translation, code generation, and complex reasoning. The rapid advancement of computational resources, particularly GPUs and specialised accelerators, has made training billion-parameter models feasible. Scaling laws suggest that model capability improves predictably with increases in parameters, training data, and compute budget. "
 
+// codeBenchTasks defines the 12-language code benchmark suite.
+var codeBenchTasks = []struct {
+	Lang   string
+	Label  string
+	Task   string
+	Prompt string
+}{
+	{
+		Lang: "python", Label: "Python", Task: "fizzbuzz",
+		Prompt: `Write a Python function named fizzbuzz(n) that takes a positive integer n and returns a list of strings for numbers 1 through n: "Fizz" for multiples of 3, "Buzz" for multiples of 5, "FizzBuzz" for both, otherwise the number as a string. Include only the function, no explanation.`,
+	},
+	{
+		Lang: "go", Label: "Go", Task: "reverseWords",
+		Prompt: `Write a Go function named reverseWords(s string) string that reverses the order of whitespace-separated words in the input string. Include only the function and any necessary imports, no package declaration, no explanation.`,
+	},
+	{
+		Lang: "javascript", Label: "JavaScript", Task: "debounce",
+		Prompt: `Write a JavaScript function named debounce(fn, ms) that returns a debounced version of fn that delays invoking fn until ms milliseconds have elapsed since the last invocation. Include only the function, no explanation.`,
+	},
+	{
+		Lang: "typescript", Label: "TypeScript", Task: "typed debounce",
+		Prompt: `Write a TypeScript generic function debounce<T extends (...args: any[]) => any>(fn: T, ms: number): (...args: Parameters<T>) => void that debounces fn. Include full type annotations. Include only the function, no explanation.`,
+	},
+	{
+		Lang: "node", Label: "Node.js", Task: "file line counter",
+		Prompt: `Write a Node.js script that reads a filename from process.argv[2], counts non-empty lines, and prints the count to stdout. Use only built-in Node.js modules (fs). Include only the script, no explanation.`,
+	},
+	{
+		Lang: "bash", Label: "Bash", Task: "delete old logs",
+		Prompt: `Write a bash script starting with #!/bin/bash that accepts a directory path as $1 and deletes all .log files in that directory older than 7 days (use find), printing each deleted filepath to stdout. Include only the script, no explanation.`,
+	},
+	{
+		Lang: "sh", Label: "sh (POSIX)", Task: "POSIX delete old logs",
+		Prompt: `Write a POSIX sh script starting with #!/bin/sh (no bash extensions) that accepts a directory path as $1 and deletes all .log files older than 7 days using find, printing each deleted filepath to stdout. Include only the script, no explanation.`,
+	},
+	{
+		Lang: "rust", Label: "Rust", Task: "fibonacci vec",
+		Prompt: `Write a Rust function named fibonacci(n: usize) -> Vec<u64> that returns a Vec of the first n Fibonacci numbers starting with [0, 1, 1, 2, ...]. Include only the function, no main, no explanation.`,
+	},
+	{
+		Lang: "php", Label: "PHP", Task: "filter adults from JSON",
+		Prompt: `Write a PHP function named filterAdults(string $json): array that decodes a JSON string of {"users":[{"name":"...","age":N},...]} and returns only the user arrays where age >= 18. Include only the function, no explanation.`,
+	},
+	{
+		Lang: "ruby", Label: "Ruby", Task: "find duplicates",
+		Prompt: `Write a Ruby method named find_duplicates(arr) that accepts an array and returns a sorted array of elements that appear more than once (each duplicate listed once). Include only the method, no explanation.`,
+	},
+	{
+		Lang: "c", Label: "C", Task: "array stack",
+		Prompt: `Write C code for a fixed-size stack (max 64 elements) using an array: a Stack struct with an int data[64] array and an int top field; and three functions: void push(Stack* s, int v), int pop(Stack* s, int* out), int is_empty(Stack* s). Include only the struct and functions, no main, no explanation.`,
+	},
+	{
+		Lang: "sql", Label: "SQL", Task: "top customers by value",
+		Prompt: `Write a SQL query against table orders(order_id INTEGER, customer_id INTEGER, customer_name TEXT, amount DECIMAL) that returns the top 5 customers by total order value, with columns customer_name and total_amount, ordered descending. Include only the SQL, no explanation.`,
+	},
+}
+
+// judgeCodePrompt builds a structured LLM-as-judge prompt for a code evaluation.
+func judgeCodePrompt(lang, task, code string) string {
+	return fmt.Sprintf(`You are a strict code quality evaluator. Rate the following %s code that was written for this task: "%s"
+
+CODE:
+%s
+
+Score each criterion 0 to 10 (10 = perfect):
+- correctness: Does the code correctly solve the stated task? Are edge cases handled?
+- completeness: Is the code runnable/usable as-is? No placeholders, valid syntax?
+- style: Is the code idiomatic and well-structured for %s?
+
+Respond with ONLY a JSON object. No markdown, no explanation, no extra text:
+{"correctness":N,"completeness":N,"style":N,"brief_critique":"one short sentence"}`,
+		lang, task, code, lang)
+}
+
+// hallucinationFillerUnit is a ~150-word paragraph about distributed systems,
+// repeated to fill a target context window for needle-in-a-haystack tests.
+const hallucinationFillerUnit = `In distributed computing, fault tolerance describes a system's ability to continue correct operation despite component failures. Engineers design such systems using redundancy, replication, and consensus protocols. The Raft algorithm, for example, elects a leader among a cluster of servers, replicating log entries to a quorum of followers before acknowledging writes to the client. When a leader fails, the remaining nodes elect a new one without losing committed data. Byzantine fault tolerance extends these ideas to handle nodes that send arbitrarily incorrect messages rather than simply crashing. Systems like Google Spanner use TrueTime, a globally synchronised clock API, to provide external consistency across datacenters. Horizontal scaling distributes load across commodity hardware, while consistent hashing minimises rebalancing when nodes join or leave a cluster. Modern cloud architectures combine these techniques with chaos engineering — intentionally injecting failures — to verify that redundancy mechanisms function correctly under real conditions. `
+
+const hallucinationNeedle   = "ORION-DELTA-9"
+const hallucinationSecret   = "The emergency override code for sector 7 is: ORION-DELTA-9."
+const hallucinationQuestion = "What is the emergency override code for sector 7? Reply with only the code itself, nothing else."
+
+// contextSizesK returns all context sizes in tokens (thousands) up to maxK, doubling from 8k.
+func contextSizesK(maxK int) []int {
+	sizes := []int{8, 16, 32, 64, 128, 256, 512, 1024, 2048, 5120, 10240}
+	var result []int
+	for _, s := range sizes {
+		if s <= maxK {
+			result = append(result, s)
+		}
+	}
+	if len(result) == 0 {
+		result = []int{8}
+	}
+	return result
+}
+
+// buildHallucinationPrompt creates a prompt of approximately targetK*1000 tokens
+// with the needle inserted at positionPct% of the filler length.
+func buildHallucinationPrompt(targetK int, positionPct int) string {
+	// Estimate: ~4 chars per token, each filler unit ~620 chars
+	targetChars := targetK * 1000 * 4
+	unitLen := len(hallucinationFillerUnit)
+	totalUnits := targetChars / unitLen
+	if totalUnits < 2 {
+		totalUnits = 2
+	}
+
+	insertAt := (totalUnits * positionPct) / 100
+
+	var sb strings.Builder
+	sb.WriteString("Read the following document carefully, then answer the question at the end.\n\n")
+	for i := 0; i < totalUnits; i++ {
+		if i == insertAt {
+			sb.WriteString("[CLASSIFIED RECORD] ")
+			sb.WriteString(hallucinationSecret)
+			sb.WriteString(" [END RECORD]\n\n")
+		}
+		sb.WriteString(hallucinationFillerUnit)
+		sb.WriteString("\n\n")
+	}
+	sb.WriteString("\n\nQuestion: ")
+	sb.WriteString(hallucinationQuestion)
+	return sb.String()
+}
+
 // --- Benchmark runners ---
 
 func runBenchmarkForPrompt(ctx context.Context, client *OllamaClient, model string, prompt string, logFunc func(string)) (float64, float64, float64, error) {
@@ -3387,6 +3525,730 @@ func runReasoningBenchmarkRun(ctx context.Context, client *OllamaClient, model s
 
 	n := float64(len(reasoningQuestions))
 	return correct, total, sumTtft / n, sumTps / n, sumLatency / n, string(extra), nil
+}
+
+// checkCodeSyntax does a fast static syntax check for supported languages.
+// Returns (syntaxOK, message). Languages without a CLI checker return (true, "skipped").
+func checkCodeSyntax(lang, code string) (bool, string) {
+	// Write code to a temp file
+	writeTemp := func(ext, content string) (string, func(), error) {
+		f, err := os.CreateTemp("", "code_check_*"+ext)
+		if err != nil {
+			return "", func() {}, err
+		}
+		if _, err := f.WriteString(content); err != nil {
+			_ = f.Close()
+			return "", func() {}, err
+		}
+		_ = f.Close()
+		return f.Name(), func() { _ = os.Remove(f.Name()) }, nil
+	}
+
+	runCmd := func(timeout time.Duration, name string, args ...string) (bool, string) {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+		if err != nil {
+			return false, strings.TrimSpace(string(out))
+		}
+		return true, ""
+	}
+
+	switch lang {
+	case "go":
+		// Use go/parser in-process — no temp file, no subprocess
+		_, parseErr := goparser.ParseFile(token.NewFileSet(), "", code, goparser.AllErrors)
+		if parseErr != nil {
+			return false, parseErr.Error()
+		}
+		return true, ""
+
+	case "python":
+		path, cleanup, err := writeTemp(".py", code)
+		if err != nil {
+			return true, "check unavailable"
+		}
+		defer cleanup()
+		return runCmd(5*time.Second, "python3", "-m", "py_compile", path)
+
+	case "javascript", "node", "typescript":
+		path, cleanup, err := writeTemp(".js", code)
+		if err != nil {
+			return true, "check unavailable"
+		}
+		defer cleanup()
+		return runCmd(5*time.Second, "node", "--check", path)
+
+	case "bash":
+		path, cleanup, err := writeTemp(".sh", code)
+		if err != nil {
+			return true, "check unavailable"
+		}
+		defer cleanup()
+		return runCmd(5*time.Second, "bash", "-n", path)
+
+	case "sh":
+		path, cleanup, err := writeTemp(".sh", code)
+		if err != nil {
+			return true, "check unavailable"
+		}
+		defer cleanup()
+		return runCmd(5*time.Second, "sh", "-n", path)
+
+	case "php":
+		path, cleanup, err := writeTemp(".php", code)
+		if err != nil {
+			return true, "check unavailable"
+		}
+		defer cleanup()
+		return runCmd(5*time.Second, "php", "-l", path)
+
+	case "ruby":
+		path, cleanup, err := writeTemp(".rb", code)
+		if err != nil {
+			return true, "check unavailable"
+		}
+		defer cleanup()
+		return runCmd(5*time.Second, "ruby", "-c", path)
+
+	default:
+		// rust, c, sql, typescript (no tsc) — skip syntax check, rely on judge
+		return true, "skipped"
+	}
+}
+
+// runCodeBenchmarkRun tests a list of languages, returning per-language results.
+func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judgeModel string, langs []string, logFunc func(string)) ([]map[string]interface{}, error) {
+	// Build a lookup map for the requested languages
+	taskMap := make(map[string]struct{ Label, Task, Prompt string })
+	for _, t := range codeBenchTasks {
+		taskMap[t.Lang] = struct{ Label, Task, Prompt string }{t.Label, t.Task, t.Prompt}
+	}
+
+	var results []map[string]interface{}
+
+	for _, lang := range langs {
+		t, ok := taskMap[lang]
+		if !ok {
+			logFunc(fmt.Sprintf("[%s] unknown language, skipping", lang))
+			continue
+		}
+
+		logFunc(fmt.Sprintf("[%s] Generating %s code...", t.Label, t.Task))
+
+		// --- Pass 1: Generate code ---
+		genReq := GenerateRequest{
+			Model:  model,
+			Prompt: t.Prompt,
+			Stream: true,
+			Options: map[string]interface{}{
+				"temperature": 0.0,
+				"num_predict": 512,
+			},
+		}
+
+		start := time.Now()
+		stream, err := client.StreamGenerate(ctx, genReq)
+		if err != nil {
+			logFunc(fmt.Sprintf("[%s] Generation failed: %v", t.Label, err))
+			results = append(results, map[string]interface{}{
+				"lang": lang, "label": t.Label, "task": t.Task,
+				"error": err.Error(), "syntax_ok": false,
+				"judge": map[string]interface{}{"correctness": 0, "completeness": 0, "style": 0, "brief_critique": "generation failed"},
+				"quality_score": 0.0, "tps": 0.0, "ttft_ms": 0.0,
+			})
+			continue
+		}
+
+		var firstTok time.Duration
+		var gotFirst bool
+		var toks int
+		var codeBuilder strings.Builder
+
+		scanner := newStreamScanner(stream)
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			if len(line) == 0 {
+				continue
+			}
+			var chunk struct {
+				Response string `json:"response"`
+				Done     bool   `json:"done"`
+			}
+			if json.Unmarshal(line, &chunk) == nil {
+				if !gotFirst && chunk.Response != "" {
+					firstTok = time.Since(start)
+					gotFirst = true
+				}
+				if chunk.Response != "" {
+					toks++
+					codeBuilder.WriteString(chunk.Response)
+				}
+			}
+		}
+		_ = stream.Close()
+
+		genDur := time.Since(start)
+		generatedCode := strings.TrimSpace(codeBuilder.String())
+
+		// Strip markdown code fences if present
+		if idx := strings.Index(generatedCode, "```"); idx != -1 {
+			// extract content between first ``` and last ```
+			inner := generatedCode[idx+3:]
+			if nl := strings.Index(inner, "\n"); nl != -1 {
+				inner = inner[nl+1:]
+			}
+			if end := strings.LastIndex(inner, "```"); end != -1 {
+				inner = inner[:end]
+			}
+			generatedCode = strings.TrimSpace(inner)
+		}
+
+		genSec := genDur.Seconds() - firstTok.Seconds()
+		if genSec <= 0 {
+			genSec = 0.001
+		}
+		tps := math.Round(float64(toks)/genSec*10) / 10
+		ttft := float64(firstTok.Milliseconds())
+
+		logFunc(fmt.Sprintf("[%s] Generated (%d tokens, %.1f TPS). Running syntax check...", t.Label, toks, tps))
+
+		// --- Pass 2: Syntax check ---
+		syntaxOK, syntaxMsg := checkCodeSyntax(lang, generatedCode)
+		if syntaxMsg == "skipped" {
+			logFunc(fmt.Sprintf("[%s] Syntax check: skipped (no checker for %s)", t.Label, lang))
+		} else if syntaxOK {
+			logFunc(fmt.Sprintf("[%s] Syntax check: PASS", t.Label))
+		} else {
+			logFunc(fmt.Sprintf("[%s] Syntax check: FAIL — %s", t.Label, syntaxMsg))
+		}
+
+		// --- Pass 3: LLM judge ---
+		judgeTarget := judgeModel
+		if judgeTarget == "" || judgeTarget == "same" {
+			judgeTarget = model
+		}
+		logFunc(fmt.Sprintf("[%s] Running LLM judge (%s)...", t.Label, judgeTarget))
+
+		judgeReq := GenerateRequest{
+			Model:  judgeTarget,
+			Prompt: judgeCodePrompt(t.Label, t.Task, generatedCode),
+			Stream: true,
+			Options: map[string]interface{}{
+				"temperature": 0.0,
+				"num_predict": 200,
+			},
+		}
+
+		jStream, jErr := client.StreamGenerate(ctx, judgeReq)
+		judgeResult := map[string]interface{}{
+			"correctness":    0, "completeness": 0, "style": 0,
+			"brief_critique": "judge unavailable",
+		}
+		qualityScore := 0.0
+
+		if jErr == nil {
+			var jBuilder strings.Builder
+			jScanner := newStreamScanner(jStream)
+			for jScanner.Scan() {
+				line := jScanner.Bytes()
+				if len(line) == 0 {
+					continue
+				}
+				var chunk struct {
+					Response string `json:"response"`
+				}
+				if json.Unmarshal(line, &chunk) == nil {
+					jBuilder.WriteString(chunk.Response)
+				}
+			}
+			_ = jStream.Close()
+
+			raw := strings.TrimSpace(jBuilder.String())
+			// Extract JSON from response (may have extra text)
+			if start := strings.Index(raw, "{"); start != -1 {
+				if end := strings.LastIndex(raw, "}"); end > start {
+					raw = raw[start : end+1]
+				}
+			}
+			var jr struct {
+				Correctness   float64 `json:"correctness"`
+				Completeness  float64 `json:"completeness"`
+				Style         float64 `json:"style"`
+				BriefCritique string  `json:"brief_critique"`
+			}
+			if jParseErr := json.Unmarshal([]byte(raw), &jr); jParseErr == nil {
+				judgeResult = map[string]interface{}{
+					"correctness":    math.Round(jr.Correctness*10) / 10,
+					"completeness":   math.Round(jr.Completeness*10) / 10,
+					"style":          math.Round(jr.Style*10) / 10,
+					"brief_critique": jr.BriefCritique,
+				}
+				// Weighted: correctness 50%, completeness 30%, style 20%
+				qualityScore = math.Round((jr.Correctness*0.5+jr.Completeness*0.3+jr.Style*0.2)*10) / 10
+			} else {
+				judgeResult["brief_critique"] = fmt.Sprintf("parse error: %v", jParseErr)
+			}
+		}
+
+		// Penalise if syntax failed (cap quality at 4/10 if syntax fails and it's a checkable language)
+		if !syntaxOK && syntaxMsg != "skipped" && qualityScore > 4 {
+			qualityScore = 4.0
+		}
+
+		logFunc(fmt.Sprintf("[%s] Quality: %.1f/10 | Syntax: %v | TPS: %.1f", t.Label, qualityScore, syntaxOK, tps))
+
+		// Truncate code snippet to 600 chars for storage
+		snippet := generatedCode
+		if len(snippet) > 600 {
+			snippet = snippet[:600] + "…"
+		}
+
+		results = append(results, map[string]interface{}{
+			"lang":          lang,
+			"label":         t.Label,
+			"task":          t.Task,
+			"tps":           tps,
+			"ttft_ms":       ttft,
+			"syntax_ok":     syntaxOK,
+			"syntax_msg":    syntaxMsg,
+			"judge":         judgeResult,
+			"quality_score": qualityScore,
+			"code_snippet":  snippet,
+		})
+	}
+
+	return results, nil
+}
+
+// runCodeBenchmarkSSEHandler streams a code benchmark run.
+func runCodeBenchmarkSSEHandler(c *gin.Context) {
+	model := c.Query("model")
+	if model == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "model required"})
+		return
+	}
+	judgeModel := c.DefaultQuery("judge_model", "same")
+	langsParam := c.DefaultQuery("langs", "python,go,javascript,typescript,node,bash,sh,rust,php,ruby,c,sql")
+	langs := strings.Split(langsParam, ",")
+	for i, l := range langs {
+		langs[i] = strings.TrimSpace(l)
+	}
+
+	activeSrv, err := GetActiveServer()
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "No active Ollama server"})
+		return
+	}
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Transfer-Encoding", "chunked")
+
+	client := NewOllamaClient(activeSrv)
+	ctx := c.Request.Context()
+	ollamaVer, _, _ := client.CheckStatus()
+
+	LogActivity("benchmark", fmt.Sprintf("Code benchmark started: %s (%d languages)", model, len(langs)))
+
+	c.Stream(func(w io.Writer) bool {
+		c.SSEvent("status", fmt.Sprintf("Starting code benchmark: %s | %d languages | judge: %s", model, len(langs), judgeModel))
+
+		results, runErr := runCodeBenchmarkRun(ctx, client, model, judgeModel, langs, func(msg string) {
+			c.SSEvent("status", msg)
+		})
+		if runErr != nil {
+			c.SSEvent("error", runErr.Error())
+			return false
+		}
+		if len(results) == 0 {
+			c.SSEvent("error", "No language results produced")
+			return false
+		}
+
+		// Aggregate
+		var sumQ, sumTPS float64
+		passSyntax := 0
+		for _, r := range results {
+			if q, ok := r["quality_score"].(float64); ok {
+				sumQ += q
+			}
+			if t, ok := r["tps"].(float64); ok {
+				sumTPS += t
+			}
+			if ok, _ := r["syntax_ok"].(bool); ok {
+				passSyntax++
+			}
+		}
+		n := float64(len(results))
+		avgQ := math.Round(sumQ/n*10) / 10
+		avgTPS := math.Round(sumTPS/n*10) / 10
+
+		overallScore := "F"
+		switch {
+		case avgQ >= 9:
+			overallScore = "S"
+		case avgQ >= 7:
+			overallScore = "A"
+		case avgQ >= 5:
+			overallScore = "B"
+		case avgQ >= 3:
+			overallScore = "C"
+		}
+
+		extraBytes, _ := json.Marshal(map[string]interface{}{
+			"judge_model": judgeModel,
+			"languages":   results,
+		})
+
+		judgeLabel := judgeModel
+		if judgeModel == "same" {
+			judgeLabel = model
+		}
+
+		run := CodeBenchmarkRun{
+			ServerName:         activeSrv.Name,
+			ServerURL:          activeSrv.URL,
+			ModelName:          model,
+			OllamaVersion:      ollamaVer,
+			JudgeModel:         judgeLabel,
+			Languages:          strings.Join(langs, ","),
+			AvgQualityScore:    avgQ,
+			AvgTPS:             avgTPS,
+			LangsTotal:         len(results),
+			LangsPassingSyntax: passSyntax,
+			OverallScore:       overallScore,
+			ExtraJSON:          string(extraBytes),
+		}
+		id, saveErr := SaveCodeBenchmarkRun(run)
+		if saveErr != nil {
+			c.SSEvent("error", fmt.Sprintf("Save failed: %v", saveErr))
+			return false
+		}
+
+		c.SSEvent("status", fmt.Sprintf("Code benchmark complete. Avg quality: %.1f/10 | Avg TPS: %.1f | Score: %s", avgQ, avgTPS, overallScore))
+
+		doneBytes, _ := json.Marshal(map[string]interface{}{
+			"id":                   id,
+			"model_name":           model,
+			"judge_model":          judgeLabel,
+			"avg_quality_score":    avgQ,
+			"avg_tps":              avgTPS,
+			"langs_total":          len(results),
+			"langs_passing_syntax": passSyntax,
+			"overall_score":        overallScore,
+			"extra_json":           string(extraBytes),
+		})
+		c.SSEvent("done", string(doneBytes))
+		return false
+	})
+}
+
+// runHallucinationSSEHandler streams a needle-in-a-haystack hallucination test.
+func runHallucinationSSEHandler(c *gin.Context) {
+	model := c.Query("model")
+	if model == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "model required"})
+		return
+	}
+	maxKStr := c.DefaultQuery("max_context_k", "32")
+	maxK, _ := strconv.Atoi(maxKStr)
+	if maxK <= 0 {
+		maxK = 32
+	}
+
+	customFiller := strings.TrimSpace(c.Query("custom_filler"))
+	fillerSource := "builtin"
+	fillerUnit := hallucinationFillerUnit
+	if customFiller != "" {
+		fillerSource = "custom"
+		fillerUnit = customFiller
+		if len(fillerUnit) < 50 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "custom filler too short"})
+			return
+		}
+	}
+
+	activeSrv, err := GetActiveServer()
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "No active Ollama server"})
+		return
+	}
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Transfer-Encoding", "chunked")
+
+	client := NewOllamaClient(activeSrv)
+	ctx := c.Request.Context()
+	ollamaVer, _, _ := client.CheckStatus()
+
+	sizes := contextSizesK(maxK)
+	positions := []int{10, 50, 90}
+	total := len(sizes) * len(positions)
+
+	LogActivity("benchmark", fmt.Sprintf("Hallucination test started: %s (max %dk, %d cells)", model, maxK, total))
+
+	// Override buildHallucinationPrompt to use the (potentially custom) fillerUnit
+	buildPrompt := func(targetK, positionPct int) string {
+		targetChars := targetK * 1000 * 4
+		unitLen := len(fillerUnit)
+		totalUnits := targetChars / unitLen
+		if totalUnits < 2 {
+			totalUnits = 2
+		}
+		insertAt := (totalUnits * positionPct) / 100
+
+		var sb strings.Builder
+		sb.WriteString("Read the following document carefully, then answer the question at the end.\n\n")
+		for i := 0; i < totalUnits; i++ {
+			if i == insertAt {
+				sb.WriteString("[CLASSIFIED RECORD] ")
+				sb.WriteString(hallucinationSecret)
+				sb.WriteString(" [END RECORD]\n\n")
+			}
+			sb.WriteString(fillerUnit)
+			sb.WriteString("\n\n")
+		}
+		sb.WriteString("\n\nQuestion: ")
+		sb.WriteString(hallucinationQuestion)
+		return sb.String()
+	}
+
+	c.Stream(func(w io.Writer) bool {
+		c.SSEvent("status", fmt.Sprintf("Starting hallucination test: %s | max context: %dk | %d cells", model, maxK, total))
+
+		type cell struct {
+			ContextK        int     `json:"context_k"`
+			PositionPct     int     `json:"position_pct"`
+			Pass            bool    `json:"pass"`
+			IsHallucination bool    `json:"is_hallucination"`
+			Response        string  `json:"response"`
+			TtftMs          float64 `json:"ttft_ms"`
+		}
+
+		var cells []cell
+		passed := 0
+		hallucinated := 0
+		done := 0
+
+		for _, k := range sizes {
+			for _, pos := range positions {
+				select {
+				case <-ctx.Done():
+					c.SSEvent("error", "Cancelled")
+					return false
+				default:
+				}
+
+				done++
+				c.SSEvent("status", fmt.Sprintf("[%d/%d] Context: %dk | Position: %d%%...", done, total, k, pos))
+
+				prompt := buildPrompt(k, pos)
+				numCtx := k * 1024
+
+				req := GenerateRequest{
+					Model:  model,
+					Prompt: prompt,
+					Stream: true,
+					Options: map[string]interface{}{
+						"temperature": 0.0,
+						"num_predict": 30,
+						"num_ctx":     numCtx,
+					},
+				}
+
+				start := time.Now()
+				stream, streamErr := client.StreamGenerate(ctx, req)
+				if streamErr != nil {
+					c.SSEvent("status", fmt.Sprintf("  Failed: %v", streamErr))
+					cells = append(cells, cell{ContextK: k, PositionPct: pos, Pass: false, Response: "ERROR: " + streamErr.Error()})
+					continue
+				}
+
+				var firstTok time.Duration
+				var gotFirst bool
+				var respBuilder strings.Builder
+
+				scanner := newStreamScanner(stream)
+				for scanner.Scan() {
+					line := scanner.Bytes()
+					if len(line) == 0 {
+						continue
+					}
+					var chunk struct {
+						Response string `json:"response"`
+						Done     bool   `json:"done"`
+					}
+					if json.Unmarshal(line, &chunk) == nil {
+						if !gotFirst && chunk.Response != "" {
+							firstTok = time.Since(start)
+							gotFirst = true
+						}
+						respBuilder.WriteString(chunk.Response)
+					}
+				}
+				_ = stream.Close()
+
+				response := strings.TrimSpace(respBuilder.String())
+				pass := strings.Contains(strings.ToUpper(response), strings.ToUpper(hallucinationNeedle))
+
+				// Hallucination detection: plausible-looking code that isn't correct
+				// Simple heuristic: contains letters-digits-letters pattern but not the needle
+				isHallucination := false
+				if !pass && response != "" {
+					lower := strings.ToLower(response)
+					refusals := []string{"don't know", "cannot find", "not mentioned", "no mention",
+						"not provided", "not in the", "unable to find", "i don't", "cannot determine",
+						"not specified", "not contain", "no information"}
+					isRefusal := false
+					for _, r := range refusals {
+						if strings.Contains(lower, r) {
+							isRefusal = true
+							break
+						}
+					}
+					if !isRefusal {
+						isHallucination = true
+					}
+				}
+
+				if pass {
+					passed++
+				}
+				if isHallucination {
+					hallucinated++
+				}
+
+				status := "PASS"
+				if !pass {
+					if isHallucination {
+						status = "HALLUCINATION"
+					} else {
+						status = "REFUSAL"
+					}
+				}
+				c.SSEvent("status", fmt.Sprintf("  %s → %q", status, response))
+
+				// Stream cell result to JS for live heat-map update
+				cellBytes, _ := json.Marshal(map[string]interface{}{
+					"context_k":        k,
+					"position_pct":     pos,
+					"pass":             pass,
+					"is_hallucination": isHallucination,
+					"response":         response,
+					"ttft_ms":          float64(firstTok.Milliseconds()),
+				})
+				c.SSEvent("cell", string(cellBytes))
+
+				cells = append(cells, cell{
+					ContextK: k, PositionPct: pos,
+					Pass: pass, IsHallucination: isHallucination,
+					Response: response, TtftMs: float64(firstTok.Milliseconds()),
+				})
+			}
+		}
+
+		recallPct := 0.0
+		hallPct := 0.0
+		if total > 0 {
+			recallPct = math.Round(float64(passed)/float64(total)*1000) / 10
+			hallPct = math.Round(float64(hallucinated)/float64(total)*1000) / 10
+		}
+
+		extraBytes, _ := json.Marshal(map[string]interface{}{
+			"needle":        hallucinationNeedle,
+			"filler_source": fillerSource,
+			"cells":         cells,
+			"total_cells":   total,
+			"passed":        passed,
+			"hallucinated":  hallucinated,
+		})
+
+		halRun := HallucinationRun{
+			ServerName:       activeSrv.Name,
+			ServerURL:        activeSrv.URL,
+			ModelName:        model,
+			OllamaVersion:    ollamaVer,
+			MaxContextK:      maxK,
+			FillerSource:     fillerSource,
+			RecallPct:        recallPct,
+			HallucinationPct: hallPct,
+			ExtraJSON:        string(extraBytes),
+		}
+		id, saveErr := SaveHallucinationRun(halRun)
+		if saveErr != nil {
+			c.SSEvent("error", fmt.Sprintf("Save failed: %v", saveErr))
+			return false
+		}
+
+		c.SSEvent("status", fmt.Sprintf("Hallucination test complete. Recall: %.1f%% | Hallucinations: %.1f%%", recallPct, hallPct))
+
+		doneBytes, _ := json.Marshal(map[string]interface{}{
+			"id":                id,
+			"model_name":        model,
+			"max_context_k":     maxK,
+			"recall_pct":        recallPct,
+			"hallucination_pct": hallPct,
+			"extra_json":        string(extraBytes),
+		})
+		c.SSEvent("done", string(doneBytes))
+		return false
+	})
+}
+
+func getCodeBenchmarksHandler(c *gin.Context) {
+	runs, err := GetCodeBenchmarkRuns()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if runs == nil {
+		runs = []CodeBenchmarkRun{}
+	}
+	c.JSON(http.StatusOK, runs)
+}
+
+func deleteCodeBenchmarkHandler(c *gin.Context) {
+	idStr := c.Param("id")
+	var id int64
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	if err := DeleteCodeBenchmarkRun(id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func getHallucinationRunsHandler(c *gin.Context) {
+	runs, err := GetHallucinationRuns()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if runs == nil {
+		runs = []HallucinationRun{}
+	}
+	c.JSON(http.StatusOK, runs)
+}
+
+func deleteHallucinationRunHandler(c *gin.Context) {
+	idStr := c.Param("id")
+	var id int64
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	if err := DeleteHallucinationRun(id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 func runBenchmarkSSEHandler(c *gin.Context) {

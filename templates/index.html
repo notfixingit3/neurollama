@@ -1374,6 +1374,12 @@
             <button id="benchmark-subtab-nodevnode" onclick="switchBenchmarkSubtab('nodevnode')" class="bench-subtab">
               <i class="fa-solid fa-code-compare mr-1.5"></i>NODE VS NODE
             </button>
+            <button id="benchmark-subtab-code" onclick="switchBenchmarkSubtab('code')" class="bench-subtab">
+              <i class="fa-solid fa-code mr-1.5"></i>CODE
+            </button>
+            <button id="benchmark-subtab-hallucination" onclick="switchBenchmarkSubtab('hallucination')" class="bench-subtab">
+              <i class="fa-solid fa-ghost mr-1.5"></i>HALLUCINATION
+            </button>
           </div>
 
           <!-- SUBTAB 1: STANDARD BENCHMARKS -->
@@ -1748,6 +1754,190 @@
             </div>
 
           </div>
+
+          <!-- SUBTAB: CODE BENCHMARK -->
+          <div id="benchmark-code-container" class="hidden grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <!-- Left: Config -->
+            <div class="lg:col-span-3 flex flex-col gap-4">
+              <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col gap-4">
+                <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] border-b border-[#4c566a]/40 pb-2">
+                  <i class="fa-solid fa-code mr-2"></i>Code Benchmark
+                </h2>
+
+                <!-- Model -->
+                <div class="form-control">
+                  <label class="label py-1"><span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">Model</span></label>
+                  <select id="code-bench-model" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full"></select>
+                </div>
+
+                <!-- Languages -->
+                <div class="form-control">
+                  <div class="flex items-center justify-between mb-1">
+                    <label class="label py-0"><span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">Languages</span></label>
+                    <button onclick="toggleAllCodeLangs()" class="text-[9px] font-mono text-[#88c0d0] hover:text-[#8fbcbb]">ALL / NONE</button>
+                  </div>
+                  <div id="code-bench-lang-grid" class="grid grid-cols-2 gap-1">
+                    <!-- populated by JS -->
+                  </div>
+                </div>
+
+                <!-- Judge model -->
+                <div class="form-control">
+                  <label class="label py-1"><span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">Judge Model</span></label>
+                  <div class="flex items-center gap-2 mb-2">
+                    <input type="checkbox" id="code-judge-different" class="checkbox checkbox-xs border-[#4c566a]" onchange="toggleJudgeModelSelect()">
+                    <span class="text-[10px] font-mono text-[#d8dee9]">Use different model as judge</span>
+                  </div>
+                  <select id="code-judge-model-select" class="hidden select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full"></select>
+                </div>
+
+                <button id="code-bench-run-btn" onclick="startCodeBenchmark()" class="btn btn-sm btn-outline btn-info font-tech tracking-wider w-full gap-2 hover:tech-glow-blue">
+                  <i class="fa-solid fa-play text-[10px]"></i>RUN CODE BENCHMARK
+                </button>
+              </div>
+
+              <!-- Console -->
+              <div class="tech-panel rounded-xl p-3 flex flex-col gap-2 flex-1">
+                <h3 class="text-[10px] font-tech font-bold uppercase text-[#4c566a] tracking-wider">Console</h3>
+                <div id="code-bench-console" class="font-mono text-[9px] text-[#a3be8c] overflow-y-auto max-h-48 space-y-0.5 leading-relaxed"></div>
+              </div>
+            </div>
+
+            <!-- Right: Results -->
+            <div class="lg:col-span-9 flex flex-col gap-4">
+              <!-- Run history -->
+              <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col gap-3">
+                <div class="flex items-center justify-between">
+                  <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
+                    <i class="fa-solid fa-trophy mr-2"></i>Run History
+                  </h2>
+                  <div class="flex gap-2 items-center">
+                    <span class="text-[9px] font-mono text-[#4c566a]">Filter by language:</span>
+                    <select id="code-lang-filter" onchange="renderCodeBenchResults()" class="select select-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-[10px] focus:border-[#88c0d0] focus:outline-none">
+                      <option value="">All languages</option>
+                      <option value="python">Python</option>
+                      <option value="go">Go</option>
+                      <option value="javascript">JavaScript</option>
+                      <option value="typescript">TypeScript</option>
+                      <option value="node">Node.js</option>
+                      <option value="bash">Bash</option>
+                      <option value="sh">sh (POSIX)</option>
+                      <option value="rust">Rust</option>
+                      <option value="php">PHP</option>
+                      <option value="ruby">Ruby</option>
+                      <option value="c">C</option>
+                      <option value="sql">SQL</option>
+                    </select>
+                  </div>
+                </div>
+                <div id="code-bench-history" class="overflow-x-auto">
+                  <div class="text-center text-[#4c566a] text-xs font-mono py-8">No code benchmark runs yet. Select languages and click Run.</div>
+                </div>
+              </div>
+
+              <!-- Selected run detail -->
+              <div id="code-bench-detail" class="hidden tech-panel rounded-xl p-4 flex flex-col gap-3">
+                <h3 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
+                  <i class="fa-solid fa-magnifying-glass-chart mr-2"></i>Run Detail
+                </h3>
+                <div id="code-bench-detail-body"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- SUBTAB: HALLUCINATION -->
+          <div id="benchmark-hallucination-container" class="hidden grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <!-- Left: Config -->
+            <div class="lg:col-span-3 flex flex-col gap-4">
+              <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col gap-4">
+                <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0] border-b border-[#4c566a]/40 pb-2">
+                  <i class="fa-solid fa-ghost mr-2"></i>Hallucination Test
+                </h2>
+                <p class="text-[9px] font-mono text-[#4c566a] leading-relaxed">
+                  Needle-in-a-haystack: inserts a secret code into filler text at different positions and sizes, tests recall.
+                </p>
+
+                <!-- Model -->
+                <div class="form-control">
+                  <label class="label py-1"><span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">Model</span></label>
+                  <select id="halluc-model" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full"></select>
+                </div>
+
+                <!-- Max context -->
+                <div class="form-control">
+                  <label class="label py-1"><span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">Max Context Size</span></label>
+                  <select id="halluc-max-context" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                    <option value="8">8k tokens</option>
+                    <option value="16">16k tokens</option>
+                    <option value="32" selected>32k tokens</option>
+                    <option value="64">64k tokens</option>
+                    <option value="128">128k tokens</option>
+                    <option value="256">256k tokens</option>
+                    <option value="512">512k tokens</option>
+                    <option value="1024">1M tokens</option>
+                    <option value="2048">2M tokens</option>
+                    <option value="5120">5M tokens</option>
+                    <option value="10240">10M tokens (Llama 4 Scout)</option>
+                  </select>
+                </div>
+
+                <!-- Advanced: custom filler -->
+                <details class="group">
+                  <summary class="text-[10px] font-mono text-[#88c0d0] cursor-pointer hover:text-[#8fbcbb] list-none flex items-center gap-1">
+                    <i class="fa-solid fa-chevron-right text-[8px] group-open:rotate-90 transition-transform"></i>
+                    Advanced options
+                  </summary>
+                  <div class="mt-2 flex flex-col gap-2">
+                    <label class="text-[9px] font-mono text-[#4c566a]">Custom filler text (leave blank to use built-in):</label>
+                    <textarea id="halluc-custom-filler" rows="5"
+                      class="textarea textarea-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-[9px] focus:border-[#88c0d0] focus:outline-none resize-none w-full"
+                      placeholder="Paste your own filler document here (min 50 characters). The secret needle will be inserted automatically."></textarea>
+                  </div>
+                </details>
+
+                <button id="halluc-run-btn" onclick="startHallucinationTest()" class="btn btn-sm btn-outline btn-warning font-tech tracking-wider w-full gap-2">
+                  <i class="fa-solid fa-play text-[10px]"></i>RUN HALLUCINATION TEST
+                </button>
+              </div>
+
+              <!-- Console -->
+              <div class="tech-panel rounded-xl p-3 flex flex-col gap-2 flex-1">
+                <h3 class="text-[10px] font-tech font-bold uppercase text-[#4c566a] tracking-wider">Console</h3>
+                <div id="halluc-console" class="font-mono text-[9px] text-[#a3be8c] overflow-y-auto max-h-48 space-y-0.5 leading-relaxed"></div>
+              </div>
+            </div>
+
+            <!-- Right: Results -->
+            <div class="lg:col-span-9 flex flex-col gap-4">
+              <!-- Live heat map (shown during and after run) -->
+              <div id="halluc-heatmap-panel" class="hidden tech-panel tech-header-accent rounded-xl p-4 flex flex-col gap-4">
+                <div class="flex items-center justify-between">
+                  <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
+                    <i class="fa-solid fa-table-cells mr-2"></i>Recall Heat Map
+                  </h2>
+                  <div class="flex gap-3 text-[9px] font-mono">
+                    <span class="flex items-center gap-1"><span class="halluc-cell-pass inline-block w-3 h-3 rounded-sm"></span>Recall</span>
+                    <span class="flex items-center gap-1"><span class="halluc-cell-halluc inline-block w-3 h-3 rounded-sm"></span>Hallucination</span>
+                    <span class="flex items-center gap-1"><span class="halluc-cell-refusal inline-block w-3 h-3 rounded-sm"></span>Refusal</span>
+                    <span class="flex items-center gap-1"><span class="halluc-cell-pending inline-block w-3 h-3 rounded-sm"></span>Pending</span>
+                  </div>
+                </div>
+                <div id="halluc-heatmap" class="overflow-x-auto"></div>
+                <div id="halluc-stats" class="flex gap-4 text-[10px] font-mono"></div>
+              </div>
+
+              <!-- Run history -->
+              <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col gap-3">
+                <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
+                  <i class="fa-solid fa-clock-rotate-left mr-2"></i>Run History
+                </h2>
+                <div id="halluc-history">
+                  <div class="text-center text-[#4c566a] text-xs font-mono py-8">No hallucination tests yet. Select a model and run.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
         </div>
 
         <!-- PANEL 7: DOCUMENT RAG -->

@@ -356,6 +356,35 @@ func migrate() error {
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (user_id, key)
 		);`,
+		`CREATE TABLE IF NOT EXISTS code_benchmark_runs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			server_name TEXT NOT NULL DEFAULT '',
+			server_url TEXT NOT NULL DEFAULT '',
+			model_name TEXT NOT NULL,
+			ollama_version TEXT NOT NULL DEFAULT '',
+			judge_model TEXT NOT NULL DEFAULT '',
+			languages TEXT NOT NULL DEFAULT '',
+			avg_quality_score REAL NOT NULL DEFAULT 0,
+			avg_tps REAL NOT NULL DEFAULT 0,
+			langs_total INTEGER NOT NULL DEFAULT 0,
+			langs_passing_syntax INTEGER NOT NULL DEFAULT 0,
+			overall_score TEXT NOT NULL DEFAULT 'F',
+			extra_json TEXT NOT NULL DEFAULT '{}',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);`,
+		`CREATE TABLE IF NOT EXISTS hallucination_runs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			server_name TEXT NOT NULL DEFAULT '',
+			server_url TEXT NOT NULL DEFAULT '',
+			model_name TEXT NOT NULL,
+			ollama_version TEXT NOT NULL DEFAULT '',
+			max_context_k INTEGER NOT NULL DEFAULT 8,
+			filler_source TEXT NOT NULL DEFAULT 'builtin',
+			recall_pct REAL NOT NULL DEFAULT 0,
+			hallucination_pct REAL NOT NULL DEFAULT 0,
+			extra_json TEXT NOT NULL DEFAULT '{}',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);`,
 		// FTS5 virtual table for full-text chat search (external content backed by messages)
 		`CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts
 		 USING fts5(content, content='messages', content_rowid='id', tokenize='porter unicode61');`,
@@ -1508,6 +1537,39 @@ func GetNvnMatches(nodeID string, limit int) ([]NvnMatch, error) {
 	return list, nil
 }
 
+// ── Code & Hallucination Benchmark Types ─────────────────────────────────────
+
+type CodeBenchmarkRun struct {
+	ID                 int64   `json:"id"`
+	ServerName         string  `json:"server_name"`
+	ServerURL          string  `json:"server_url"`
+	ModelName          string  `json:"model_name"`
+	OllamaVersion      string  `json:"ollama_version"`
+	JudgeModel         string  `json:"judge_model"`
+	Languages          string  `json:"languages"`
+	AvgQualityScore    float64 `json:"avg_quality_score"`
+	AvgTPS             float64 `json:"avg_tps"`
+	LangsTotal         int     `json:"langs_total"`
+	LangsPassingSyntax int     `json:"langs_passing_syntax"`
+	OverallScore       string  `json:"overall_score"`
+	ExtraJSON          string  `json:"extra_json"`
+	CreatedAt          string  `json:"created_at"`
+}
+
+type HallucinationRun struct {
+	ID               int64   `json:"id"`
+	ServerName       string  `json:"server_name"`
+	ServerURL        string  `json:"server_url"`
+	ModelName        string  `json:"model_name"`
+	OllamaVersion    string  `json:"ollama_version"`
+	MaxContextK      int     `json:"max_context_k"`
+	FillerSource     string  `json:"filler_source"`
+	RecallPct        float64 `json:"recall_pct"`
+	HallucinationPct float64 `json:"hallucination_pct"`
+	ExtraJSON        string  `json:"extra_json"`
+	CreatedAt        string  `json:"created_at"`
+}
+
 // ── User & Preferences Helpers ────────────────────────────────────────────────
 
 // seedAdminUser inserts the default admin user if it doesn't exist yet.
@@ -1623,4 +1685,94 @@ func SearchChats(query string, limit int) ([]ChatSearchResult, error) {
 		}
 	}
 	return results, nil
+}
+
+// ── Code Benchmark CRUD ───────────────────────────────────────────────────────
+
+func SaveCodeBenchmarkRun(run CodeBenchmarkRun) (int64, error) {
+	res, err := DB.Exec(`
+		INSERT INTO code_benchmark_runs
+			(server_name, server_url, model_name, ollama_version, judge_model,
+			 languages, avg_quality_score, avg_tps, langs_total, langs_passing_syntax,
+			 overall_score, extra_json)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		run.ServerName, run.ServerURL, run.ModelName, run.OllamaVersion, run.JudgeModel,
+		run.Languages, run.AvgQualityScore, run.AvgTPS, run.LangsTotal, run.LangsPassingSyntax,
+		run.OverallScore, run.ExtraJSON)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func GetCodeBenchmarkRuns() ([]CodeBenchmarkRun, error) {
+	rows, err := DB.Query(`
+		SELECT id, server_name, server_url, model_name, ollama_version, judge_model,
+		       languages, avg_quality_score, avg_tps, langs_total, langs_passing_syntax,
+		       overall_score, extra_json, datetime(created_at, 'localtime')
+		FROM code_benchmark_runs ORDER BY id DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var list []CodeBenchmarkRun
+	for rows.Next() {
+		var r CodeBenchmarkRun
+		if err := rows.Scan(&r.ID, &r.ServerName, &r.ServerURL, &r.ModelName, &r.OllamaVersion,
+			&r.JudgeModel, &r.Languages, &r.AvgQualityScore, &r.AvgTPS, &r.LangsTotal,
+			&r.LangsPassingSyntax, &r.OverallScore, &r.ExtraJSON, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		list = append(list, r)
+	}
+	return list, nil
+}
+
+func DeleteCodeBenchmarkRun(id int64) error {
+	_, err := DB.Exec(`DELETE FROM code_benchmark_runs WHERE id = ?`, id)
+	return err
+}
+
+// ── Hallucination CRUD ────────────────────────────────────────────────────────
+
+func SaveHallucinationRun(run HallucinationRun) (int64, error) {
+	res, err := DB.Exec(`
+		INSERT INTO hallucination_runs
+			(server_name, server_url, model_name, ollama_version,
+			 max_context_k, filler_source, recall_pct, hallucination_pct, extra_json)
+		VALUES (?,?,?,?,?,?,?,?,?)`,
+		run.ServerName, run.ServerURL, run.ModelName, run.OllamaVersion,
+		run.MaxContextK, run.FillerSource, run.RecallPct, run.HallucinationPct, run.ExtraJSON)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func GetHallucinationRuns() ([]HallucinationRun, error) {
+	rows, err := DB.Query(`
+		SELECT id, server_name, server_url, model_name, ollama_version,
+		       max_context_k, filler_source, recall_pct, hallucination_pct,
+		       extra_json, datetime(created_at, 'localtime')
+		FROM hallucination_runs ORDER BY id DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var list []HallucinationRun
+	for rows.Next() {
+		var r HallucinationRun
+		if err := rows.Scan(&r.ID, &r.ServerName, &r.ServerURL, &r.ModelName, &r.OllamaVersion,
+			&r.MaxContextK, &r.FillerSource, &r.RecallPct, &r.HallucinationPct,
+			&r.ExtraJSON, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		list = append(list, r)
+	}
+	return list, nil
+}
+
+func DeleteHallucinationRun(id int64) error {
+	_, err := DB.Exec(`DELETE FROM hallucination_runs WHERE id = ?`, id)
+	return err
 }

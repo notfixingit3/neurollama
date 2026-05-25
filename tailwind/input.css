@@ -389,3 +389,22 @@ mark.chat-search-mark {
   border-radius: 2px;
   padding: 0 2px;
 }
+
+/* Hallucination test heat-map cells */
+.halluc-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 28px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  cursor: default;
+  transition: opacity 0.2s;
+}
+.halluc-cell-pass    { background-color: rgba(163, 190, 140, 0.25); color: #a3be8c; border: 1px solid rgba(163,190,140,0.4); }
+.halluc-cell-halluc  { background-color: rgba(191, 97,  114, 0.25); color: #bf616a; border: 1px solid rgba(191,97,114,0.4); }
+.halluc-cell-refusal { background-color: rgba(235, 203, 139, 0.25); color: #ebcb8b; border: 1px solid rgba(235,203,139,0.4); }
+.halluc-cell-pending { background-color: rgba(76,  86,  106, 0.20); color: #4c566a; border: 1px solid rgba(76,86,106,0.3); }
