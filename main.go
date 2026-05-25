@@ -36,6 +36,164 @@ var (
 	activeDBPath = "data/neurollama.db"
 )
 
+// releaseNotesCache caches GitHub release note bodies per version tag (permanent — notes don't change).
+var releaseNotesCache struct {
+	sync.Mutex
+	entries map[string]struct {
+		Body    string
+		HTMLURL string
+	}
+}
+
+func init() {
+	releaseNotesCache.entries = make(map[string]struct {
+		Body    string
+		HTMLURL string
+	})
+}
+
+func releaseNotesHandler(c *gin.Context) {
+	version := strings.TrimPrefix(c.Query("version"), "v")
+	if version == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "version required"})
+		return
+	}
+	tag := "v" + version
+
+	releaseNotesCache.Lock()
+	entry, cached := releaseNotesCache.entries[tag]
+	releaseNotesCache.Unlock()
+	if cached {
+		c.JSON(http.StatusOK, gin.H{"version": version, "body": entry.Body, "html_url": entry.HTMLURL})
+		return
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, _ := http.NewRequest("GET",
+		"https://api.github.com/repos/ollama/ollama/releases/tags/"+tag, nil)
+	req.Header.Set("User-Agent", "neurollama/"+appVersion)
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	resp, err := client.Do(req)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		c.JSON(http.StatusNotFound, gin.H{"error": "No release found for " + tag})
+		return
+	}
+	if resp.StatusCode != http.StatusOK {
+		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("GitHub returned %d", resp.StatusCode)})
+		return
+	}
+
+	var rel struct {
+		Body    string `json:"body"`
+		HTMLURL string `json:"html_url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse response"})
+		return
+	}
+
+	releaseNotesCache.Lock()
+	releaseNotesCache.entries[tag] = struct {
+		Body    string
+		HTMLURL string
+	}{rel.Body, rel.HTMLURL}
+	releaseNotesCache.Unlock()
+
+	c.JSON(http.StatusOK, gin.H{"version": version, "body": rel.Body, "html_url": rel.HTMLURL})
+}
+
+// ollamaLatestCache caches the latest Ollama release info from GitHub for 1 hour.
+var ollamaLatestCache struct {
+	sync.Mutex
+	stable     string
+	prerelease string
+	fetchedAt  time.Time
+}
+
+// fetchOllamaLatest queries the GitHub releases API and returns the latest
+// stable and pre-release tag names (without the "v" prefix).
+func fetchOllamaLatest() (stable, prerelease string, err error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, _ := http.NewRequest("GET", "https://api.github.com/repos/ollama/ollama/releases?per_page=10", nil)
+	req.Header.Set("User-Agent", "neurollama/"+appVersion)
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+
+	var releases []struct {
+		TagName    string `json:"tag_name"`
+		Prerelease bool   `json:"prerelease"`
+		Draft      bool   `json:"draft"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
+		return "", "", err
+	}
+
+	for _, r := range releases {
+		if r.Draft {
+			continue
+		}
+		tag := strings.TrimPrefix(r.TagName, "v")
+		if !r.Prerelease && stable == "" {
+			stable = tag
+		}
+		if r.Prerelease && prerelease == "" {
+			prerelease = tag
+		}
+		if stable != "" && prerelease != "" {
+			break
+		}
+	}
+	return stable, prerelease, nil
+}
+
+func ollamaLatestHandler(c *gin.Context) {
+	const cacheTTL = time.Hour
+
+	ollamaLatestCache.Lock()
+	defer ollamaLatestCache.Unlock()
+
+	if ollamaLatestCache.stable != "" && time.Since(ollamaLatestCache.fetchedAt) < cacheTTL {
+		c.JSON(http.StatusOK, gin.H{
+			"stable":     ollamaLatestCache.stable,
+			"prerelease": ollamaLatestCache.prerelease,
+		})
+		return
+	}
+
+	stable, prerelease, err := fetchOllamaLatest()
+	if err != nil {
+		// Serve stale cache rather than fail
+		if ollamaLatestCache.stable != "" {
+			c.JSON(http.StatusOK, gin.H{
+				"stable":     ollamaLatestCache.stable,
+				"prerelease": ollamaLatestCache.prerelease,
+			})
+			return
+		}
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
+
+	ollamaLatestCache.stable     = stable
+	ollamaLatestCache.prerelease = prerelease
+	ollamaLatestCache.fetchedAt  = time.Now()
+
+	c.JSON(http.StatusOK, gin.H{
+		"stable":     stable,
+		"prerelease": prerelease,
+	})
+}
+
 type ServerStatusResponse struct {
 	Server
 	Status  string `json:"status"` // "online" or "offline"
@@ -230,6 +388,9 @@ func main() {
 		api.GET("/benchmarks/export.csv", exportBenchmarksCSVHandler)
 		api.GET("/benchmarks/run", runBenchmarkSSEHandler)
 		api.GET("/benchmarks/node-vs-node", nodeVsNodeBenchmarkHandler)
+		api.GET("/benchmarks/nvn-leaderboard", nvnLeaderboardHandler)
+		api.GET("/benchmarks/nvn-matches", nvnMatchesHandler)
+		api.DELETE("/benchmarks/nvn-matches/:id", deleteNvnMatchHandler)
 		api.PUT("/benchmarks/:id/score", updateBenchmarkScoreHandler)
 		api.DELETE("/benchmarks/:id", deleteBenchmarkHandler)
 		api.GET("/node-models", nodeModelsHandler)
@@ -249,11 +410,18 @@ func main() {
 		api.DELETE("/rag/documents/:id", deleteRAGDocumentHandler)
 		api.POST("/rag/query", queryRAGSimilarityHandler)
 
+		// User preferences (DB-backed, default admin user)
+		api.GET("/preferences", getPreferencesHandler)
+		api.PUT("/preferences", setPreferenceHandler)
+		api.DELETE("/preferences", clearPreferencesHandler)
+
 		// Diagnostics
 		api.GET("/diagnostics", diagnosticsHandler)
 
 		// System — About, bulk-delete, backup/restore, activity, presets
 		api.GET("/about", aboutHandler)
+		api.GET("/ollama-latest", ollamaLatestHandler)
+		api.GET("/ollama-release-notes", releaseNotesHandler)
 		api.DELETE("/chats", deleteAllChatsHandler)
 		api.DELETE("/benchmarks", deleteAllBenchmarksHandler)
 		api.GET("/backup", backupDBHandler)
@@ -1394,6 +1562,43 @@ func importPresetsHandler(c *gin.Context) {
 	}
 	LogActivity("system", fmt.Sprintf("Presets imported: %d presets from %s", imported, file.Filename))
 	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Imported %d preset(s).", imported), "count": imported})
+}
+
+// ── User Preferences Handlers ─────────────────────────────────────────────────
+
+func getPreferencesHandler(c *gin.Context) {
+	prefs, err := GetAllPreferences("admin")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, prefs)
+}
+
+type SetPreferenceRequest struct {
+	Key   string `json:"key" binding:"required"`
+	Value string `json:"value"`
+}
+
+func setPreferenceHandler(c *gin.Context) {
+	var req SetPreferenceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := SetPreference("admin", req.Key, req.Value); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func clearPreferencesHandler(c *gin.Context) {
+	if err := ClearPreferences("admin"); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 type CreateStreamRequest struct {
@@ -3188,6 +3393,9 @@ func runBenchmarkSSEHandler(c *gin.Context) {
 	client := NewOllamaClient(activeSrv)
 	ctx := c.Request.Context()
 
+	// Capture Ollama version once before streaming starts (non-blocking, best-effort)
+	ollamaVer, _, _ := client.CheckStatus()
+
 	c.Stream(func(w io.Writer) bool {
 		c.SSEvent("status", fmt.Sprintf("Initializing %s benchmark for %s...", strings.ToUpper(benchType), model))
 
@@ -3301,7 +3509,7 @@ func runBenchmarkSSEHandler(c *gin.Context) {
 			avgLatency = sumLatency / float64(runs)
 		}
 
-		id, saveErr = SaveBenchmark(model, activeSrv.Name, activeSrv.URL, benchType, extraJSON, avgTtft, avgTps, avgLatency)
+		id, saveErr = SaveBenchmark(model, activeSrv.Name, activeSrv.URL, benchType, extraJSON, ollamaVer, avgTtft, avgTps, avgLatency)
 		if saveErr != nil {
 			c.SSEvent("error", fmt.Sprintf("Failed to save benchmark: %v", saveErr))
 			return false
@@ -4220,14 +4428,38 @@ func aboutHandler(c *gin.Context) {
 		_ = DB.QueryRow("SELECT COUNT(*) FROM benchmarks").Scan(&benchCount)
 	}
 
+	// DB file size (main + WAL if present)
+	var dbBytes, walBytes int64
+	if info, err := os.Stat(activeDBPath); err == nil {
+		dbBytes = info.Size()
+	}
+	if info, err := os.Stat(activeDBPath + "-wal"); err == nil {
+		walBytes = info.Size()
+	}
+	totalBytes := dbBytes + walBytes
+
+	fmtSize := func(b int64) string {
+		switch {
+		case b >= 1<<20:
+			return fmt.Sprintf("%.1f MB", float64(b)/float64(1<<20))
+		case b >= 1<<10:
+			return fmt.Sprintf("%.1f KB", float64(b)/float64(1<<10))
+		default:
+			return fmt.Sprintf("%d B", b)
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"version":    appVersion,
-		"goVersion":  runtime.Version(),
-		"uptime":     uptimeStr,
-		"startTime":  appStartTime.Format("2006-01-02 15:04:05"),
-		"dbPath":     activeDBPath,
-		"chatCount":  chatCount,
-		"benchCount": benchCount,
+		"version":       appVersion,
+		"goVersion":     runtime.Version(),
+		"uptime":        uptimeStr,
+		"startTime":     appStartTime.Format("2006-01-02 15:04:05"),
+		"dbPath":        activeDBPath,
+		"dbSize":        fmtSize(totalBytes),
+		"dbSizeBytes":   totalBytes,
+		"dbSizeWal":     fmtSize(walBytes),
+		"chatCount":     chatCount,
+		"benchCount":    benchCount,
 	})
 }
 
@@ -4468,6 +4700,7 @@ func nodeVsNodeBenchmarkHandler(c *gin.Context) {
 		runNode := func(srv Server, label string) NvNResult {
 			res := NvNResult{NodeName: srv.Name, NodeURL: srv.URL, NodeID: srv.ID}
 			client := NewOllamaClient(srv)
+			nodeVer, _, _ := client.CheckStatus()
 			logFn := func(msg string) { emit(label, msg) }
 			emit(label, fmt.Sprintf("Running %s benchmark...", strings.ToUpper(benchType)))
 
@@ -4492,7 +4725,7 @@ func nodeVsNodeBenchmarkHandler(c *gin.Context) {
 				emit(label, "✗ Failed: "+runErr.Error())
 				return res
 			}
-			id, _ := SaveBenchmark(model, srv.Name, srv.URL, benchType, res.Extra, res.TTFT, res.TPS, res.Latency)
+			id, _ := SaveBenchmark(model, srv.Name, srv.URL, benchType, res.Extra, nodeVer, res.TTFT, res.TPS, res.Latency)
 			if id > 0 {
 				res.BenchID = id
 				_ = CullBenchmarks(model, srv.URL, benchType, 5)
@@ -4516,6 +4749,36 @@ func nodeVsNodeBenchmarkHandler(c *gin.Context) {
 			resB = NvNResult{NodeName: nodeB.Name, NodeURL: nodeB.URL, NodeID: nodeB.ID, HasError: true, ErrMsg: "model unavailable"}
 		}
 
+		// Determine overall winner (majority of TPS/TTFT/Latency metrics).
+		winnerID, winnerName := func() (string, string) {
+			if resA.HasError || resB.HasError {
+				return "", ""
+			}
+			scoreA, scoreB := 0, 0
+			if resA.TPS > resB.TPS { scoreA++ } else if resB.TPS > resA.TPS { scoreB++ }
+			if resA.TTFT > 0 && resB.TTFT > 0 {
+				if resA.TTFT < resB.TTFT { scoreA++ } else if resB.TTFT < resA.TTFT { scoreB++ }
+			}
+			if resA.Latency > 0 && resB.Latency > 0 {
+				if resA.Latency < resB.Latency { scoreA++ } else if resB.Latency < resA.Latency { scoreB++ }
+			}
+			if scoreA > scoreB { return resA.NodeID, resA.NodeName }
+			if scoreB > scoreA { return resB.NodeID, resB.NodeName }
+			return "", "" // tie
+		}()
+
+		_, _ = SaveNvnMatch(NvnMatch{
+			ModelName:  model,
+			BenchType:  benchType,
+			NodeAID:    resA.NodeID, NodeAName: resA.NodeName,
+			NodeBID:    resB.NodeID, NodeBName: resB.NodeName,
+			WinnerID:   winnerID, WinnerName: winnerName,
+			NodeATPS:   resA.TPS, NodeBTPS: resB.TPS,
+			NodeATTFT:  resA.TTFT, NodeBTTFT: resB.TTFT,
+			NodeALat:   resA.Latency, NodeBLat: resB.Latency,
+			NodeAError: resA.HasError, NodeBError: resB.HasError,
+		})
+
 		payload, _ := json.Marshal(map[string]interface{}{
 			"model": model, "type": benchType,
 			"node_a": resA, "node_b": resB,
@@ -4525,4 +4788,42 @@ func nodeVsNodeBenchmarkHandler(c *gin.Context) {
 		c.Writer.Flush()
 		return false
 	})
+}
+
+func deleteNvnMatchHandler(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	if err := DeleteNvnMatch(id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func nvnLeaderboardHandler(c *gin.Context) {
+	entries, err := GetNvnLeaderboard()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if entries == nil {
+		entries = []NvnLeaderboardEntry{}
+	}
+	c.JSON(http.StatusOK, entries)
+}
+
+func nvnMatchesHandler(c *gin.Context) {
+	nodeID := c.Query("nodeId")
+	matches, err := GetNvnMatches(nodeID, 100)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if matches == nil {
+		matches = []NvnMatch{}
+	}
+	c.JSON(http.StatusOK, matches)
 }

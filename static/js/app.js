@@ -231,12 +231,48 @@ function makeSearchableSelect(selectEl) {
 }
 // ── End searchable select ────────────────────────────────────────────────────
 
+// ── Preferences (DB-backed, loaded once at startup) ───────────────────────────
+let prefs = {};
+
+async function loadPreferences() {
+  try {
+    const res = await fetch('/api/preferences');
+    if (res.ok) prefs = await res.json();
+  } catch { /* offline — fall back to defaults */ }
+}
+
+// getPref reads from the in-memory prefs map, returning defaultValue if absent.
+function getPref(key, defaultValue = '') {
+  return (key in prefs) ? prefs[key] : defaultValue;
+}
+
+// setPref optimistically updates the local map and fire-and-forgets a PUT.
+function setPref(key, val) {
+  prefs[key] = String(val);
+  fetch('/api/preferences', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key, value: String(val) }),
+  }).catch(() => {});
+}
+// ── End preferences helpers ──────────────────────────────────────────────────
+
 // Initialization
 document.addEventListener('DOMContentLoaded', () => {
   init();
+  // Close node slide-out when clicking outside of it or its trigger button
+  document.addEventListener('click', e => {
+    const panel  = document.getElementById('node-slideout');
+    const btn    = document.getElementById('footer-node-btn');
+    if (!panel || panel.classList.contains('hidden')) return;
+    if (!panel.contains(e.target) && !btn?.contains(e.target)) closeNodeSlideout();
+  });
 });
 
 async function init() {
+  // Load all user preferences from DB before restoring any state.
+  await loadPreferences();
+
   initAccordionRow();
   // Non-blocking: fire and forget — page renders immediately, server cards and
   // status dots fill in once the (now-instant) cache read completes.
@@ -304,7 +340,7 @@ async function init() {
     if (!chatRagEnabledEl) return;
     const enabled = chatRagEnabledEl.checked;
     
-    localStorage.setItem('chat-rag-enabled', enabled);
+    setPref('chat-rag-enabled', enabled);
     
     if (chatRagModelContainer) {
       if (enabled) {
@@ -333,16 +369,16 @@ async function init() {
   if (chatRagEnabledEl) {
     chatRagEnabledEl.addEventListener('change', updateChatRAGControlsState);
     
-    const savedRagEnabled = localStorage.getItem('chat-rag-enabled') === 'true';
+    const savedRagEnabled = getPref('chat-rag-enabled') === 'true';
     chatRagEnabledEl.checked = savedRagEnabled;
-    
-    const savedRagModel = localStorage.getItem('chat-rag-model-select');
+
+    const savedRagModel = getPref('chat-rag-model-select');
     const chatRagSelect = document.getElementById('chat-rag-model-select');
     if (savedRagModel && chatRagSelect) {
       chatRagSelect.value = savedRagModel;
     }
-    
-    const savedRagTopK = localStorage.getItem('chat-rag-top-k');
+
+    const savedRagTopK = getPref('chat-rag-top-k');
     const chatRagTopKVal = document.getElementById('chat-rag-top-k');
     if (savedRagTopK && chatRagTopKVal) {
       chatRagTopKVal.value = savedRagTopK;
@@ -356,14 +392,14 @@ async function init() {
   const chatRagSelectEl = document.getElementById('chat-rag-model-select');
   if (chatRagSelectEl) {
     chatRagSelectEl.addEventListener('change', () => {
-      localStorage.setItem('chat-rag-model-select', chatRagSelectEl.value);
+      setPref('chat-rag-model-select', chatRagSelectEl.value);
     });
   }
 
   const chatRagTopKRange = document.getElementById('chat-rag-top-k');
   if (chatRagTopKRange) {
     chatRagTopKRange.addEventListener('change', () => {
-      localStorage.setItem('chat-rag-top-k', chatRagTopKRange.value);
+      setPref('chat-rag-top-k', chatRagTopKRange.value);
     });
   }
 
@@ -377,7 +413,7 @@ async function init() {
     ['rag-model-select',        'neurollama-rag-model'],
   ].forEach(([id, key]) => {
     const el = document.getElementById(id);
-    if (el) el.addEventListener('change', () => localStorage.setItem(key, el.value));
+    if (el) el.addEventListener('change', () => setPref(key, el.value));
   });
 
   // Initialize RAG drag-and-drop & file input listeners
@@ -485,11 +521,14 @@ async function init() {
   } catch { /* corrupt cache — ignore */ }
 
   // Restore inventory + system sub-tabs
-  activeInventorySubtab = localStorage.getItem('neurollama-inventory-subtab') || 'models';
+  activeInventorySubtab = getPref('neurollama-inventory-subtab', 'models');
   // Restore system sub-tab, then handle legacy workspace values
   // (old saves of 'memory' / 'diagnostics' / 'settings' redirect to 'system')
-  activeSystemSubtab = localStorage.getItem('neurollama-system-subtab') || 'settings';
-  let savedWorkspace = localStorage.getItem('active-workspace') || 'inventory';
+  activeSystemSubtab = getPref('neurollama-system-subtab', 'settings');
+  let savedWorkspace = getPref('active-workspace', 'inventory');
+  // Restore leaderboard sort state
+  lbSortCol = getPref('neurollama-bench-sort-col', 'created_at');
+  lbSortDir = getPref('neurollama-bench-sort-dir', 'desc');
   const legacySystemTabs = { memory: 'memory', diagnostics: 'diagnostics', settings: 'settings' };
   if (legacySystemTabs[savedWorkspace]) {
     activeSystemSubtab = legacySystemTabs[savedWorkspace];
@@ -544,7 +583,7 @@ function switchWorkspace(workspace) {
   });
 
   activeWorkspace = workspace;
-  localStorage.setItem('active-workspace', workspace);
+  setPref('active-workspace', workspace);
 
   // Tab specific actions
   if (workspace === 'inventory') {
@@ -599,7 +638,7 @@ function switchWorkspace(workspace) {
 
 function switchInventorySubtab(tab) {
   activeInventorySubtab = tab;
-  localStorage.setItem('neurollama-inventory-subtab', tab);
+  setPref('neurollama-inventory-subtab', tab);
   ['models', 'hub'].forEach(t => {
     const btn = document.getElementById(`inventory-subtab-${t}`);
     const container = document.getElementById(`inventory-${t}-container`);
@@ -616,7 +655,7 @@ function switchInventorySubtab(tab) {
 
 function switchSystemSubtab(subtab) {
   activeSystemSubtab = subtab;
-  localStorage.setItem('neurollama-system-subtab', subtab);
+  setPref('neurollama-system-subtab', subtab);
 
   // Show/hide sub-panels and toggle active state on sub-tab buttons
   ['memory', 'diagnostics', 'settings', 'activity', 'about', 'data'].forEach(sp => {
@@ -664,18 +703,153 @@ async function fetchAbout() {
          <div class="text-[#d8dee9]">${value}</div>
        </div>`;
     grid.innerHTML =
-      row('Version', d.version) +
-      row('Go Runtime', d.goVersion) +
-      row('Uptime', d.uptime) +
-      row('Started', d.startTime) +
-      row('Database', `<span class="text-[#81a1c1]">${d.dbPath}</span>`) +
-      row('Chat Sessions', d.chatCount) +
+      row('Version',        d.version) +
+      row('Go Runtime',     d.goVersion) +
+      row('Uptime',         d.uptime) +
+      row('Started',        d.startTime) +
+      row('Database',       `<span class="text-[#81a1c1]">${d.dbPath}</span>`) +
+      row('DB Size',        `<span class="text-[#88c0d0]">${d.dbSize || '—'}</span>${d.dbSizeWal && d.dbSizeWal !== '0 B' ? ` <span class="text-[#4c566a] text-[9px]">+ ${d.dbSizeWal} WAL</span>` : ''}`) +
+      row('Chat Sessions',  d.chatCount) +
       row('Benchmark Runs', d.benchCount);
     // Keep Data panel counters in sync if they're visible
     _updateDataPanelCounts(d.chatCount, d.benchCount);
+    // Render Ollama release note tiles
+    renderOllamaReleaseTiles();
   } catch (e) {
     grid.innerHTML = `<div class="col-span-full text-[#bf616a] font-mono text-xs">Failed to load app info: ${e.message}</div>`;
   }
+}
+
+// ── Ollama Release Notes ──────────────────────────────────────────────────────
+
+// Inline markdown → safe HTML for text nodes within a line.
+function _inlineMd(raw) {
+  // 1. HTML-escape the raw text
+  let s = raw
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  // 2. [text](url) links
+  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
+    '<a href="$2" target="_blank" rel="noopener" class="text-[#88c0d0] hover:underline">$1</a>');
+  // 3. **bold**
+  s = s.replace(/\*\*([^*]+)\*\*/g,
+    '<strong class="text-[#e5e9f0] font-semibold">$1</strong>');
+  // 4. `code`
+  s = s.replace(/`([^`]+)`/g,
+    '<code class="bg-[#2e3440] text-[#a3be8c] px-1 rounded text-[9px] font-mono">$1</code>');
+  return s;
+}
+
+// Convert a GitHub-flavoured markdown string to styled HTML.
+function renderOllamaMd(md) {
+  if (!md) return '<em class="text-[#4c566a]">No content.</em>';
+  const lines = md.split('\n');
+  let html = '';
+  let inUl = false;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd();
+    const isBullet = /^[-*]\s+/.test(line);
+
+    if (!isBullet && inUl) { html += '</ul>'; inUl = false; }
+
+    if (/^##\s+/.test(line)) {
+      html += `<p class="text-[#81a1c1] font-tech text-[10px] uppercase tracking-widest mt-3 mb-1 font-semibold">${_inlineMd(line.replace(/^#+\s+/, ''))}</p>`;
+    } else if (/^###/.test(line)) {
+      html += `<p class="text-[#88c0d0] font-tech text-[10px] uppercase tracking-wider mt-2 mb-0.5">${_inlineMd(line.replace(/^#+\s+/, ''))}</p>`;
+    } else if (isBullet) {
+      if (!inUl) { html += '<ul class="list-none space-y-0.5 my-1">'; inUl = true; }
+      html += `<li class="flex gap-1.5"><span class="text-[#4c566a] shrink-0">›</span><span class="text-[#d8dee9]">${_inlineMd(line.replace(/^[-*]\s+/, ''))}</span></li>`;
+    } else if (line === '') {
+      html += '<div class="h-1.5"></div>';
+    } else {
+      html += `<p class="text-[#d8dee9]">${_inlineMd(line)}</p>`;
+    }
+  }
+  if (inUl) html += '</ul>';
+  return html;
+}
+
+async function renderOllamaReleaseTiles() {
+  const container = document.getElementById('ollama-release-tiles');
+  if (!container) return;
+  container.innerHTML = '<div class="text-[#4c566a] font-mono text-[10px] animate-pulse py-1">Fetching release notes…</div>';
+
+  // Active node version
+  const active = servers.find(s => s.isActive);
+  const runningVer = active?.status === 'online' ? active.version : null;
+
+  // Ensure we have latest stable/pre info
+  if (!ollamaLatestInfo) {
+    try {
+      const r = await fetch('/api/ollama-latest');
+      if (r.ok) {
+        const d = await r.json();
+        ollamaLatestInfo = { stable: d.stable || '', prerelease: d.prerelease || '', fetchedAt: Date.now() };
+      }
+    } catch {}
+  }
+
+  const stable    = ollamaLatestInfo?.stable    || '';
+  const prerelease = ollamaLatestInfo?.prerelease || '';
+
+  // Decide which tiles to render
+  const tiles = [];
+
+  if (runningVer) {
+    tiles.push({ version: runningVer, label: 'RUNNING', kind: 'running' });
+  }
+
+  // Latest stable — show whenever it differs from running
+  if (stable && stable !== runningVer) {
+    tiles.push({ version: stable, label: 'LATEST STABLE', kind: 'stable' });
+  }
+
+  // Pre-release — show if it's newer than stable AND different from what's running
+  if (prerelease && compareVersions(prerelease, stable) > 0 && prerelease !== runningVer) {
+    tiles.push({ version: prerelease, label: 'PRE-RELEASE', kind: 'prerelease' });
+  }
+
+  if (tiles.length === 0) { container.innerHTML = ''; return; }
+
+  // Fetch all in parallel
+  const results = await Promise.all(tiles.map(async t => {
+    try {
+      const r = await fetch(`/api/ollama-release-notes?version=${encodeURIComponent(t.version)}`);
+      if (r.status === 404) return { ...t, body: null, url: null };
+      if (!r.ok) return { ...t, body: null, url: null };
+      const d = await r.json();
+      return { ...t, body: d.body || null, url: d.html_url || null };
+    } catch { return { ...t, body: null, url: null }; }
+  }));
+
+  const badgeCls = {
+    running:    'bg-[#a3be8c]/15 text-[#a3be8c] border border-[#a3be8c]/40',
+    stable:     'bg-[#ebcb8b]/15 text-[#ebcb8b] border border-[#ebcb8b]/30',
+    prerelease: 'bg-[#88c0d0]/15 text-[#88c0d0] border border-[#88c0d0]/30',
+  };
+  const colCls = results.length === 1 ? '' : results.length === 2 ? 'xl:grid-cols-2' : 'xl:grid-cols-3';
+
+  container.innerHTML = `
+    <div class="grid grid-cols-1 ${colCls} gap-4">
+      ${results.map(t => `
+        <div class="tech-panel rounded-xl p-4 flex flex-col gap-3">
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded text-[9px] font-tech tracking-wide ${badgeCls[t.kind]}">${t.label}</span>
+              <span class="font-mono text-[#d8dee9] text-xs font-semibold">v${escapeHTML(t.version)}</span>
+            </div>
+            ${t.url ? `<a href="${escapeHTML(t.url)}" target="_blank" rel="noopener"
+              class="flex items-center gap-1 text-[#4c566a] hover:text-[#88c0d0] transition-colors text-[10px] font-mono shrink-0">
+              <i class="fa-brands fa-github text-[9px]"></i>GitHub
+            </a>` : ''}
+          </div>
+          <div class="overflow-y-auto max-h-72 font-mono text-[10px] leading-relaxed space-y-0.5 pr-1">
+            ${t.body ? renderOllamaMd(t.body) : '<em class="text-[#4c566a]">No release notes found.</em>'}
+          </div>
+        </div>`).join('')}
+    </div>`;
 }
 
 // ── System: Data Management ──────────────────────────────────────────────────
@@ -716,19 +890,23 @@ function clearModelCache() {
   refreshDataPanel();
 }
 
-function clearPreferences() {
-  [
-    'neurollama-chat-model', 'neurollama-completion-model', 'neurollama-builder-model',
-    'neurollama-bench-model', 'neurollama-optimizer-model', 'neurollama-rag-model',
-    'neurollama-system-subtab', 'active-workspace',
-    'sidebar-nodes-collapsed', 'sidebar-history-collapsed', 'sidebar-config-collapsed',
-    'neurollama-bench-subtab',
-  ].forEach(k => localStorage.removeItem(k));
-  showToast('Preferences cleared. Refresh to apply.', 'success');
+async function clearPreferences() {
+  try {
+    const res = await fetch('/api/preferences', { method: 'DELETE' });
+    if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+    prefs = {};
+    showToast('Preferences cleared. Refresh to apply.', 'success');
+  } catch (e) {
+    showToast('Failed to clear preferences: ' + e.message, 'error');
+  }
 }
 
 function wipeAllLocalStorage() {
   if (!confirm('Clear ALL NEUROLLAMA local data from this browser? This cannot be undone.')) return;
+  // Clear DB-backed preferences
+  fetch('/api/preferences', { method: 'DELETE' }).catch(() => {});
+  prefs = {};
+  // Clear remaining browser-local ephemeral data (model cache, prompt history, stream failures)
   Object.keys(localStorage)
     .filter(k => k.startsWith('neurollama-') || k === 'active-workspace' || k.startsWith('sidebar-'))
     .forEach(k => localStorage.removeItem(k));
@@ -1024,14 +1202,14 @@ function populateModelDropdowns() {
     if (chatRagSelect) chatRagSelect.innerHTML = noModels;
   } else {
     if (chatSelect) {
-      const currentSelected = chatSelect.value || localStorage.getItem('neurollama-chat-model') || '';
+      const currentSelected = chatSelect.value || getPref('neurollama-chat-model') || '';
       chatSelect.innerHTML = options;
       if (currentSelected && chatSelect.querySelector(`option[value="${CSS.escape(currentSelected)}"]`)) {
         chatSelect.value = currentSelected;
       }
     }
     if (builderSelect) {
-      const currentSelected = builderSelect.value || localStorage.getItem('neurollama-builder-model') || '';
+      const currentSelected = builderSelect.value || getPref('neurollama-builder-model') || '';
       builderSelect.innerHTML = '<option value="">-- Select a base model --</option>' + options;
       if (currentSelected && builderSelect.querySelector(`option[value="${CSS.escape(currentSelected)}"]`)) {
         builderSelect.value = currentSelected;
@@ -1039,28 +1217,28 @@ function populateModelDropdowns() {
     }
     if (benchmarkSelect) populateBenchmarkModelSelect();
     if (optimizerSelect) {
-      const currentSelected = optimizerSelect.value || localStorage.getItem('neurollama-optimizer-model') || '';
+      const currentSelected = optimizerSelect.value || getPref('neurollama-optimizer-model') || '';
       optimizerSelect.innerHTML = options;
       if (currentSelected && optimizerSelect.querySelector(`option[value="${CSS.escape(currentSelected)}"]`)) {
         optimizerSelect.value = currentSelected;
       }
     }
     if (ragSelect) {
-      const currentSelected = ragSelect.value || localStorage.getItem('neurollama-rag-model') || '';
+      const currentSelected = ragSelect.value || getPref('neurollama-rag-model') || '';
       ragSelect.innerHTML = options;
       if (currentSelected && ragSelect.querySelector(`option[value="${CSS.escape(currentSelected)}"]`)) {
         ragSelect.value = currentSelected;
       }
     }
     if (chatRagSelect) {
-      const currentSelected = chatRagSelect.value || localStorage.getItem('chat-rag-model-select') || '';
+      const currentSelected = chatRagSelect.value || getPref('chat-rag-model-select') || '';
       chatRagSelect.innerHTML = options;
       if (currentSelected && chatRagSelect.querySelector(`option[value="${CSS.escape(currentSelected)}"]`)) {
         chatRagSelect.value = currentSelected;
       }
     }
     if (completionSelect) {
-      const currentSelected = completionSelect.value || localStorage.getItem('neurollama-completion-model') || '';
+      const currentSelected = completionSelect.value || getPref('neurollama-completion-model') || '';
       completionSelect.innerHTML = options;
       if (currentSelected && completionSelect.querySelector(`option[value="${CSS.escape(currentSelected)}"]`)) {
         completionSelect.value = currentSelected;
@@ -1420,6 +1598,58 @@ function renderServers() {
   }).join('');
 }
 
+// Cached result from /api/ollama-latest { stable, prerelease, fetchedAt }
+let ollamaLatestInfo = null;
+
+async function checkOllamaVersionDot(version) {
+  const dot = document.getElementById('ollama-version-dot');
+  if (!dot) return;
+  if (!version) { dot.classList.add('hidden'); return; }
+
+  // Refresh cache at most once per hour
+  const now = Date.now();
+  if (!ollamaLatestInfo || (now - ollamaLatestInfo.fetchedAt) > 3_600_000) {
+    try {
+      const r = await fetch('/api/ollama-latest');
+      if (!r.ok) throw new Error();
+      const d = await r.json();
+      ollamaLatestInfo = { stable: d.stable || '', prerelease: d.prerelease || '', fetchedAt: now };
+    } catch {
+      dot.classList.add('hidden');
+      return;
+    }
+  }
+
+  const { stable, prerelease } = ollamaLatestInfo;
+  if (!stable) { dot.classList.add('hidden'); return; }
+
+  const cmpStable = compareVersions(version, stable);
+  let color, title;
+
+  if (cmpStable === 0) {
+    // Running latest stable
+    color = 'bg-[#a3be8c]';
+    title = `Up to date — v${version} is the latest stable release`;
+  } else if (cmpStable > 0) {
+    // Ahead of stable — on a pre-release build
+    color = 'bg-[#88c0d0]';
+    title = `Pre-release v${version} — latest stable is v${stable}`;
+  } else {
+    // Behind stable — update available
+    color = 'bg-[#ebcb8b]';
+    title = `Update available: v${stable} (running v${version})`;
+    if (prerelease && compareVersions(prerelease, stable) > 0) {
+      title += ` · Pre-release v${prerelease} also available`;
+    }
+  }
+
+  dot.className = `h-2 w-2 rounded-full shrink-0 cursor-default transition-colors ${color}`;
+  dot.title = title;
+  dot.classList.remove('hidden');
+  // Now that ollamaLatestInfo is populated, refine the footer badge too
+  updateFooterNodeBadge();
+}
+
 function updateActiveServerUI(srv) {
   const srvName = document.getElementById('global-active-server-name');
   const srvLatency = document.getElementById('global-active-server-latency');
@@ -1436,11 +1666,16 @@ function updateActiveServerUI(srv) {
       statusIndicator.className = 'h-2.5 w-2.5 rounded-full bg-[#a3be8c] status-glow-online inline-block';
       statusText.textContent = 'ONLINE';
       statusText.className = 'text-xs uppercase text-[#a3be8c] font-semibold font-tech';
+      checkOllamaVersionDot(srv.version);
+      updateFooterNodeBadge();
     } else {
       srvLatency.textContent = '-- ms';
       statusIndicator.className = 'h-2.5 w-2.5 rounded-full bg-[#bf616a] inline-block';
       statusText.textContent = 'OFFLINE';
       statusText.className = 'text-xs uppercase text-[#bf616a] font-semibold font-tech';
+      const dot = document.getElementById('ollama-version-dot');
+      if (dot) dot.classList.add('hidden');
+      updateFooterNodeBadge();
     }
   } else {
     srvName.textContent = '---';
@@ -1449,7 +1684,122 @@ function updateActiveServerUI(srv) {
     statusIndicator.className = 'h-2.5 w-2.5 rounded-full bg-[#4c566a] inline-block';
     statusText.textContent = 'NONE';
     statusText.className = 'text-xs uppercase text-[#4c566a] font-semibold font-tech';
+    const dot = document.getElementById('ollama-version-dot');
+    if (dot) dot.classList.add('hidden');
+    updateFooterNodeBadge();
   }
+}
+
+// ── Footer node channel badge ────────────────────────────────────────────────
+
+function updateFooterNodeBadge() {
+  const dot  = document.getElementById('footer-node-channel-dot');
+  const txt  = document.getElementById('footer-node-channel-text');
+  const btn  = document.getElementById('footer-node-btn');
+  if (!dot || !txt) return;
+
+  const active = servers.find(s => s.isActive);
+
+  if (!active || active.status !== 'online' || !active.version) {
+    dot.className  = 'h-2 w-2 rounded-full bg-[#4c566a] shrink-0';
+    txt.textContent = active ? 'OFFLINE' : '—';
+    txt.className  = 'font-semibold text-[#4c566a]';
+    if (btn) btn.classList.add('hidden');
+    return;
+  }
+
+  if (btn) btn.classList.remove('hidden');
+  const stable = ollamaLatestInfo?.stable || '';
+
+  if (!stable) {
+    // GitHub data not loaded yet — show online, update once available
+    dot.className  = 'h-2 w-2 rounded-full bg-[#a3be8c] shrink-0';
+    txt.textContent = 'ONLINE';
+    txt.className  = 'font-semibold text-[#a3be8c]';
+    return;
+  }
+
+  if (compareVersions(active.version, stable) > 0) {
+    dot.className  = 'h-2 w-2 rounded-full bg-[#88c0d0] shrink-0';
+    txt.textContent = 'PRE-REL';
+    txt.className  = 'font-semibold text-[#88c0d0]';
+  } else {
+    dot.className  = 'h-2 w-2 rounded-full bg-[#a3be8c] shrink-0';
+    txt.textContent = 'STABLE';
+    txt.className  = 'font-semibold text-[#a3be8c]';
+  }
+}
+
+// ── Node selector slide-out ──────────────────────────────────────────────────
+
+function renderNodeSlideout() {
+  const list = document.getElementById('node-slideout-list');
+  if (!list) return;
+
+  if (!servers.length) {
+    list.innerHTML = '<div class="text-[#4c566a] text-center py-4 text-[10px]">No nodes configured.</div>';
+    return;
+  }
+
+  const stable = ollamaLatestInfo?.stable || '';
+
+  list.innerHTML = servers.map(s => {
+    const isOnline = s.status === 'online';
+    const isActive = !!s.isActive;
+
+    // Channel badge
+    let channelBadge = '';
+    if (isOnline && s.version && stable) {
+      channelBadge = compareVersions(s.version, stable) > 0
+        ? `<span class="shrink-0 text-[8px] px-1.5 py-0.5 rounded bg-[#88c0d0]/15 text-[#88c0d0] border border-[#88c0d0]/30 font-tech">PRE</span>`
+        : `<span class="shrink-0 text-[8px] px-1.5 py-0.5 rounded bg-[#a3be8c]/15 text-[#a3be8c] border border-[#a3be8c]/30 font-tech">STABLE</span>`;
+    }
+
+    // Action area
+    const actionArea = isActive
+      ? `<span class="shrink-0 text-[8px] px-1.5 py-0.5 rounded bg-[#81a1c1]/15 text-[#81a1c1] border border-[#81a1c1]/30 font-tech">ACTIVE</span>`
+      : `<button onclick="selectServer('${escapeHTML(s.id)}');closeNodeSlideout();"
+                 class="shrink-0 text-[8px] px-1.5 py-0.5 rounded border border-[#4c566a] text-[#4c566a] hover:border-[#88c0d0] hover:text-[#88c0d0] transition-colors font-tech whitespace-nowrap">
+           SET
+         </button>`;
+
+    return `
+      <div class="flex items-center gap-2 px-2 py-2 rounded-lg transition-colors ${isActive ? 'bg-[#3b4252]/60' : 'hover:bg-[#2e3440]'}">
+        <span class="h-2 w-2 rounded-full shrink-0 ${isOnline ? 'bg-[#a3be8c]' : 'bg-[#bf616a]'}"></span>
+        <div class="flex-1 min-w-0">
+          <div class="text-[#d8dee9] truncate">${escapeHTML(s.name)}</div>
+          <div class="text-[9px] ${isOnline ? 'text-[#4c566a]' : 'text-[#bf616a]'}">
+            ${isOnline
+              ? `v${escapeHTML(s.version || '?')} · ${s.latency ?? '—'} ms`
+              : 'OFFLINE'}
+          </div>
+        </div>
+        ${channelBadge}
+        ${actionArea}
+      </div>`;
+  }).join('');
+}
+
+function toggleNodeSlideout() {
+  const panel   = document.getElementById('node-slideout');
+  const chevron = document.getElementById('footer-node-chevron');
+  if (!panel) return;
+  const open = panel.classList.contains('hidden');
+  if (open) {
+    renderNodeSlideout();
+    panel.classList.remove('hidden');
+    if (chevron) chevron.style.transform = 'rotate(180deg)';
+  } else {
+    panel.classList.add('hidden');
+    if (chevron) chevron.style.transform = '';
+  }
+}
+
+function closeNodeSlideout() {
+  const panel   = document.getElementById('node-slideout');
+  const chevron = document.getElementById('footer-node-chevron');
+  if (panel)   panel.classList.add('hidden');
+  if (chevron) chevron.style.transform = '';
 }
 
 async function selectServer(id) {
@@ -3615,6 +3965,28 @@ function formatBytes(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
+// Compare two semver strings (with optional "v" prefix and pre-release suffix).
+// Returns -1 (a < b), 0 (equal), or 1 (a > b).
+// Stable releases sort higher than pre-releases at the same version (semver).
+function compareVersions(a, b) {
+  const parse = v => {
+    v = String(v).replace(/^v/, '');
+    const [core, pre] = v.split(/-(.+)/); // split on first "-"
+    const parts = core.split('.').map(n => parseInt(n, 10) || 0);
+    return { major: parts[0]||0, minor: parts[1]||0, patch: parts[2]||0, pre: pre || null };
+  };
+  const av = parse(a), bv = parse(b);
+  for (const k of ['major', 'minor', 'patch']) {
+    if (av[k] > bv[k]) return 1;
+    if (av[k] < bv[k]) return -1;
+  }
+  // Same numeric version: stable (no pre) > pre-release
+  if (!av.pre && bv.pre) return 1;
+  if (av.pre && !bv.pre) return -1;
+  if (av.pre && bv.pre) return av.pre < bv.pre ? -1 : av.pre > bv.pre ? 1 : 0;
+  return 0;
+}
+
 function escapeHTML(str) {
   if (str === null || str === undefined) return '';
   return String(str)
@@ -4182,11 +4554,13 @@ const POPULAR_MODELS = [
   { name:'tinyllama:1.1b',   source:'ollama', category:'Lightweight', caps:[],             params:'1.1B',  ctx:'2K',   size:'638 MB',  desc:"TinyLlama — 1.1B parameters, useful for embedded/edge use." },
   { name:'phi3.5:3.8b',      source:'ollama', category:'Lightweight', caps:[],             params:'3.8B',  ctx:'128K', size:'2.2 GB',  desc:"Phi-3.5 Mini — updated Phi with strong long-context performance." },
   // ── HuggingFace GGUF ──────────────────────────────────────────────────────
-  { name:'hf.co/bartowski/Llama-3.1-8B-Instruct-GGUF:Q4_K_M',              source:'hf', category:'General',   caps:[],            params:'8B',  ctx:'128K', size:'~5 GB',  desc:"Bartowski's Llama 3.1 8B GGUF — popular well-quantized community build." },
-  { name:'hf.co/bartowski/gemma-3-27b-it-GGUF:Q4_K_M',                     source:'hf', category:'Vision',    caps:['vision'],    params:'27B', ctx:'128K', size:'~17 GB', desc:"Gemma 3 27B instruction-tuned GGUF with full vision support." },
-  { name:'hf.co/bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF:Q4_K_M',       source:'hf', category:'Reasoning', caps:['reasoning'], params:'14B', ctx:'64K',  size:'~9 GB',  desc:"DeepSeek R1 14B distilled into Qwen — fast reasoning at smaller scale." },
-  { name:'hf.co/bartowski/Mistral-Small-3.1-24B-Instruct-2503-GGUF:Q4_K_M',source:'hf', category:'Vision',    caps:['vision'],    params:'24B', ctx:'128K', size:'~15 GB', desc:"Mistral Small 3.1 24B — strong multilingual vision + text model." },
-  { name:'hf.co/bartowski/Qwen2.5-Coder-32B-Instruct-GGUF:Q4_K_M',         source:'hf', category:'Code',      caps:['code'],      params:'32B', ctx:'128K', size:'~20 GB', desc:"Qwen 2.5 Coder 32B GGUF — best open-source coding model at this weight." },
+  // Note: bartowski uses org-prefix naming for models from orgs (mistralai_, google_)
+  // and "Meta-" prefix for Meta models. Verified against HuggingFace repo listing.
+  { name:'hf.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF:Q4_K_M',                       source:'hf', category:'General',   caps:[],            params:'8B',  ctx:'128K', size:'~5 GB',  desc:"Bartowski's Llama 3.1 8B GGUF — popular well-quantized community build." },
+  { name:'hf.co/bartowski/google_gemma-3-27b-it-GGUF:Q4_K_M',                             source:'hf', category:'Vision',    caps:['vision'],    params:'27B', ctx:'128K', size:'~17 GB', desc:"Gemma 3 27B instruction-tuned GGUF with full vision support." },
+  { name:'hf.co/bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF:Q4_K_M',                      source:'hf', category:'Reasoning', caps:['reasoning'], params:'14B', ctx:'64K',  size:'~9 GB',  desc:"DeepSeek R1 14B distilled into Qwen — fast reasoning at smaller scale." },
+  { name:'hf.co/bartowski/mistralai_Mistral-Small-3.1-24B-Instruct-2503-GGUF:Q4_K_M',     source:'hf', category:'Vision',    caps:['vision'],    params:'24B', ctx:'128K', size:'~15 GB', desc:"Mistral Small 3.1 24B — strong multilingual vision + text model." },
+  { name:'hf.co/bartowski/Qwen2.5-Coder-32B-Instruct-GGUF:Q4_K_M',                        source:'hf', category:'Code',      caps:['code'],      params:'32B', ctx:'128K', size:'~20 GB', desc:"Qwen 2.5 Coder 32B GGUF — best open-source coding model at this weight." },
 ];
 
 // --- MODEL HUB STATE ---
@@ -4215,7 +4589,7 @@ function setPullSource(source) {
   const input = document.getElementById('pull-model-name');
   if (input) {
     input.placeholder = source === 'hf'
-      ? 'e.g. hf.co/bartowski/Llama-3.1-8B-Instruct-GGUF:Q4_K_M'
+      ? 'e.g. hf.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF:Q4_K_M'
       : 'e.g. llama3:8b, mistral, qwen2.5:1.5b';
     input.value = '';
   }
@@ -4359,12 +4733,12 @@ function toggleNodeRegistry() {
     sidebar.classList.remove('hidden');
     mainSection.classList.replace('lg:col-span-12', 'lg:col-span-9');
     if (icon) icon.className = 'fa-solid fa-chevron-left text-xs';
-    localStorage.setItem('sidebar-registry-collapsed', 'false');
+    setPref('sidebar-registry-collapsed', 'false');
   } else {
     sidebar.classList.add('hidden');
     mainSection.classList.replace('lg:col-span-9', 'lg:col-span-12');
     if (icon) icon.className = 'fa-solid fa-chevron-right text-xs';
-    localStorage.setItem('sidebar-registry-collapsed', 'true');
+    setPref('sidebar-registry-collapsed', 'true');
   }
 }
 
@@ -4378,19 +4752,19 @@ function togglePlaygroundSidebar(type) {
     const isHidden = chatsSidebar.classList.contains('hidden');
     if (isHidden) {
       chatsSidebar.classList.remove('hidden');
-      localStorage.setItem('sidebar-chats-collapsed', 'false');
+      setPref('sidebar-chats-collapsed', 'false');
     } else {
       chatsSidebar.classList.add('hidden');
-      localStorage.setItem('sidebar-chats-collapsed', 'true');
+      setPref('sidebar-chats-collapsed', 'true');
     }
   } else if (type === 'config') {
     const isHidden = configSidebar.classList.contains('hidden');
     if (isHidden) {
       configSidebar.classList.remove('hidden');
-      localStorage.setItem('sidebar-config-collapsed', 'false');
+      setPref('sidebar-config-collapsed', 'false');
     } else {
       configSidebar.classList.add('hidden');
-      localStorage.setItem('sidebar-config-collapsed', 'true');
+      setPref('sidebar-config-collapsed', 'true');
     }
   }
 
@@ -4427,9 +4801,9 @@ function updatePlaygroundLayoutClasses() {
 }
 
 function initSidebarState() {
-  const registryCollapsed = localStorage.getItem('sidebar-registry-collapsed') === 'true';
-  const chatsCollapsed = localStorage.getItem('sidebar-chats-collapsed') === 'true';
-  const configCollapsed = localStorage.getItem('sidebar-config-collapsed') === 'true';
+  const registryCollapsed = getPref('sidebar-registry-collapsed') === 'true';
+  const chatsCollapsed = getPref('sidebar-chats-collapsed') === 'true';
+  const configCollapsed = getPref('sidebar-config-collapsed') === 'true';
 
   if (registryCollapsed) {
     const sidebar = document.getElementById('node-registry-sidebar');
@@ -5192,7 +5566,7 @@ function saveCompletionSettings() {
   completionConfigIds.forEach(id => {
     const el = document.getElementById(id);
     if (el) {
-      localStorage.setItem(id, el.value);
+      setPref(id, el.value);
     }
   });
 }
@@ -5201,7 +5575,7 @@ function loadCompletionSettings() {
   completionConfigIds.forEach(id => {
     const el = document.getElementById(id);
     if (el) {
-      const saved = localStorage.getItem(id);
+      const saved = getPref(id, null);
       if (saved !== null) {
         el.value = saved;
         const valueEl = document.getElementById(id + '-value');
@@ -6503,7 +6877,7 @@ function populateBenchmarkModelSelect() {
     select.innerHTML = `<option value="">-- No ${reason} found --</option>`;
     return;
   }
-  const currentSelected = select.value || localStorage.getItem('neurollama-bench-model') || '';
+  const currentSelected = select.value || getPref('neurollama-bench-model') || '';
   select.innerHTML = filtered.map(m => {
     const paramSize = (m.details && m.details.parameter_size) || '?';
     return `<option value="${m.name}">${m.name} (${paramSize})</option>`;
@@ -6527,7 +6901,7 @@ function setBenchmarkType(type) {
 function setLbFilter(filter) {
   currentLbFilter = filter;
   currentScoreFilter = 'all'; // clear grade filter when type changes
-  localStorage.setItem('neurollama-bench-filter', filter);
+  setPref('neurollama-bench-filter', filter);
   const filters = ['all', ...BENCH_TYPES];
   filters.forEach(f => {
     const btn = document.getElementById(`lb-filter-${f}`);
@@ -6544,7 +6918,7 @@ function setLbScoreFilter(grade) {
 
 function restoreLbFilterUI() {
   // Restore filter button state
-  const savedFilter = localStorage.getItem('neurollama-bench-filter') || 'all';
+  const savedFilter = getPref('neurollama-bench-filter', 'all');
   currentLbFilter = savedFilter;
   const filters = ['all', ...BENCH_TYPES];
   filters.forEach(f => {
@@ -6563,9 +6937,9 @@ function restoreLbFilterUI() {
   }
 }
 
-// Leaderboard sort state — persisted in localStorage
-let lbSortCol = localStorage.getItem('neurollama-bench-sort-col') || 'created_at';
-let lbSortDir = localStorage.getItem('neurollama-bench-sort-dir') || 'desc';
+// Leaderboard sort state — persisted in DB preferences (restored in init after loadPreferences)
+let lbSortCol = 'created_at';
+let lbSortDir = 'desc';
 const SCORE_ORDER = { S: 5, A: 4, B: 3, C: 2, F: 1 };
 
 function setLbSort(col) {
@@ -6575,8 +6949,8 @@ function setLbSort(col) {
     lbSortCol = col;
     lbSortDir = (col === 'model_name' || col === 'server_name') ? 'asc' : 'desc';
   }
-  localStorage.setItem('neurollama-bench-sort-col', lbSortCol);
-  localStorage.setItem('neurollama-bench-sort-dir', lbSortDir);
+  setPref('neurollama-bench-sort-col', lbSortCol);
+  setPref('neurollama-bench-sort-dir', lbSortDir);
   // Update header sort indicators
   document.querySelectorAll('[id^="sort-indicator-"]').forEach(el => {
     el.innerHTML = '<i class="fa-solid fa-sort text-[9px]"></i>';
@@ -6975,7 +7349,10 @@ async function fetchBenchmarks() {
           </td>
           <td class="py-3 text-left font-mono text-[11px] overflow-hidden">
             <div class="text-[#88c0d0] font-bold truncate" title="${escapeHTML(serverDisplay || '')}">${escapeHTML(serverDisplay || '—')}</div>
-            <div class="text-[9px] text-[#4c566a] truncate" title="${escapeHTML(group.server_url || '')}">${escapeHTML(group.server_url || '')}</div>
+            <div class="text-[9px] text-[#4c566a] truncate flex items-center gap-1.5">
+              ${group.ollama_version ? `<span class="bg-[#3b4252] px-1.5 rounded" title="Ollama version">v${escapeHTML(group.ollama_version)}</span>` : ''}
+              <span class="truncate" title="${escapeHTML(group.server_url || '')}">${escapeHTML(group.server_url || '')}</span>
+            </div>
           </td>
           ${ttftCell}
           ${metricCell}
@@ -7013,12 +7390,15 @@ async function fetchBenchmarks() {
           const newestTag = idx === 0
             ? `<span class="text-[8px] text-[#a3be8c] font-bold uppercase tracking-wide bg-[#a3be8c]/15 px-1.5 rounded ml-2">latest</span>`
             : '';
+          const verTag = run.ollama_version
+            ? `<span class="text-[8px] text-[#4c566a] font-mono ml-1.5 bg-[#3b4252] px-1.5 rounded" title="Ollama version">v${escapeHTML(run.ollama_version)}</span>`
+            : '';
 
           html += `
             <tr id="sub-${gkey}-${idx}" data-group="${gkey}"
                 class="bench-sub-row bg-[#2e3440]/60 border-b border-[#4c566a]/10 text-[11px] hidden">
               <td class="py-2 pl-8 font-mono text-[#4c566a]">
-                ${escapeHTML(runDate)}${newestTag}
+                ${escapeHTML(runDate)}${newestTag}${verTag}
               </td>
               <td class="text-[10px] text-[#4c566a]">run #${run.id}</td>
               ${rt}
@@ -7177,9 +7557,11 @@ function switchBenchmarkSubtab(tab) {
 
 // ── Node vs Node ─────────────────────────────────────────────────────────────
 
-let nvnType       = 'standard';
-let nvnES         = null;   // EventSource
-let nvnModels     = {};     // { nodeId: [model objects] }
+let nvnType         = 'standard';
+let nvnES           = null;   // EventSource
+let nvnModels       = {};     // { nodeId: [model objects] }
+let nvnFilterNodeA  = false;  // when true, model list is restricted to Node A's models
+let nvnFilterBoth   = false;  // when true, model list is restricted to models on BOTH A and B
 
 function setNvnType(type) {
   nvnType = type;
@@ -7187,6 +7569,30 @@ function setNvnType(type) {
     const btn = document.getElementById(`nvn-type-${t}`);
     if (btn) btn.classList.toggle('bench-type-btn-active', t === type);
   });
+}
+
+function _setNvnFilterBadge(id, active) {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  btn.classList.toggle('border-[#88c0d0]', active);
+  btn.classList.toggle('text-[#88c0d0]',   active);
+  btn.classList.toggle('bg-[#88c0d0]/10',  active);
+  btn.classList.toggle('border-[#4c566a]', !active);
+  btn.classList.toggle('text-[#4c566a]',   !active);
+}
+
+function toggleNvnNodeAFilter() {
+  nvnFilterNodeA = !nvnFilterNodeA;
+  if (nvnFilterNodeA) { nvnFilterBoth = false; _setNvnFilterBadge('nvn-filter-both-btn', false); }
+  _setNvnFilterBadge('nvn-filter-node-a-btn', nvnFilterNodeA);
+  populateNvnModelSelect();
+}
+
+function toggleNvnBothFilter() {
+  nvnFilterBoth = !nvnFilterBoth;
+  if (nvnFilterBoth) { nvnFilterNodeA = false; _setNvnFilterBadge('nvn-filter-node-a-btn', false); }
+  _setNvnFilterBadge('nvn-filter-both-btn', nvnFilterBoth);
+  populateNvnModelSelect();
 }
 
 async function loadNvnPanel() {
@@ -7204,10 +7610,10 @@ async function loadNvnPanel() {
   // Pre-select active server as Node A if possible
   const active = servers.find(s => s.isActive);
   if (active) nodeA.value = active.id;
-  if (servers.length > 1) {
-    const other = servers.find(s => !s.isActive);
-    if (other) nodeB.value = other.id;
-  }
+  // Pre-select Node B: prefer an online non-active node, fall back to any non-active
+  const nodeForB = servers.find(s => !s.isActive && s.status === 'online')
+                || servers.find(s => !s.isActive);
+  if (nodeForB) nodeB.value = nodeForB.id;
 
   // Fetch model lists for all nodes so we can show availability
   await refreshNvnModels();
@@ -7217,6 +7623,9 @@ async function loadNvnPanel() {
   // Attach searchable select to nvn-model-select if not already done
   const modelSel = document.getElementById('nvn-model-select');
   if (modelSel && !modelSel._ssInit) makeSearchableSelect(modelSel);
+
+  // Load the win/loss leaderboard
+  loadNvnLeaderboard();
 }
 
 async function refreshNvnModels() {
@@ -7232,31 +7641,59 @@ function populateNvnModelSelect() {
   const select = document.getElementById('nvn-model-select');
   if (!select) return;
 
-  // Build a de-duped union of all model names across all cached nodes
   const seen = new Map(); // name → paramSize
-  Object.values(nvnModels).forEach(modelList => {
-    (modelList || []).forEach(m => {
-      if (!seen.has(m.name)) {
-        const param = (m.details && m.details.parameter_size) || '?';
-        seen.set(m.name, param);
+  const nodeAId = document.getElementById('nvn-node-a')?.value;
+  const nodeBId = document.getElementById('nvn-node-b')?.value;
+
+  if (nvnFilterBoth) {
+    // Intersection: only models present on BOTH Node A and Node B
+    const nodeAList = (nodeAId && nvnModels[nodeAId]) || [];
+    const nodeBNames = new Set(((nodeBId && nvnModels[nodeBId]) || []).map(m => m.name));
+    nodeAList.forEach(m => {
+      if (nodeBNames.has(m.name) && !seen.has(m.name)) {
+        seen.set(m.name, (m.details && m.details.parameter_size) || '?');
       }
     });
-  });
+  } else if (nvnFilterNodeA) {
+    // Only include models present on the currently selected Node A
+    const nodeAList = (nodeAId && nvnModels[nodeAId]) || [];
+    nodeAList.forEach(m => {
+      if (!seen.has(m.name)) {
+        seen.set(m.name, (m.details && m.details.parameter_size) || '?');
+      }
+    });
+  } else {
+    // Union of all models across all cached nodes
+    Object.values(nvnModels).forEach(modelList => {
+      (modelList || []).forEach(m => {
+        if (!seen.has(m.name)) {
+          seen.set(m.name, (m.details && m.details.parameter_size) || '?');
+        }
+      });
+    });
+  }
 
-  // Fall back to active-server models array
-  if (seen.size === 0) {
+  // Fall back to active-server models array if nothing loaded yet
+  if (seen.size === 0 && !nvnFilterNodeA && !nvnFilterBoth) {
     models.forEach(m => {
       const param = (m.details && m.details.parameter_size) || '?';
       seen.set(m.name, param);
     });
   }
 
+  const emptyMsg = nvnFilterBoth   ? '— No shared models on A & B —'
+                 : nvnFilterNodeA  ? '— No models on Node A —'
+                 :                   '— No models found —';
+
   const sorted = [...seen.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   const prev = select.value;
-  select.innerHTML = sorted.map(([name, param]) =>
-    `<option value="${escapeHTML(name)}">${escapeHTML(name)} (${escapeHTML(param)})</option>`
-  ).join('');
+  select.innerHTML = sorted.length
+    ? sorted.map(([name, param]) =>
+        `<option value="${escapeHTML(name)}">${escapeHTML(name)} (${escapeHTML(param)})</option>`
+      ).join('')
+    : `<option value="">${emptyMsg}</option>`;
   if (prev && select.querySelector(`option[value="${CSS.escape(prev)}"]`)) select.value = prev;
+  updateNvnAvailability();
 }
 
 function nvnNodeHasModel(nodeId, modelName) {
@@ -7337,7 +7774,8 @@ function startNodeVsNode() {
     document.getElementById('nvn-run-btn')?.classList.remove('hidden');
     document.getElementById('nvn-stop-btn')?.classList.add('hidden');
     refreshNvnModels().then(updateNvnAvailability);
-    fetchBenchmarks(); // refresh leaderboard with new results
+    fetchBenchmarks(); // refresh standard leaderboard
+    loadNvnLeaderboard(); // refresh win/loss board
   });
 
   nvnES.onerror = () => {
@@ -7446,6 +7884,227 @@ function renderNvnResults(data) {
         </div>`;
       })() : ''}
     </div>`;
+}
+
+// ── NvN Win/Loss Leaderboard ─────────────────────────────────────────────────
+
+let nvnDrawerNodeId   = null; // currently-expanded node in the match drawer
+let nvnDrawerNodeName = null;
+let nvnDrawerFilter   = null;
+
+async function loadNvnLeaderboard() {
+  const body = document.getElementById('nvn-leaderboard-body');
+  if (!body) return;
+  try {
+    const r = await fetch('/api/benchmarks/nvn-leaderboard');
+    if (!r.ok) throw new Error('fetch failed');
+    const entries = await r.json();
+    if (!entries || entries.length === 0) {
+      body.innerHTML = '<div class="text-center text-[#4c566a] font-mono text-xs py-4 italic">No matches recorded yet — run a comparison to start tracking wins.</div>';
+      return;
+    }
+    // Sort: wins desc, then matches desc
+    entries.sort((a, b) => b.wins - a.wins || b.matches - a.matches);
+    const maxWins = Math.max(...entries.map(e => e.wins), 1);
+
+    body.innerHTML = `
+      <div class="overflow-x-auto">
+        <table class="w-full font-mono text-xs">
+          <thead>
+            <tr class="border-b border-[#4c566a]/40 text-[9px] font-tech uppercase text-[#4c566a]">
+              <th class="py-1.5 text-left pl-1">Node</th>
+              <th class="py-1.5 text-center w-10">Rank</th>
+              <th class="py-1.5 text-center w-28">Win Rate</th>
+              <th class="py-1.5 text-center w-16 text-[#a3be8c]">Wins</th>
+              <th class="py-1.5 text-center w-16 text-[#bf616a]">Losses</th>
+              <th class="py-1.5 text-center w-12">Ties</th>
+              <th class="py-1.5 text-center w-16">Matches</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${entries.map((e, i) => {
+              const rank = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}`;
+              const winPct = e.win_rate.toFixed(0);
+              const safeId   = escapeHTML(e.node_id);
+              const safeName = escapeHTML(e.node_name);
+              return `
+              <tr class="border-b border-[#4c566a]/15 hover:bg-[#2e3440]/40 transition-colors">
+                <td class="py-2 pl-1">
+                  <button onclick="openNvnDrawer('${safeId}','${safeName}','all')"
+                          class="font-bold text-[#88c0d0] hover:text-[#d8dee9] hover:underline text-left font-mono text-xs max-w-[140px] truncate block"
+                          title="View all matches for ${safeName}">${safeName}</button>
+                </td>
+                <td class="py-2 text-center text-[11px]">${rank}</td>
+                <td class="py-2 px-2">
+                  <div class="flex items-center gap-1.5">
+                    <div class="flex-1 h-1.5 bg-[#2e3440] rounded-full overflow-hidden">
+                      <div class="h-full rounded-full ${winPct >= 50 ? 'bg-[#a3be8c]' : 'bg-[#bf616a]'}" style="width:${winPct}%"></div>
+                    </div>
+                    <span class="text-[10px] w-7 text-right ${winPct >= 50 ? 'text-[#a3be8c]' : 'text-[#bf616a]'}">${winPct}%</span>
+                  </div>
+                </td>
+                <td class="py-2 text-center">
+                  <button onclick="openNvnDrawer('${safeId}','${safeName}','win')"
+                          class="font-bold text-[#a3be8c] hover:underline font-mono text-xs"
+                          title="View wins">${e.wins}</button>
+                </td>
+                <td class="py-2 text-center">
+                  <button onclick="openNvnDrawer('${safeId}','${safeName}','loss')"
+                          class="font-bold text-[#bf616a] hover:underline font-mono text-xs"
+                          title="View losses">${e.losses}</button>
+                </td>
+                <td class="py-2 text-center text-[#4c566a]">${e.ties}</td>
+                <td class="py-2 text-center">
+                  <button onclick="openNvnDrawer('${safeId}','${safeName}','all')"
+                          class="hover:underline font-mono text-xs text-[#4c566a] hover:text-[#d8dee9]"
+                          title="View all matches">${e.matches}</button>
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } catch {
+    body.innerHTML = '<div class="text-center text-[#bf616a] font-mono text-xs py-2">Failed to load leaderboard.</div>';
+  }
+}
+
+async function openNvnDrawer(nodeId, nodeName, filter) {
+  const drawer = document.getElementById('nvn-match-drawer');
+  const title  = document.getElementById('nvn-drawer-title');
+  const list   = document.getElementById('nvn-match-list');
+  if (!drawer || !list) return;
+
+  nvnDrawerNodeId   = nodeId;
+  nvnDrawerNodeName = nodeName;
+  nvnDrawerFilter   = filter;
+  const filterLabel = filter === 'win' ? 'Wins' : filter === 'loss' ? 'Losses' : 'All Matches';
+  title.textContent = `${nodeName} — ${filterLabel}`;
+  list.innerHTML = '<div class="text-[#4c566a] font-mono text-[10px] italic py-2 text-center">Loading…</div>';
+  drawer.classList.remove('hidden');
+
+  try {
+    const r = await fetch(`/api/benchmarks/nvn-matches?nodeId=${encodeURIComponent(nodeId)}`);
+    const matches = await r.json();
+
+    const filtered = matches.filter(m => {
+      if (filter === 'win')  return m.winner_id === nodeId;
+      if (filter === 'loss') return m.winner_id !== nodeId && m.winner_id !== '' && !m.node_a_error && !m.node_b_error;
+      return true;
+    });
+
+    if (filtered.length === 0) {
+      list.innerHTML = '<div class="text-[#4c566a] font-mono text-[10px] italic py-2 text-center">No matches in this category.</div>';
+      return;
+    }
+
+    list.innerHTML = filtered.map(m => {
+      // Orient everything relative to the focused node
+      const isA      = m.node_a_id === nodeId;
+      const myName   = isA ? m.node_a_name  : m.node_b_name;
+      const oppName  = isA ? m.node_b_name  : m.node_a_name;
+      const myTPS    = isA ? m.node_a_tps   : m.node_b_tps;
+      const oppTPS   = isA ? m.node_b_tps   : m.node_a_tps;
+      const myTTFT   = isA ? m.node_a_ttft  : m.node_b_ttft;
+      const oppTTFT  = isA ? m.node_b_ttft  : m.node_a_ttft;
+      const myLat    = isA ? m.node_a_lat   : m.node_b_lat;
+      const oppLat   = isA ? m.node_b_lat   : m.node_a_lat;
+      const myErr    = isA ? m.node_a_error : m.node_b_error;
+      const oppErr   = isA ? m.node_b_error : m.node_a_error;
+
+      const won = m.winner_id === nodeId;
+      const tie = m.winner_id === '';
+
+      const outcomeCls = myErr  ? 'border-[#4c566a]/60 bg-[#2e3440]/30'
+                       : won   ? 'border-[#a3be8c]/40 bg-[#a3be8c]/5'
+                       : tie   ? 'border-[#ebcb8b]/30 bg-[#ebcb8b]/5'
+                               : 'border-[#bf616a]/30 bg-[#bf616a]/5';
+
+      const outcomeBadge = myErr ? `<span class="px-1.5 py-0.5 rounded text-[9px] font-tech bg-[#4c566a]/30 text-[#4c566a]">ERROR</span>`
+                         : won  ? `<span class="px-1.5 py-0.5 rounded text-[9px] font-tech bg-[#a3be8c]/20 text-[#a3be8c] border border-[#a3be8c]/40">WIN</span>`
+                         : tie  ? `<span class="px-1.5 py-0.5 rounded text-[9px] font-tech bg-[#ebcb8b]/15 text-[#ebcb8b] border border-[#ebcb8b]/30">TIE</span>`
+                                : `<span class="px-1.5 py-0.5 rounded text-[9px] font-tech bg-[#bf616a]/15 text-[#bf616a] border border-[#bf616a]/30">LOSS</span>`;
+
+      const modelShort = m.model_name.split('/').pop(); // strip hf.co/org/ prefix
+      const date = m.created_at ? m.created_at.substring(0, 16).replace('T', ' ') : '';
+
+      // Per-metric winner highlighting (lower latency/ttft is better, higher tps is better)
+      const hiTPS  = v => myTPS > 0 && oppTPS > 0 ? (v === myTPS && myTPS >= oppTPS ? 'text-[#a3be8c] font-bold' : v === myTPS ? '' : myTPS >= oppTPS ? '' : 'text-[#a3be8c] font-bold') : '';
+      const hiLow  = (vMy, vOpp) => vMy > 0 && vOpp > 0 ? (vMy <= vOpp ? 'text-[#a3be8c] font-bold' : '') : '';
+      const hiHigh = (vMy, vOpp) => vMy > 0 && vOpp > 0 ? (vMy >= vOpp ? 'text-[#a3be8c] font-bold' : '') : '';
+
+      const fmt1  = v => v > 0 ? v.toFixed(1) : '—';
+      const fmtMs = v => v > 0 ? `${Math.round(v)} ms` : '—';
+
+      return `
+        <div class="rounded-lg border ${outcomeCls} p-3 font-mono text-[10px] space-y-2">
+          <!-- Match header -->
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div class="flex items-center gap-2 flex-wrap">
+              ${outcomeBadge}
+              <span class="text-[#4c566a] uppercase text-[9px] font-tech">${escapeHTML(m.bench_type)}</span>
+              <span class="text-[#d8dee9]">vs <strong class="text-[#88c0d0]">${escapeHTML(oppName)}</strong></span>
+            </div>
+            <div class="flex items-center gap-2 text-[9px] text-[#4c566a]">
+              <span class="truncate max-w-[120px]" title="${escapeHTML(m.model_name)}">${escapeHTML(modelShort)}</span>
+              <span>${date}</span>
+              <button onclick="deleteNvnMatch(${m.id})"
+                      class="text-[#4c566a] hover:text-[#bf616a] transition-colors p-0.5 rounded"
+                      title="Delete this result">
+                <i class="fa-solid fa-trash text-[9px]"></i>
+              </button>
+            </div>
+          </div>
+          <!-- Side-by-side metrics -->
+          <div class="grid grid-cols-4 gap-1 text-[9px]">
+            <div class="text-[#4c566a] font-tech uppercase"></div>
+            <div class="text-center font-tech text-[#88c0d0] truncate">${escapeHTML(myName)}</div>
+            <div class="text-center font-tech text-[#a3be8c] truncate">${escapeHTML(oppName)}</div>
+            <div class="text-[#4c566a]"></div>
+
+            <div class="text-[#4c566a] uppercase">TPS</div>
+            <div class="text-center ${hiHigh(myTPS, oppTPS)}">${fmt1(myTPS)}</div>
+            <div class="text-center ${hiHigh(oppTPS, myTPS)}">${fmt1(oppTPS)}</div>
+            <div class="text-[#4c566a]">tok/s</div>
+
+            ${myTTFT > 0 || oppTTFT > 0 ? `
+            <div class="text-[#4c566a] uppercase">TTFT</div>
+            <div class="text-center ${hiLow(myTTFT, oppTTFT)}">${fmtMs(myTTFT)}</div>
+            <div class="text-center ${hiLow(oppTTFT, myTTFT)}">${fmtMs(oppTTFT)}</div>
+            <div class="text-[#4c566a]">↓ better</div>` : ''}
+
+            ${myLat > 0 || oppLat > 0 ? `
+            <div class="text-[#4c566a] uppercase">Latency</div>
+            <div class="text-center ${hiLow(myLat, oppLat)}">${fmtMs(myLat)}</div>
+            <div class="text-center ${hiLow(oppLat, myLat)}">${fmtMs(oppLat)}</div>
+            <div class="text-[#4c566a]">↓ better</div>` : ''}
+          </div>
+        </div>`;
+    }).join('');
+  } catch {
+    list.innerHTML = '<div class="text-[#bf616a] font-mono text-[10px] text-center py-2">Failed to load matches.</div>';
+  }
+}
+
+function closeNvnDrawer() {
+  nvnDrawerNodeId   = null;
+  nvnDrawerNodeName = null;
+  nvnDrawerFilter   = null;
+  const drawer = document.getElementById('nvn-match-drawer');
+  if (drawer) drawer.classList.add('hidden');
+}
+
+async function deleteNvnMatch(id) {
+  try {
+    const r = await fetch(`/api/benchmarks/nvn-matches/${id}`, { method: 'DELETE' });
+    if (!r.ok) { showToast('Failed to delete match', 'error'); return; }
+    showToast('Match deleted', 'success');
+    // Refresh the drawer in place and update the leaderboard
+    if (nvnDrawerNodeId) openNvnDrawer(nvnDrawerNodeId, nvnDrawerNodeName, nvnDrawerFilter);
+    loadNvnLeaderboard();
+  } catch {
+    showToast('Failed to delete match', 'error');
+  }
 }
 
 let optimizerEventSource = null;

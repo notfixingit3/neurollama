@@ -61,6 +61,7 @@ type Benchmark struct {
 	ServerName     string  `json:"server_name"`
 	ServerURL      string  `json:"server_url"`
 	BenchmarkType  string  `json:"benchmark_type"`
+	OllamaVersion  string  `json:"ollama_version"`
 	TtftMs         float64 `json:"ttft_ms"`
 	Tps            float64 `json:"tps"`
 	AvgLatencyMs   float64 `json:"avg_latency_ms"`
@@ -99,19 +100,20 @@ type BenchmarkWithScore struct {
 // BenchmarkGroup is a set of runs for one model+type+server combination,
 // with all aggregation pre-computed by the server.
 type BenchmarkGroup struct {
-	ModelName       string               `json:"model_name"`
-	BenchmarkType   string               `json:"benchmark_type"`
-	ServerName      string               `json:"server_name"`
-	ServerURL       string               `json:"server_url"`
-	RunCount        int                  `json:"run_count"`
-	LatestID        int64                `json:"latest_id"`
-	LatestScore     string               `json:"latest_score"`     // raw DB value
-	LatestNotes     string               `json:"latest_notes"`
-	LatestCreatedAt string               `json:"latest_created_at"`
-	DisplayScore    string               `json:"display_score"`    // resolved: stored or auto-computed
-	IsAutoScore     bool                 `json:"is_auto_score"`
-	SummaryRun      BenchmarkSummaryRun  `json:"summary_run"`
-	Runs            []BenchmarkWithScore `json:"runs"`
+	ModelName          string               `json:"model_name"`
+	BenchmarkType      string               `json:"benchmark_type"`
+	ServerName         string               `json:"server_name"`
+	ServerURL          string               `json:"server_url"`
+	OllamaVersion      string               `json:"ollama_version"`       // version from most-recent run
+	RunCount           int                  `json:"run_count"`
+	LatestID           int64                `json:"latest_id"`
+	LatestScore        string               `json:"latest_score"`         // raw DB value
+	LatestNotes        string               `json:"latest_notes"`
+	LatestCreatedAt    string               `json:"latest_created_at"`
+	DisplayScore       string               `json:"display_score"`        // resolved: stored or auto-computed
+	IsAutoScore        bool                 `json:"is_auto_score"`
+	SummaryRun         BenchmarkSummaryRun  `json:"summary_run"`
+	Runs               []BenchmarkWithScore `json:"runs"`
 }
 
 // TypeBest captures the best-performing group for one benchmark type.
@@ -201,6 +203,10 @@ func InitDB(dbPath string) error {
 
 	if err := seedDefaultPresets(); err != nil {
 		log.Printf("Warning: failed to seed default presets: %v", err)
+	}
+
+	if err := seedAdminUser(); err != nil {
+		log.Printf("Warning: failed to seed admin user: %v", err)
 	}
 
 	log.Printf("SQLite database initialized successfully at %s", dbPath)
@@ -318,6 +324,38 @@ func migrate() error {
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY(document_id) REFERENCES rag_documents(id) ON DELETE CASCADE
 		);`,
+		`CREATE TABLE IF NOT EXISTS nvn_matches (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			model_name   TEXT NOT NULL,
+			bench_type   TEXT NOT NULL DEFAULT 'standard',
+			node_a_id    TEXT NOT NULL,
+			node_a_name  TEXT NOT NULL,
+			node_b_id    TEXT NOT NULL,
+			node_b_name  TEXT NOT NULL,
+			winner_id    TEXT NOT NULL DEFAULT '',
+			winner_name  TEXT NOT NULL DEFAULT '',
+			node_a_tps   REAL NOT NULL DEFAULT 0,
+			node_b_tps   REAL NOT NULL DEFAULT 0,
+			node_a_ttft  REAL NOT NULL DEFAULT 0,
+			node_b_ttft  REAL NOT NULL DEFAULT 0,
+			node_a_lat   REAL NOT NULL DEFAULT 0,
+			node_b_lat   REAL NOT NULL DEFAULT 0,
+			node_a_error INTEGER NOT NULL DEFAULT 0,
+			node_b_error INTEGER NOT NULL DEFAULT 0,
+			created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+		);`,
+		`CREATE TABLE IF NOT EXISTS users (
+			id         TEXT PRIMARY KEY,
+			name       TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);`,
+		`CREATE TABLE IF NOT EXISTS user_preferences (
+			user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			key        TEXT NOT NULL,
+			value      TEXT NOT NULL DEFAULT '',
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (user_id, key)
+		);`,
 	}
 
 	for _, q := range queries {
@@ -359,6 +397,7 @@ func migrate() error {
 		{"benchmarks", "server_url",     "ALTER TABLE benchmarks ADD COLUMN server_url TEXT NOT NULL DEFAULT ''"},
 		{"benchmarks", "benchmark_type", "ALTER TABLE benchmarks ADD COLUMN benchmark_type TEXT NOT NULL DEFAULT 'standard'"},
 		{"benchmarks", "extra_json",     "ALTER TABLE benchmarks ADD COLUMN extra_json TEXT NOT NULL DEFAULT ''"},
+		{"benchmarks", "ollama_version", "ALTER TABLE benchmarks ADD COLUMN ollama_version TEXT NOT NULL DEFAULT ''"},
 	}
 
 	for _, alter := range alterQueries {
@@ -627,6 +666,7 @@ func GetBenchmarks() ([]Benchmark, error) {
 	rows, err := DB.Query(`SELECT id, model_name,
 		COALESCE(server_name,''), COALESCE(server_url,''),
 		COALESCE(benchmark_type,'standard'), COALESCE(extra_json,''),
+		COALESCE(ollama_version,''),
 		ttft_ms, tps, avg_latency_ms, reasoning_score, COALESCE(notes,''),
 		datetime(created_at,'localtime')
 		FROM benchmarks ORDER BY id DESC`)
@@ -640,7 +680,7 @@ func GetBenchmarks() ([]Benchmark, error) {
 		var b Benchmark
 		if err := rows.Scan(
 			&b.ID, &b.ModelName, &b.ServerName, &b.ServerURL,
-			&b.BenchmarkType, &b.ExtraJSON,
+			&b.BenchmarkType, &b.ExtraJSON, &b.OllamaVersion,
 			&b.TtftMs, &b.Tps, &b.AvgLatencyMs, &b.ReasoningScore,
 			&b.Notes, &b.CreatedAt,
 		); err != nil {
@@ -714,6 +754,7 @@ func GetGroupedBenchmarks(filter, sortCol, sortDir string) (*BenchmarkGroupedRes
 			BenchmarkType:   k.btype,
 			ServerName:      latest.ServerName,
 			ServerURL:       k.serverURL,
+			OllamaVersion:   latest.OllamaVersion,
 			RunCount:        len(runs),
 			LatestID:        latest.ID,
 			LatestScore:     latest.ReasoningScore,
@@ -981,16 +1022,16 @@ func computeBenchmarkScore(benchType string, tps float64, extraJSON string) stri
 	}
 }
 
-func SaveBenchmark(modelName, serverName, serverURL, benchmarkType, extraJSON string, ttft, tps, avgLatency float64) (int64, error) {
+func SaveBenchmark(modelName, serverName, serverURL, benchmarkType, extraJSON, ollamaVersion string, ttft, tps, avgLatency float64) (int64, error) {
 	if benchmarkType == "" {
 		benchmarkType = "standard"
 	}
 	score := computeBenchmarkScore(benchmarkType, tps, extraJSON)
 	res, err := DB.Exec(
 		`INSERT INTO benchmarks
-		 (model_name, server_name, server_url, benchmark_type, extra_json, ttft_ms, tps, avg_latency_ms, reasoning_score)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		modelName, serverName, serverURL, benchmarkType, extraJSON, ttft, tps, avgLatency, score,
+		 (model_name, server_name, server_url, benchmark_type, extra_json, ollama_version, ttft_ms, tps, avg_latency_ms, reasoning_score)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		modelName, serverName, serverURL, benchmarkType, extraJSON, ollamaVersion, ttft, tps, avgLatency, score,
 	)
 	if err != nil {
 		return 0, err
@@ -1275,4 +1316,211 @@ func GetRAGChunksForModel(embeddingModel string) ([]RAGChunkWithDocInfo, error) 
 		list = append(list, c)
 	}
 	return list, nil
+}
+
+// ── Node-vs-Node match history ────────────────────────────────────────────────
+
+// NvnMatch is a single completed node-vs-node benchmark match.
+type NvnMatch struct {
+	ID          int64   `json:"id"`
+	ModelName   string  `json:"model_name"`
+	BenchType   string  `json:"bench_type"`
+	NodeAID     string  `json:"node_a_id"`
+	NodeAName   string  `json:"node_a_name"`
+	NodeBID     string  `json:"node_b_id"`
+	NodeBName   string  `json:"node_b_name"`
+	WinnerID    string  `json:"winner_id"`
+	WinnerName  string  `json:"winner_name"`
+	NodeATPS    float64 `json:"node_a_tps"`
+	NodeBTPS    float64 `json:"node_b_tps"`
+	NodeATTFT   float64 `json:"node_a_ttft"`
+	NodeBTTFT   float64 `json:"node_b_ttft"`
+	NodeALat    float64 `json:"node_a_lat"`
+	NodeBLat    float64 `json:"node_b_lat"`
+	NodeAError  bool    `json:"node_a_error"`
+	NodeBError  bool    `json:"node_b_error"`
+	CreatedAt   string  `json:"created_at"`
+}
+
+// NvnLeaderboardEntry is the per-node win/loss summary.
+type NvnLeaderboardEntry struct {
+	NodeID   string  `json:"node_id"`
+	NodeName string  `json:"node_name"`
+	Wins     int     `json:"wins"`
+	Losses   int     `json:"losses"`
+	Ties     int     `json:"ties"`
+	Matches  int     `json:"matches"`
+	WinRate  float64 `json:"win_rate"` // 0-100
+}
+
+// SaveNvnMatch persists a completed NvN match result.
+func SaveNvnMatch(m NvnMatch) (int64, error) {
+	res, err := DB.Exec(`
+		INSERT INTO nvn_matches
+			(model_name, bench_type,
+			 node_a_id, node_a_name, node_b_id, node_b_name,
+			 winner_id, winner_name,
+			 node_a_tps, node_b_tps, node_a_ttft, node_b_ttft,
+			 node_a_lat, node_b_lat, node_a_error, node_b_error)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		m.ModelName, m.BenchType,
+		m.NodeAID, m.NodeAName, m.NodeBID, m.NodeBName,
+		m.WinnerID, m.WinnerName,
+		m.NodeATPS, m.NodeBTPS, m.NodeATTFT, m.NodeBTTFT,
+		m.NodeALat, m.NodeBLat,
+		boolToInt(m.NodeAError), boolToInt(m.NodeBError),
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// DeleteNvnMatch removes a single NvN match record by ID.
+func DeleteNvnMatch(id int64) error {
+	_, err := DB.Exec(`DELETE FROM nvn_matches WHERE id = ?`, id)
+	return err
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// GetNvnLeaderboard returns per-node win/loss stats, sorted by wins desc.
+func GetNvnLeaderboard() ([]NvnLeaderboardEntry, error) {
+	// Build a unified node appearance table and aggregate.
+	rows, err := DB.Query(`
+		WITH appearances AS (
+			SELECT node_a_id  AS nid, node_a_name AS nname, winner_id, node_a_error AS has_err FROM nvn_matches
+			UNION ALL
+			SELECT node_b_id  AS nid, node_b_name AS nname, winner_id, node_b_error AS has_err FROM nvn_matches
+		)
+		SELECT
+			nid,
+			nname,
+			SUM(CASE WHEN winner_id = nid THEN 1 ELSE 0 END)                              AS wins,
+			SUM(CASE WHEN winner_id != nid AND winner_id != '' AND has_err = 0 THEN 1 ELSE 0 END) AS losses,
+			SUM(CASE WHEN winner_id = '' AND has_err = 0 THEN 1 ELSE 0 END)               AS ties,
+			COUNT(*)                                                                        AS matches
+		FROM appearances
+		GROUP BY nid
+		ORDER BY wins DESC, matches DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []NvnLeaderboardEntry
+	for rows.Next() {
+		var e NvnLeaderboardEntry
+		if err := rows.Scan(&e.NodeID, &e.NodeName, &e.Wins, &e.Losses, &e.Ties, &e.Matches); err != nil {
+			return nil, err
+		}
+		if e.Matches > 0 {
+			e.WinRate = float64(e.Wins) / float64(e.Matches) * 100
+		}
+		list = append(list, e)
+	}
+	return list, nil
+}
+
+// GetNvnMatches returns recent NvN matches, optionally filtered to matches
+// involving a specific node ID. Pass "" to return all matches.
+func GetNvnMatches(nodeID string, limit int) ([]NvnMatch, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var rows *sql.Rows
+	var err error
+	if nodeID == "" {
+		rows, err = DB.Query(`
+			SELECT id, model_name, bench_type,
+			       node_a_id, node_a_name, node_b_id, node_b_name,
+			       winner_id, winner_name,
+			       node_a_tps, node_b_tps, node_a_ttft, node_b_ttft,
+			       node_a_lat, node_b_lat, node_a_error, node_b_error,
+			       strftime('%Y-%m-%dT%H:%M:%SZ', created_at)
+			FROM nvn_matches ORDER BY id DESC LIMIT ?`, limit)
+	} else {
+		rows, err = DB.Query(`
+			SELECT id, model_name, bench_type,
+			       node_a_id, node_a_name, node_b_id, node_b_name,
+			       winner_id, winner_name,
+			       node_a_tps, node_b_tps, node_a_ttft, node_b_ttft,
+			       node_a_lat, node_b_lat, node_a_error, node_b_error,
+			       strftime('%Y-%m-%dT%H:%M:%SZ', created_at)
+			FROM nvn_matches
+			WHERE node_a_id = ? OR node_b_id = ?
+			ORDER BY id DESC LIMIT ?`, nodeID, nodeID, limit)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []NvnMatch
+	for rows.Next() {
+		var m NvnMatch
+		var nodeAErr, nodeBErr int
+		if err := rows.Scan(
+			&m.ID, &m.ModelName, &m.BenchType,
+			&m.NodeAID, &m.NodeAName, &m.NodeBID, &m.NodeBName,
+			&m.WinnerID, &m.WinnerName,
+			&m.NodeATPS, &m.NodeBTPS, &m.NodeATTFT, &m.NodeBTTFT,
+			&m.NodeALat, &m.NodeBLat, &nodeAErr, &nodeBErr,
+			&m.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		m.NodeAError = nodeAErr != 0
+		m.NodeBError = nodeBErr != 0
+		list = append(list, m)
+	}
+	return list, nil
+}
+
+// ── User & Preferences Helpers ────────────────────────────────────────────────
+
+// seedAdminUser inserts the default admin user if it doesn't exist yet.
+func seedAdminUser() error {
+	_, err := DB.Exec(`INSERT OR IGNORE INTO users (id, name) VALUES ('admin', 'Admin')`)
+	return err
+}
+
+// GetAllPreferences returns every key/value pair for a user as a flat map.
+func GetAllPreferences(userID string) (map[string]string, error) {
+	rows, err := DB.Query(`SELECT key, value FROM user_preferences WHERE user_id = ?`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	result := make(map[string]string)
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		result[k] = v
+	}
+	return result, nil
+}
+
+// SetPreference upserts a single user preference key/value.
+func SetPreference(userID, key, value string) error {
+	_, err := DB.Exec(`
+		INSERT INTO user_preferences (user_id, key, value, updated_at)
+		VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(user_id, key) DO UPDATE
+		SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
+		userID, key, value)
+	return err
+}
+
+// ClearPreferences removes all preferences for a user.
+func ClearPreferences(userID string) error {
+	_, err := DB.Exec(`DELETE FROM user_preferences WHERE user_id = ?`, userID)
+	return err
 }
