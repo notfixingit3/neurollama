@@ -3792,7 +3792,11 @@ func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judge
 			Stream: true,
 			Options: map[string]interface{}{
 				"temperature": 0.0,
-				"num_predict": 200,
+				// Thinking models (e.g. gemma4:e4b) exhaust their token budget on
+				// internal reasoning before emitting visible output. 200 returned
+				// done_reason:"length" with 0 output bytes. Use 2048 so the model
+				// can think AND write the JSON score.
+				"num_predict": 2048,
 			},
 		}
 
