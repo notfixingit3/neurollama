@@ -8990,9 +8990,79 @@ async function fetchCodeBenchRuns() {
     if (!res.ok) throw new Error(res.statusText);
     codeBenchRuns = await res.json();
     renderCodeBenchResults();
+    renderLangLeaderboard();
   } catch (e) {
     showToast('Failed to load code benchmark runs: ' + e.message, 'error');
   }
+}
+
+function renderLangLeaderboard() {
+  const panel = document.getElementById('code-lang-leaderboard-panel');
+  const el    = document.getElementById('code-lang-leaderboard');
+  if (!panel || !el) return;
+
+  // Build leaders[lang][node] = { model, quality_score }
+  const leaders = {};
+  const nodeSet  = new Set();
+
+  codeBenchRuns.forEach(run => {
+    const node = run.server_name || '(local)';
+    nodeSet.add(node);
+    let langs = [];
+    try { langs = JSON.parse(run.extra_json).languages || []; } catch {}
+    langs.forEach(l => {
+      if (!l.lang) return;
+      if (!leaders[l.lang]) leaders[l.lang] = {};
+      const cur = leaders[l.lang][node];
+      if (!cur || (l.quality_score || 0) > cur.quality_score) {
+        leaders[l.lang][node] = { model: run.model_name, quality_score: l.quality_score || 0 };
+      }
+    });
+  });
+
+  if (Object.keys(leaders).length === 0) {
+    panel.classList.add('hidden');
+    return;
+  }
+
+  panel.classList.remove('hidden');
+  const nodes = [...nodeSet].sort();
+
+  const qColor = q => q >= 8 ? '#a3be8c' : q >= 6 ? '#ebcb8b' : q >= 4 ? '#d08770' : q > 0 ? '#bf616a' : '#4c566a';
+
+  // Canonical lang order matches CODE_LANGS
+  const langOrder = ['python','go','javascript','typescript','node','bash','sh','rust','php','ruby','c','sql'];
+  const langLabels = { python:'Python', go:'Go', javascript:'JavaScript', typescript:'TypeScript',
+    node:'Node.js', bash:'Bash', sh:'sh (POSIX)', rust:'Rust', php:'PHP', ruby:'Ruby', c:'C', sql:'SQL' };
+  const activeLangs = langOrder.filter(l => leaders[l]);
+
+  el.innerHTML = `
+    <table class="table table-xs w-full font-mono text-[10px]">
+      <thead>
+        <tr class="text-[#4c566a] uppercase text-[9px]">
+          <th class="w-24">Language</th>
+          ${nodes.map(n => `<th class="text-[#88c0d0]">${escapeHTML(n)}</th>`).join('')}
+        </tr>
+      </thead>
+      <tbody>
+        ${activeLangs.map(lang => `
+          <tr class="border-b border-[#4c566a]/10 hover:bg-[#3b4252]/20">
+            <td class="text-[#d8dee9] font-semibold">${langLabels[lang] || lang}</td>
+            ${nodes.map(node => {
+              const entry = leaders[lang]?.[node];
+              if (!entry) return `<td class="text-[#4c566a]">—</td>`;
+              const shortModel = entry.model.length > 22 ? entry.model.slice(0, 20) + '…' : entry.model;
+              return `<td>
+                <div class="flex items-center gap-2">
+                  <span class="font-bold" style="color:${qColor(entry.quality_score)}">${entry.quality_score.toFixed(1)}</span>
+                  <span class="text-[#8fbcbb] truncate max-w-[120px]" title="${escapeHTML(entry.model)}">${escapeHTML(shortModel)}</span>
+                </div>
+              </td>`;
+            }).join('')}
+          </tr>`).join('')}
+      </tbody>
+    </table>
+  `;
 }
 
 function renderCodeBenchResults() {

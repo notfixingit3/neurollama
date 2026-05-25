@@ -3740,6 +3740,10 @@ func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judge
 		genDur := time.Since(start)
 		generatedCode := strings.TrimSpace(codeBuilder.String())
 
+		if toks == 0 {
+			logFunc(fmt.Sprintf("[%s] ⚠ Empty response — model may have output only in thinking field", t.Label))
+		}
+
 		// Strip think blocks that some reasoning models leak into the response field
 		generatedCode = stripThinkBlocks(generatedCode)
 
@@ -3812,6 +3816,9 @@ func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judge
 					Thinking string `json:"thinking"`
 				}
 				if json.Unmarshal(line, &chunk) == nil {
+					// Some thinking models (e.g. Gemma4) emit structured output in the
+					// thinking field rather than response — capture both so we don't miss it.
+					jBuilder.WriteString(chunk.Thinking)
 					jBuilder.WriteString(chunk.Response)
 				}
 			}
