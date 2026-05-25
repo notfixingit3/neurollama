@@ -9060,39 +9060,55 @@ function renderLangLeaderboard() {
                        :          'bg-[#4c566a]/20 text-[#4c566a] border-[#4c566a]/30';
   const modelShort = m => { const s = m.replace(/:latest$/, ''); return s.length > 14 ? s.slice(0,12)+'…' : s; };
 
-  const langOrder  = ['python','go','javascript','typescript','node','bash','sh','rust','php','ruby','c','sql'];
-  const langLabels = { python:'Python', go:'Go', javascript:'JavaScript', typescript:'TypeScript',
-    node:'Node.js', bash:'Bash', sh:'sh (POSIX)', rust:'Rust', php:'PHP', ruby:'Ruby', c:'C', sql:'SQL' };
-  const activeLangs = langOrder.filter(l => top3[l]);
+  // Build icon + label lookup from CODE_LANGS
+  const langMeta = Object.fromEntries(CODE_LANGS.map(l => [l.lang, l]));
+  const activeLangs = ['python','go','javascript','typescript','node','bash','sh','rust','php','ruby','c','sql']
+    .filter(l => top3[l]);
 
-  const renderEntries = (arr) => {
+  // Inline medal chips: 🥇[score] model · 🥈[score] model · 🥉[score] model  — all on one line
+  const inlineMedals = (arr) => {
     if (!arr || arr.length === 0) return `<span class="text-[8px] text-[#4c566a]">—</span>`;
-    return arr.map((e, i) => `
-      <div class="flex items-center gap-1 py-px">
-        <span class="text-[9px] shrink-0">${MEDAL[i]}</span>
-        <span class="inline-flex px-1.5 py-px rounded border text-[8px] font-bold font-mono shrink-0 ${badgeCls(e.quality_score)}">${e.quality_score.toFixed(1)}</span>
-        <span class="text-[8px] font-mono text-[#8fbcbb] truncate" title="${escapeHTML(e.model)}">${escapeHTML(modelShort(e.model))}</span>
-      </div>`).join('');
+    return arr.map((e, i) => {
+      const q = e.quality_score;
+      const bc = badgeCls(q);
+      const nm = modelShort(e.model);
+      return `<span class="inline-flex items-center gap-0.5 shrink-0">
+        <span class="text-[9px]">${MEDAL[i]}</span>
+        <span class="inline-flex px-1 py-px rounded border text-[8px] font-bold font-mono ${bc}">${q.toFixed(1)}</span>
+        <span class="text-[8px] font-mono text-[#8fbcbb]" title="${escapeHTML(e.model)}">${escapeHTML(nm)}</span>
+      </span>`;
+    }).join('<span class="text-[#4c566a] text-[8px] mx-1">·</span>');
   };
 
   if (nodes.length === 1) {
     const node = nodes[0];
+    // Single-node: 2-col list, each row = icon + lang + inline medals on one line
     el.innerHTML = `
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px 16px;">
-        ${activeLangs.map(lang => `
-          <div class="flex flex-col py-0.5">
-            <div class="text-[9px] font-mono text-[#d8dee9] font-semibold mb-0.5">${langLabels[lang]}</div>
-            ${renderEntries(top3[lang]?.[node])}
-          </div>`).join('')}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 20px;">
+        ${activeLangs.map(lang => {
+          const meta = langMeta[lang] || { icon: '', label: lang };
+          return `<div class="flex items-center gap-2 py-0.5 min-w-0">
+            <span class="shrink-0 w-14 flex items-center gap-1 text-[9px] font-mono text-[#d8dee9] font-semibold">
+              <i class="${meta.icon} text-[#88c0d0] text-[8px]"></i>${meta.label}
+            </span>
+            <span class="flex items-center gap-0 flex-wrap min-w-0">${inlineMedals(top3[lang]?.[node])}</span>
+          </div>`;
+        }).join('')}
       </div>`;
   } else {
+    // Multi-node: lang col + one col per node, medals stacked but compact
     el.innerHTML = `
-      <div style="display:grid;grid-template-columns:5rem ${nodes.map(()=>'1fr').join(' ')};gap:4px 12px;align-items:start;">
+      <div style="display:grid;grid-template-columns:6rem ${nodes.map(()=>'1fr').join(' ')};gap:2px 12px;align-items:center;">
         <div></div>
-        ${nodes.map(n => `<div class="text-[8px] font-tech uppercase text-[#88c0d0] tracking-wider pb-1">${escapeHTML(n)}</div>`).join('')}
-        ${activeLangs.map(lang => `
-          <div class="text-[9px] font-mono text-[#d8dee9] font-semibold py-0.5">${langLabels[lang]}</div>
-          ${nodes.map(node => `<div class="flex flex-col">${renderEntries(top3[lang]?.[node])}</div>`).join('')}`).join('')}
+        ${nodes.map(n => `<div class="text-[8px] font-tech uppercase text-[#88c0d0] tracking-wider">${escapeHTML(n)}</div>`).join('')}
+        ${activeLangs.map(lang => {
+          const meta = langMeta[lang] || { icon: '', label: lang };
+          return `
+            <div class="flex items-center gap-1 py-0.5 text-[9px] font-mono text-[#d8dee9] font-semibold">
+              <i class="${meta.icon} text-[#88c0d0] text-[8px]"></i>${meta.label}
+            </div>
+            ${nodes.map(node => `<div class="flex items-center gap-0 flex-wrap">${inlineMedals(top3[lang]?.[node])}</div>`).join('')}`;
+        }).join('')}
       </div>`;
   }
 }
