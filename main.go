@@ -4216,7 +4216,7 @@ func runCodeBenchmarkSSEHandler(c *gin.Context) {
 	for i, l := range langs {
 		langs[i] = strings.TrimSpace(l)
 	}
-	numCtx := 16384
+	numCtx := 0 // 0 = model default (no num_ctx override)
 	if v, err := strconv.Atoi(c.Query("num_ctx")); err == nil && v > 0 {
 		numCtx = v
 	}
