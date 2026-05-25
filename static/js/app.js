@@ -9013,6 +9013,68 @@ function renderCodeBenchResults() {
 
   const scoreColor = s => ({ S: 'text-[#a3be8c]', A: 'text-[#88c0d0]', B: 'text-[#ebcb8b]', C: 'text-[#d08770]', F: 'text-[#bf616a]' }[s] || 'text-[#4c566a]');
 
+  // Group by model_name + server_name, most recent first within each group
+  const groups = new Map();
+  runs.forEach(r => {
+    const key = `${r.model_name}|||${r.server_name || ''}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  });
+  const groupList = [...groups.values()].map(g => {
+    g.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+    return g;
+  });
+  groupList.sort((a, b) => (b[0].created_at || '').localeCompare(a[0].created_at || ''));
+
+  const codeRow = (r, isLatest, gIdx, hasOlder) => {
+    let q = r.avg_quality_score;
+    if (langFilter) {
+      try {
+        const langResult = (JSON.parse(r.extra_json).languages || []).find(l => l.lang === langFilter);
+        if (langResult) q = langResult.quality_score || 0;
+      } catch { /* ignore */ }
+    }
+    const langCount = r.languages ? r.languages.split(',').length : 0;
+    const chevron = isLatest && hasOlder
+      ? `<button onclick="event.stopPropagation(); toggleCodeHistGroup(${gIdx})"
+           class="mr-1 text-[#4c566a] hover:text-[#88c0d0] transition-colors">
+           <i id="code-grp-icon-${gIdx}" class="fa-solid fa-chevron-right text-[8px]"></i>
+         </button>`
+      : `<span class="inline-block w-3 mr-1"></span>`;
+    return `
+      <tr class="hover:bg-[#3b4252]/30 cursor-pointer border-b border-[#4c566a]/10 ${r.id === selectedCodeRunId ? 'bg-[#3b4252]/40' : ''}"
+          onclick="showCodeBenchDetail(${r.id})">
+        <td class="text-[#d8dee9] font-semibold">${chevron}${escapeHTML(r.model_name)}</td>
+        <td class="text-[#4c566a]">${escapeHTML(r.server_name || '—')}</td>
+        <td class="text-[#8fbcbb]">${escapeHTML(r.judge_model)}</td>
+        <td class="text-[#d8dee9]">${langCount}</td>
+        <td class="text-[#ebcb8b] font-semibold">${q.toFixed(1)}/10</td>
+        <td>${r.avg_tps.toFixed(1)}</td>
+        <td class="${r.langs_passing_syntax === r.langs_total ? 'text-[#a3be8c]' : 'text-[#bf616a]'}">${r.langs_passing_syntax}/${r.langs_total}</td>
+        <td class="font-bold ${scoreColor(r.overall_score)}">${r.overall_score}</td>
+        <td class="text-[#4c566a]">${r.created_at ? r.created_at.slice(0, 16) : ''}</td>
+        <td><button onclick="event.stopPropagation(); deleteCodeBenchRun(${r.id})" class="btn btn-ghost btn-xs text-[#bf616a] p-1"><i class="fa-solid fa-trash-can text-[9px]"></i></button></td>
+      </tr>`;
+  };
+
+  let rows = '';
+  groupList.forEach((group, gIdx) => {
+    const [latest, ...older] = group;
+    rows += codeRow(latest, true, gIdx, older.length > 0);
+    if (older.length > 0) {
+      rows += `
+        <tr id="code-hist-group-${gIdx}" class="hidden">
+          <td colspan="10" class="p-0 border-b border-[#4c566a]/20">
+            <table class="table table-xs w-full font-mono text-[10px]">
+              <tbody class="bg-[#242933]/50">
+                ${older.map(r => codeRow(r, false, gIdx, false)).join('')}
+              </tbody>
+            </table>
+          </td>
+        </tr>`;
+    }
+  });
+
   histEl.innerHTML = `
     <table class="table table-xs w-full font-mono text-[10px]">
       <thead>
@@ -9021,35 +9083,17 @@ function renderCodeBenchResults() {
           <th>Langs</th><th>Quality</th><th>Avg TPS</th><th>Syntax</th><th>Score</th><th>Date</th><th></th>
         </tr>
       </thead>
-      <tbody>
-        ${runs.map(r => {
-          const langCount = r.languages ? r.languages.split(',').length : 0;
-          let qualityForFilter = r.avg_quality_score;
-          if (langFilter) {
-            try {
-              const ex = JSON.parse(r.extra_json);
-              const langResult = (ex.languages || []).find(l => l.lang === langFilter);
-              if (langResult) qualityForFilter = langResult.quality_score || 0;
-            } catch { /* ignore */ }
-          }
-          return `
-          <tr class="hover:bg-[#3b4252]/30 cursor-pointer border-b border-[#4c566a]/10 ${r.id === selectedCodeRunId ? 'bg-[#3b4252]/40' : ''}"
-              onclick="showCodeBenchDetail(${r.id})">
-            <td class="text-[#d8dee9] font-semibold">${escapeHTML(r.model_name)}</td>
-            <td class="text-[#4c566a]">${escapeHTML(r.server_name || '—')}</td>
-            <td class="text-[#8fbcbb]">${escapeHTML(r.judge_model)}</td>
-            <td class="text-[#d8dee9]">${langCount}</td>
-            <td class="text-[#ebcb8b] font-semibold">${qualityForFilter.toFixed(1)}/10</td>
-            <td>${r.avg_tps.toFixed(1)}</td>
-            <td class="${r.langs_passing_syntax === r.langs_total ? 'text-[#a3be8c]' : 'text-[#bf616a]'}">${r.langs_passing_syntax}/${r.langs_total}</td>
-            <td class="font-bold ${scoreColor(r.overall_score)}">${r.overall_score}</td>
-            <td class="text-[#4c566a]">${r.created_at ? r.created_at.slice(0, 16) : ''}</td>
-            <td><button onclick="event.stopPropagation(); deleteCodeBenchRun(${r.id})" class="btn btn-ghost btn-xs text-[#bf616a] p-1"><i class="fa-solid fa-trash-can text-[9px]"></i></button></td>
-          </tr>`;
-        }).join('')}
-      </tbody>
+      <tbody>${rows}</tbody>
     </table>
   `;
+}
+
+function toggleCodeHistGroup(gIdx) {
+  const row = document.getElementById(`code-hist-group-${gIdx}`);
+  const icon = document.getElementById(`code-grp-icon-${gIdx}`);
+  if (!row) return;
+  const nowHidden = row.classList.toggle('hidden');
+  if (icon) icon.className = `fa-solid fa-chevron-${nowHidden ? 'right' : 'down'} text-[8px]`;
 }
 
 function showCodeBenchDetail(id) {
@@ -9301,6 +9345,62 @@ function renderHallucinationHistory() {
     return;
   }
 
+  // Group by model_name + server_name, most recent first within each group
+  const groups = new Map();
+  hallucinationRuns.forEach(r => {
+    const key = `${r.model_name}|||${r.server_name || ''}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  });
+  const groupList = [...groups.values()].map(g => {
+    g.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+    return g;
+  });
+  groupList.sort((a, b) => (b[0].created_at || '').localeCompare(a[0].created_at || ''));
+
+  const fmtK = k => k >= 1024 ? k / 1024 + 'M' : k + 'k';
+  const recallCls = p => p >= 80 ? 'text-[#a3be8c]' : p >= 50 ? 'text-[#ebcb8b]' : 'text-[#bf616a]';
+  const hallucCls = p => p > 30 ? 'text-[#bf616a]' : p > 10 ? 'text-[#d08770]' : 'text-[#a3be8c]';
+
+  const hallucRow = (r, isLatest, gIdx, hasOlder) => {
+    const chevron = isLatest && hasOlder
+      ? `<button onclick="event.stopPropagation(); toggleHallucHistGroup(${gIdx})"
+           class="mr-1 text-[#4c566a] hover:text-[#88c0d0] transition-colors">
+           <i id="halluc-grp-icon-${gIdx}" class="fa-solid fa-chevron-right text-[8px]"></i>
+         </button>`
+      : `<span class="inline-block w-3 mr-1"></span>`;
+    return `
+      <tr class="hover:bg-[#3b4252]/30 cursor-pointer border-b border-[#4c566a]/10"
+          onclick="showHallucinationDetail(${r.id})">
+        <td class="text-[#d8dee9] font-semibold">${chevron}${escapeHTML(r.model_name)}</td>
+        <td class="text-[#4c566a]">${escapeHTML(r.server_name || '—')}</td>
+        <td class="text-[#88c0d0]">${fmtK(r.max_context_k)}</td>
+        <td class="font-bold ${recallCls(r.recall_pct)}">${r.recall_pct.toFixed(1)}%</td>
+        <td class="${hallucCls(r.hallucination_pct)}">${r.hallucination_pct.toFixed(1)}%</td>
+        <td class="text-[#4c566a]">${escapeHTML(r.filler_source)}</td>
+        <td class="text-[#4c566a]">${r.created_at ? r.created_at.slice(0, 16) : ''}</td>
+        <td><button onclick="event.stopPropagation(); deleteHallucinationRun(${r.id})" class="btn btn-ghost btn-xs text-[#bf616a] p-1"><i class="fa-solid fa-trash-can text-[9px]"></i></button></td>
+      </tr>`;
+  };
+
+  let rows = '';
+  groupList.forEach((group, gIdx) => {
+    const [latest, ...older] = group;
+    rows += hallucRow(latest, true, gIdx, older.length > 0);
+    if (older.length > 0) {
+      rows += `
+        <tr id="halluc-hist-group-${gIdx}" class="hidden">
+          <td colspan="8" class="p-0 border-b border-[#4c566a]/20">
+            <table class="table table-xs w-full font-mono text-[10px]">
+              <tbody class="bg-[#242933]/50">
+                ${older.map(r => hallucRow(r, false, gIdx, false)).join('')}
+              </tbody>
+            </table>
+          </td>
+        </tr>`;
+    }
+  });
+
   el.innerHTML = `
     <table class="table table-xs w-full font-mono text-[10px]">
       <thead>
@@ -9309,23 +9409,17 @@ function renderHallucinationHistory() {
           <th>Recall</th><th>Hallucinations</th><th>Filler</th><th>Date</th><th></th>
         </tr>
       </thead>
-      <tbody>
-        ${hallucinationRuns.map(r => `
-          <tr class="hover:bg-[#3b4252]/30 cursor-pointer border-b border-[#4c566a]/10"
-              onclick="showHallucinationDetail(${r.id})">
-            <td class="text-[#d8dee9] font-semibold">${escapeHTML(r.model_name)}</td>
-            <td class="text-[#4c566a]">${escapeHTML(r.server_name || '—')}</td>
-            <td class="text-[#88c0d0]">${r.max_context_k >= 1024 ? r.max_context_k/1024 + 'M' : r.max_context_k + 'k'}</td>
-            <td class="font-bold ${r.recall_pct >= 80 ? 'text-[#a3be8c]' : r.recall_pct >= 50 ? 'text-[#ebcb8b]' : 'text-[#bf616a]'}">${r.recall_pct.toFixed(1)}%</td>
-            <td class="${r.hallucination_pct > 30 ? 'text-[#bf616a]' : r.hallucination_pct > 10 ? 'text-[#d08770]' : 'text-[#a3be8c]'}">${r.hallucination_pct.toFixed(1)}%</td>
-            <td class="text-[#4c566a]">${escapeHTML(r.filler_source)}</td>
-            <td class="text-[#4c566a]">${r.created_at ? r.created_at.slice(0,16) : ''}</td>
-            <td><button onclick="event.stopPropagation(); deleteHallucinationRun(${r.id})" class="btn btn-ghost btn-xs text-[#bf616a] p-1"><i class="fa-solid fa-trash-can text-[9px]"></i></button></td>
-          </tr>
-        `).join('')}
-      </tbody>
+      <tbody>${rows}</tbody>
     </table>
   `;
+}
+
+function toggleHallucHistGroup(gIdx) {
+  const row = document.getElementById(`halluc-hist-group-${gIdx}`);
+  const icon = document.getElementById(`halluc-grp-icon-${gIdx}`);
+  if (!row) return;
+  const nowHidden = row.classList.toggle('hidden');
+  if (icon) icon.className = `fa-solid fa-chevron-${nowHidden ? 'right' : 'down'} text-[8px]`;
 }
 
 function showHallucinationDetail(id) {
