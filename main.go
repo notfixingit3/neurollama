@@ -3118,7 +3118,7 @@ var codeBenchTasks = []struct {
 	},
 	{
 		Lang: "c", Label: "C", Task: "array stack",
-		Prompt: `Write C code for a fixed-size stack (max 64 elements) using an array: a Stack struct with an int data[64] array and an int top field; and three functions: void push(Stack* s, int v), int pop(Stack* s, int* out), int is_empty(Stack* s). Include only the struct and functions, no main, no explanation.`,
+		Prompt: `Write C code (C99) for a fixed-size stack using an array. Use typedef struct { int data[64]; int top; } Stack; and three functions: void push(Stack* s, int v), int pop(Stack* s, int* out), int is_empty(Stack* s). Use typedef struct so Stack can be used without the struct keyword. Include only the typedef and functions, no main, no explanation.`,
 	},
 	{
 		Lang: "sql", Label: "SQL", Task: "top customers by value",
@@ -3824,7 +3824,7 @@ func checkCodeSyntax(lang, code string) (bool, string) {
 			return true, "check unavailable"
 		}
 		defer cleanup()
-		return runCmd(10*time.Second, compiler, "-fsyntax-only", "-x", "c", path)
+		return runCmd(10*time.Second, compiler, "-fsyntax-only", "-std=c99", "-x", "c", path)
 
 	case "sql":
 		if _, lookErr := exec.LookPath("sqlfluff"); lookErr != nil {
