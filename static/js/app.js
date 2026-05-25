@@ -9255,22 +9255,26 @@ function renderLangLeaderboard() {
         <div>${right.map(l => langRow(l, node)).join('')}</div>
       </div>`;
   } else {
-    // Multi-node: lang col + one sub-section per node
+    // Multi-node: flat CSS grid — lang col + 3 medal cols per node.
+    // Flat (no nested grids) so every cell sits in the same grid and columns
+    // align perfectly across all rows. Node headers span 3 medal columns each.
+    const colTemplate = `70px ${nodes.map(() => '1fr 1fr 1fr').join(' ')}`;
     el.innerHTML = `
-      <div style="display:grid;grid-template-columns:6rem ${nodes.map(()=>'1fr').join(' ')};gap:2px 12px;align-items:start;">
+      <div style="display:grid;grid-template-columns:${colTemplate};gap:1px 4px;align-items:center;">
         <div></div>
-        ${nodes.map(n => `<div class="text-[8px] font-tech uppercase text-[#88c0d0] tracking-wider pb-1">${escapeHTML(n)}</div>`).join('')}
+        ${nodes.map(n => `
+          <div style="grid-column:span 3" class="text-[8px] font-tech uppercase text-[#88c0d0] tracking-wider pb-1 border-b border-[#4c566a]/30 mb-1">${escapeHTML(n)}</div>
+        `).join('')}
         ${activeLangs.map(lang => {
           const meta = langMeta[lang] || { icon: '', label: lang };
           return `
-            <div class="flex items-center gap-1 py-0.5 text-[9px] font-mono text-[#d8dee9] font-semibold">
-              <i class="${meta.icon} text-[#88c0d0] text-[8px] shrink-0"></i>${meta.label}
-            </div>
-            ${nodes.map(node => {
+            <span class="flex items-center gap-1 text-[9px] font-mono text-[#d8dee9] font-semibold overflow-hidden py-0.5">
+              <i class="${meta.icon} text-[#88c0d0] text-[8px] shrink-0"></i>
+              <span class="truncate">${meta.label}</span>
+            </span>
+            ${nodes.flatMap(node => {
               const arr = top3[lang]?.[node] || [];
-              return `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0 3px;" class="py-0.5">
-                ${[0,1,2].map(i => medalCell(arr, i)).join('')}
-              </div>`;
+              return [0,1,2].map(i => medalCell(arr, i));
             }).join('')}`;
         }).join('')}
       </div>`;
