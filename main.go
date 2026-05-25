@@ -3556,8 +3556,13 @@ func checkCodeSyntax(lang, code string) (bool, string) {
 
 	switch lang {
 	case "go":
-		// Use go/parser in-process — no temp file, no subprocess
-		_, parseErr := goparser.ParseFile(token.NewFileSet(), "", code, goparser.AllErrors)
+		// go/parser requires a package clause; prepend one if the model omitted it
+		// (prompts ask for a function, not a full file)
+		src := code
+		if !strings.HasPrefix(strings.TrimSpace(src), "package ") {
+			src = "package main\n" + src
+		}
+		_, parseErr := goparser.ParseFile(token.NewFileSet(), "", src, goparser.AllErrors)
 		if parseErr != nil {
 			return false, parseErr.Error()
 		}
