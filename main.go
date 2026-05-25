@@ -3661,7 +3661,7 @@ func checkCodeSyntax(lang, code string) (bool, string) {
 }
 
 // runCodeBenchmarkRun tests a list of languages, returning per-language results.
-func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judgeModel string, langs []string, logFunc func(string)) ([]map[string]interface{}, error) {
+func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judgeModel string, langs []string, logFunc func(string), debug bool) ([]map[string]interface{}, error) {
 	// Build a lookup map for the requested languages
 	taskMap := make(map[string]struct{ Label, Task, Prompt string })
 	for _, t := range codeBenchTasks {
@@ -3810,10 +3810,15 @@ func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judge
 		if jErr == nil {
 			var jRespBuilder, jThinkBuilder strings.Builder
 			jScanner := newStreamScanner(jStream)
+			firstChunk := true
 			for jScanner.Scan() {
 				line := jScanner.Bytes()
 				if len(line) == 0 {
 					continue
+				}
+				if debug && firstChunk {
+					logFunc(fmt.Sprintf("[%s] [DBG] Judge chunk[0]: %.300s", t.Label, string(line)))
+					firstChunk = false
 				}
 				var chunk struct {
 					Response string `json:"response"`
@@ -3828,6 +3833,9 @@ func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judge
 
 			respStr  := strings.TrimSpace(jRespBuilder.String())
 			thinkStr := strings.TrimSpace(jThinkBuilder.String())
+			if debug {
+				logFunc(fmt.Sprintf("[%s] [DBG] Judge: resp=%dB think=%dB | %.120s", t.Label, len(respStr), len(thinkStr), respStr))
+			}
 
 			// Try each source in priority order: response-only, thinking-only, combined.
 			// For each candidate: strip think-tags, find the last valid {...} JSON block.
@@ -3935,6 +3943,7 @@ func runCodeBenchmarkSSEHandler(c *gin.Context) {
 	client := NewOllamaClient(activeSrv)
 	ctx := c.Request.Context()
 	ollamaVer, _, _ := client.CheckStatus()
+	debug := c.Query("debug") == "true"
 
 	LogActivity("benchmark", fmt.Sprintf("Code benchmark started: %s (%d languages)", model, len(langs)))
 
@@ -3951,9 +3960,12 @@ func runCodeBenchmarkSSEHandler(c *gin.Context) {
 			c.Writer.Flush()
 		}
 
+		if debug {
+			emit("[DBG] Debug mode enabled")
+		}
 		emit(fmt.Sprintf("Starting code benchmark: %s | %d languages | judge: %s", model, len(langs), judgeModel))
 
-		results, runErr := runCodeBenchmarkRun(ctx, client, model, judgeModel, langs, emit)
+		results, runErr := runCodeBenchmarkRun(ctx, client, model, judgeModel, langs, emit, debug)
 		if runErr != nil {
 			c.SSEvent("error", runErr.Error())
 			c.Writer.Flush()

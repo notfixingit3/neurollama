@@ -8822,6 +8822,24 @@ const CODE_LANGS = [
 
 let codeBenchRuns = [];
 let codeBenchEventSource = null;
+let codeBenchDebug = false;
+let hallucDebug = false;
+
+function toggleBenchDebug(type) {
+  if (type === 'code') {
+    codeBenchDebug = !codeBenchDebug;
+    const btn = document.getElementById('code-debug-btn');
+    if (btn) btn.classList.toggle('text-[#ebcb8b]', codeBenchDebug);
+    if (btn) btn.classList.toggle('text-[#4c566a]', !codeBenchDebug);
+    showToast('Code benchmark debug ' + (codeBenchDebug ? 'ON' : 'OFF'), codeBenchDebug ? 'warning' : 'info');
+  } else {
+    hallucDebug = !hallucDebug;
+    const btn = document.getElementById('halluc-debug-btn');
+    if (btn) btn.classList.toggle('text-[#ebcb8b]', hallucDebug);
+    if (btn) btn.classList.toggle('text-[#4c566a]', !hallucDebug);
+    showToast('Hallucination debug ' + (hallucDebug ? 'ON' : 'OFF'), hallucDebug ? 'warning' : 'info');
+  }
+}
 let selectedCodeRunId = null;
 
 function initCodeBenchLangGrid() {
@@ -8890,6 +8908,7 @@ function startCodeBenchmark() {
   appendCodeConsole('Connecting to server…');
 
   const params = new URLSearchParams({ model, langs: langs.join(','), judge_model: judgeModel });
+  if (codeBenchDebug) params.set('debug', 'true');
   codeBenchEventSource = new EventSource(`/api/benchmarks/code/run?${params}`);
 
   const codeBenchDone = () => {
@@ -8996,14 +9015,16 @@ async function fetchCodeBenchRuns() {
   }
 }
 
+const MEDAL = ['🥇','🥈','🥉'];
+
 function renderLangLeaderboard() {
   const panel = document.getElementById('code-lang-leaderboard-panel');
   const el    = document.getElementById('code-lang-leaderboard');
   if (!panel || !el) return;
 
-  // Build leaders[lang][node] = { model, quality_score }
-  const leaders = {};
-  const nodeSet  = new Set();
+  // Build top3[lang][node] = [{model, quality_score}, …] sorted desc, max 3
+  const top3   = {};
+  const nodeSet = new Set();
 
   codeBenchRuns.forEach(run => {
     const node = run.server_name || '(local)';
@@ -9012,79 +9033,114 @@ function renderLangLeaderboard() {
     try { langs = JSON.parse(run.extra_json).languages || []; } catch {}
     langs.forEach(l => {
       if (!l.lang) return;
-      if (!leaders[l.lang]) leaders[l.lang] = {};
-      const cur = leaders[l.lang][node];
-      if (!cur || (l.quality_score || 0) > cur.quality_score) {
-        leaders[l.lang][node] = { model: run.model_name, quality_score: l.quality_score || 0 };
+      if (!top3[l.lang]) top3[l.lang] = {};
+      if (!top3[l.lang][node]) top3[l.lang][node] = [];
+      const arr = top3[l.lang][node];
+      const q = l.quality_score || 0;
+      // Insert in sorted order, keep top 3 unique models
+      if (!arr.find(e => e.model === run.model_name)) {
+        arr.push({ model: run.model_name, quality_score: q });
+        arr.sort((a, b) => b.quality_score - a.quality_score);
+        if (arr.length > 3) arr.pop();
+      } else {
+        // Update if this run scored higher
+        const idx = arr.findIndex(e => e.model === run.model_name);
+        if (q > arr[idx].quality_score) {
+          arr[idx].quality_score = q;
+          arr.sort((a, b) => b.quality_score - a.quality_score);
+        }
       }
     });
   });
 
-  if (Object.keys(leaders).length === 0) {
-    panel.classList.add('hidden');
-    return;
-  }
-
+  if (Object.keys(top3).length === 0) { panel.classList.add('hidden'); return; }
   panel.classList.remove('hidden');
   const nodes = [...nodeSet].sort();
-
-  const qColor = q => q >= 8 ? '#a3be8c' : q >= 6 ? '#ebcb8b' : q >= 4 ? '#d08770' : q > 0 ? '#bf616a' : '#4c566a';
-
-  // Canonical lang order matches CODE_LANGS
-  const langOrder = ['python','go','javascript','typescript','node','bash','sh','rust','php','ruby','c','sql'];
-  const langLabels = { python:'Python', go:'Go', javascript:'JavaScript', typescript:'TypeScript',
-    node:'Node.js', bash:'Bash', sh:'sh (POSIX)', rust:'Rust', php:'PHP', ruby:'Ruby', c:'C', sql:'SQL' };
-  const activeLangs = langOrder.filter(l => leaders[l]);
 
   const badgeCls = q => q >= 8 ? 'bg-[#a3be8c]/20 text-[#a3be8c] border-[#a3be8c]/40'
                        : q >= 6 ? 'bg-[#ebcb8b]/20 text-[#ebcb8b] border-[#ebcb8b]/40'
                        : q >= 4 ? 'bg-[#d08770]/20 text-[#d08770] border-[#d08770]/40'
                        : q > 0  ? 'bg-[#bf616a]/20 text-[#bf616a] border-[#bf616a]/40'
                        :          'bg-[#4c566a]/20 text-[#4c566a] border-[#4c566a]/30';
+  const modelShort = m => { const s = m.replace(/:latest$/, ''); return s.length > 14 ? s.slice(0,12)+'…' : s; };
 
-  const modelShort = m => {
-    const s = m.replace(/:latest$/, '');
-    return s.length > 14 ? s.slice(0, 12) + '…' : s;
+  const langOrder  = ['python','go','javascript','typescript','node','bash','sh','rust','php','ruby','c','sql'];
+  const langLabels = { python:'Python', go:'Go', javascript:'JavaScript', typescript:'TypeScript',
+    node:'Node.js', bash:'Bash', sh:'sh (POSIX)', rust:'Rust', php:'PHP', ruby:'Ruby', c:'C', sql:'SQL' };
+  const activeLangs = langOrder.filter(l => top3[l]);
+
+  const renderEntries = (arr) => {
+    if (!arr || arr.length === 0) return `<span class="text-[8px] text-[#4c566a]">—</span>`;
+    return arr.map((e, i) => `
+      <div class="flex items-center gap-1 py-px">
+        <span class="text-[9px] shrink-0">${MEDAL[i]}</span>
+        <span class="inline-flex px-1.5 py-px rounded border text-[8px] font-bold font-mono shrink-0 ${badgeCls(e.quality_score)}">${e.quality_score.toFixed(1)}</span>
+        <span class="text-[8px] font-mono text-[#8fbcbb] truncate" title="${escapeHTML(e.model)}">${escapeHTML(modelShort(e.model))}</span>
+      </div>`).join('');
   };
 
   if (nodes.length === 1) {
-    // Single node: 3-col grid, one cell per language — no wasted horizontal space
     const node = nodes[0];
     el.innerHTML = `
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px 12px;">
-        ${activeLangs.map(lang => {
-          const entry = leaders[lang]?.[node];
-          if (!entry) return `<div class="flex items-center gap-1.5 py-0.5 opacity-40">
-            <span class="text-[9px] font-mono text-[#d8dee9] w-20 shrink-0">${langLabels[lang]}</span>
-            <span class="text-[8px] text-[#4c566a]">—</span>
-          </div>`;
-          const q = entry.quality_score;
-          return `<div class="flex items-center gap-1.5 py-0.5">
-            <span class="text-[9px] font-mono text-[#d8dee9] w-20 shrink-0">${langLabels[lang]}</span>
-            <span class="inline-flex px-1.5 py-px rounded border text-[8px] font-bold font-mono shrink-0 ${badgeCls(q)}">${q.toFixed(1)}</span>
-            <span class="text-[8px] font-mono text-[#8fbcbb] truncate" title="${escapeHTML(entry.model)}">${escapeHTML(modelShort(entry.model))}</span>
-          </div>`;
-        }).join('')}
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px 16px;">
+        ${activeLangs.map(lang => `
+          <div class="flex flex-col py-0.5">
+            <div class="text-[9px] font-mono text-[#d8dee9] font-semibold mb-0.5">${langLabels[lang]}</div>
+            ${renderEntries(top3[lang]?.[node])}
+          </div>`).join('')}
       </div>`;
   } else {
-    // Multi-node: header row + lang rows, columns sized to content
     el.innerHTML = `
-      <div style="display:grid;grid-template-columns:5rem ${nodes.map(() => 'auto').join(' ')};gap:1px 12px;align-items:center;">
+      <div style="display:grid;grid-template-columns:5rem ${nodes.map(()=>'1fr').join(' ')};gap:4px 12px;align-items:start;">
         <div></div>
-        ${nodes.map(n => `<div class="text-[8px] font-tech uppercase text-[#88c0d0] tracking-wider pb-1 truncate" title="${escapeHTML(n)}">${escapeHTML(n)}</div>`).join('')}
+        ${nodes.map(n => `<div class="text-[8px] font-tech uppercase text-[#88c0d0] tracking-wider pb-1">${escapeHTML(n)}</div>`).join('')}
         ${activeLangs.map(lang => `
           <div class="text-[9px] font-mono text-[#d8dee9] font-semibold py-0.5">${langLabels[lang]}</div>
-          ${nodes.map(node => {
-            const entry = leaders[lang]?.[node];
-            if (!entry) return `<div class="text-[8px] text-[#4c566a] py-0.5">—</div>`;
-            const q = entry.quality_score;
-            return `<div class="flex items-center gap-1.5 py-0.5">
-              <span class="inline-flex px-1.5 py-px rounded border text-[8px] font-bold font-mono shrink-0 ${badgeCls(q)}">${q.toFixed(1)}</span>
-              <span class="text-[8px] font-mono text-[#8fbcbb] truncate" title="${escapeHTML(entry.model)}">${escapeHTML(modelShort(entry.model))}</span>
-            </div>`;
-          }).join('')}`).join('')}
+          ${nodes.map(node => `<div class="flex flex-col">${renderEntries(top3[lang]?.[node])}</div>`).join('')}`).join('')}
       </div>`;
   }
+}
+
+function renderHallucLeaderboard() {
+  const panel = document.getElementById('halluc-leaderboard-panel');
+  const el    = document.getElementById('halluc-leaderboard');
+  if (!panel || !el) return;
+
+  if (!hallucinationRuns || hallucinationRuns.length === 0) {
+    panel.classList.add('hidden');
+    return;
+  }
+
+  // Best recall per model+node combo, keep global top 3
+  const byModel = new Map();
+  hallucinationRuns.forEach(r => {
+    const key = `${r.model_name}|||${r.server_name || '(local)'}`;
+    const cur = byModel.get(key);
+    if (!cur || r.recall_pct > cur.recall_pct) {
+      byModel.set(key, { model: r.model_name, node: r.server_name || '(local)',
+        recall_pct: r.recall_pct, hallucination_pct: r.hallucination_pct, max_context_k: r.max_context_k });
+    }
+  });
+
+  const top3h = [...byModel.values()].sort((a, b) => b.recall_pct - a.recall_pct).slice(0, 3);
+  if (top3h.length === 0) { panel.classList.add('hidden'); return; }
+  panel.classList.remove('hidden');
+
+  const fmtK = k => k >= 1024 ? k/1024+'M' : k+'k';
+  const recallCls = p => p >= 80 ? 'text-[#a3be8c]' : p >= 50 ? 'text-[#ebcb8b]' : 'text-[#bf616a]';
+  const modelShort = m => { const s = m.replace(/:latest$/, ''); return s.length > 18 ? s.slice(0,16)+'…' : s; };
+
+  el.innerHTML = `
+    <div class="flex flex-wrap gap-x-6 gap-y-1">
+      ${top3h.map((e, i) => `
+        <div class="flex items-center gap-2 py-0.5">
+          <span class="text-[11px] shrink-0">${MEDAL[i]}</span>
+          <span class="font-bold text-[9px] font-mono ${recallCls(e.recall_pct)}">${e.recall_pct.toFixed(1)}%</span>
+          <span class="text-[8px] font-mono text-[#d8dee9]">${escapeHTML(modelShort(e.model))}</span>
+          <span class="text-[8px] font-mono text-[#4c566a]">${escapeHTML(e.node)}</span>
+          <span class="text-[8px] font-mono text-[#88c0d0]">${fmtK(e.max_context_k)}</span>
+        </div>`).join('')}
+    </div>`;
 }
 
 function renderCodeBenchResults() {
@@ -9308,6 +9364,7 @@ function startHallucinationTest() {
 
   const params = new URLSearchParams({ model, max_context_k: maxK });
   if (customFiller) params.set('custom_filler', customFiller);
+  if (hallucDebug) params.set('debug', 'true');
 
   hallucinationEventSource = new EventSource(`/api/benchmarks/hallucination/run?${params}`);
 
@@ -9423,6 +9480,7 @@ async function fetchHallucinationRuns() {
     if (!res.ok) throw new Error(res.statusText);
     hallucinationRuns = await res.json();
     renderHallucinationHistory();
+    renderHallucLeaderboard();
   } catch (e) {
     showToast('Failed to load hallucination runs: ' + e.message, 'error');
   }

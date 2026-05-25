@@ -1819,10 +1819,16 @@
               <div class="tech-panel rounded-xl p-3 flex flex-col gap-2">
                 <div class="flex items-center justify-between">
                   <h3 class="text-[10px] font-tech font-bold uppercase text-[#4c566a] tracking-wider">Console</h3>
-                  <button onclick="copyConsole('code-bench-console')" title="Copy to clipboard"
-                    class="text-[9px] font-mono text-[#4c566a] hover:text-[#88c0d0] transition-colors flex items-center gap-1">
-                    <i class="fa-regular fa-copy"></i>Copy
-                  </button>
+                  <div class="flex items-center gap-2">
+                    <button id="code-debug-btn" onclick="toggleBenchDebug('code')" title="Toggle debug logging"
+                      class="text-[9px] font-mono text-[#4c566a] hover:text-[#ebcb8b] transition-colors flex items-center gap-1">
+                      <i class="fa-solid fa-bug text-[8px]"></i>DBG
+                    </button>
+                    <button onclick="copyConsole('code-bench-console')" title="Copy to clipboard"
+                      class="text-[9px] font-mono text-[#4c566a] hover:text-[#88c0d0] transition-colors flex items-center gap-1">
+                      <i class="fa-regular fa-copy"></i>Copy
+                    </button>
+                  </div>
                 </div>
                 <div id="code-bench-console" class="font-mono text-[9px] text-[#a3be8c] overflow-y-auto h-44 space-y-0.5 leading-relaxed"></div>
               </div>
@@ -1930,6 +1936,15 @@
 
             <!-- Right: Results -->
             <div class="lg:col-span-9 flex flex-col gap-4">
+              <!-- Hallucination Leaderboard -->
+              <div id="halluc-leaderboard-panel" class="hidden tech-panel tech-header-accent rounded-xl p-3 flex flex-col gap-2">
+                <div class="flex items-center gap-2">
+                  <i class="fa-solid fa-medal text-[#ebcb8b] text-[10px]"></i>
+                  <h2 class="text-[10px] font-tech font-bold uppercase tracking-wider text-[#4c566a]">Top Models by Recall</h2>
+                </div>
+                <div id="halluc-leaderboard"></div>
+              </div>
+
               <!-- Live heat map (shown during and after run) -->
               <div id="halluc-heatmap-panel" class="hidden tech-panel tech-header-accent rounded-xl p-4 flex flex-col gap-4">
                 <div class="flex items-center justify-between">
@@ -1951,10 +1966,16 @@
               <div class="tech-panel rounded-xl p-3 flex flex-col gap-2">
                 <div class="flex items-center justify-between">
                   <h3 class="text-[10px] font-tech font-bold uppercase text-[#4c566a] tracking-wider">Console</h3>
-                  <button onclick="copyConsole('halluc-console')" title="Copy to clipboard"
-                    class="text-[9px] font-mono text-[#4c566a] hover:text-[#88c0d0] transition-colors flex items-center gap-1">
-                    <i class="fa-regular fa-copy"></i>Copy
-                  </button>
+                  <div class="flex items-center gap-2">
+                    <button id="halluc-debug-btn" onclick="toggleBenchDebug('halluc')" title="Toggle debug logging"
+                      class="text-[9px] font-mono text-[#4c566a] hover:text-[#ebcb8b] transition-colors flex items-center gap-1">
+                      <i class="fa-solid fa-bug text-[8px]"></i>DBG
+                    </button>
+                    <button onclick="copyConsole('halluc-console')" title="Copy to clipboard"
+                      class="text-[9px] font-mono text-[#4c566a] hover:text-[#88c0d0] transition-colors flex items-center gap-1">
+                      <i class="fa-regular fa-copy"></i>Copy
+                    </button>
+                  </div>
                 </div>
                 <div id="halluc-console" class="font-mono text-[9px] text-[#a3be8c] overflow-y-auto h-44 space-y-0.5 leading-relaxed"></div>
               </div>
