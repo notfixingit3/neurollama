@@ -3797,8 +3797,16 @@ func checkCodeSyntax(lang, code string) (bool, string) {
 			return true, "check unavailable"
 		}
 		defer cleanup()
-		// --edition 2021 --crate-type lib avoids needing a main() fn
-		return runCmd(20*time.Second, "rustc", "--edition", "2021", "--crate-type", "lib", "--emit=metadata", "-o", os.DevNull, path)
+		// Use a real temp dir for --out-dir; /dev/null causes rustc to try to
+		// create temp files in /dev/ which is sandboxed on macOS. -A dead_code
+		// suppresses "function never used" warnings — library code won't have main().
+		outDir, dirErr := os.MkdirTemp("", "neurollama_rustc_*")
+		if dirErr != nil {
+			return true, "check unavailable"
+		}
+		defer func() { _ = os.RemoveAll(outDir) }()
+		return runCmd(20*time.Second, "rustc", "--edition", "2021", "--crate-type", "lib", "--emit=metadata",
+			"-A", "dead_code", "-A", "unused", "--out-dir", outDir, path)
 
 	case "c":
 		compiler := ""
@@ -3857,8 +3865,8 @@ var syntaxCheckerTools = []struct {
 
 // checkerAvailable reports whether the syntax checker for a given language is present.
 func checkerAvailable(lang string) bool {
-	if lang == "go" || lang == "sql" {
-		return lang == "go" // go is always available (in-process); sql never is
+	if lang == "go" {
+		return true // always available — checked in-process
 	}
 	for _, t := range syntaxCheckerTools {
 		if t.Lang == lang {
@@ -3896,8 +3904,6 @@ func codeSyntaxCheckersHandler(c *gin.Context) {
 		switch t.Lang {
 		case "go":
 			avail = true
-		case "sql":
-			avail = false
 		default:
 			if t.Binary != "" {
 				_, err := exec.LookPath(t.Binary)
@@ -3916,12 +3922,18 @@ func codeSyntaxCheckersHandler(c *gin.Context) {
 
 // runCodeBenchmarkRun tests a list of languages, returning per-language results.
 func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judgeModel string, langs []string, numCtx int, logFunc func(string), debug bool) ([]map[string]interface{}, error) {
+	// Normalise judgeModel: the SSE handler passes "same" as sentinel when no
+	// separate judge is chosen. Collapse it to the gen model name here so all
+	// downstream code (warmup, logging, requests) uses the real model name.
+	if judgeModel == "" || judgeModel == "same" {
+		judgeModel = model
+	}
+
 	// Warmup: load the model into VRAM and prime Metal/CUDA kernels so the
 	// cold-start latency doesn't inflate the first language's TTFT.
 	warmupModel(ctx, client, model, numCtx, logFunc)
-	// If a separate judge model is configured, warm it up too so judge scoring
-	// on the first language isn't artificially slow.
-	if judgeModel != "" && judgeModel != model {
+	// Warm up the judge model separately only if it differs from the gen model.
+	if judgeModel != model {
 		warmupModel(ctx, client, judgeModel, numCtx, logFunc)
 	}
 
