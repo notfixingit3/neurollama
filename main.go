@@ -3118,7 +3118,7 @@ var codeBenchTasks = []struct {
 	},
 	{
 		Lang: "c", Label: "C", Task: "array stack",
-		Prompt: `Write C code (C99) for a fixed-size stack using an array. Use typedef struct { int data[64]; int top; } Stack; and three functions: void push(Stack* s, int v), int pop(Stack* s, int* out), int is_empty(Stack* s). Use typedef struct so Stack can be used without the struct keyword. Include only the typedef and functions, no main, no explanation.`,
+		Prompt: `Write C code (C99) for a fixed-size stack using an array. Use typedef struct { int data[64]; int top; } Stack; and three functions: void push(Stack* s, int v), int pop(Stack* s, int* out), int is_empty(Stack* s). Use typedef struct so Stack can be used without the struct keyword. Do not use printf or any I/O — use return values only for errors. Include only the typedef and functions, no includes, no main, no explanation.`,
 	},
 	{
 		Lang: "sql", Label: "SQL", Task: "top customers by value",
@@ -3819,7 +3819,11 @@ func checkCodeSyntax(lang, code string) (bool, string) {
 		if compiler == "" {
 			return true, "skipped"
 		}
-		path, cleanup, err := writeTemp(".c", code)
+		// Prepend common headers so models that include stdio/stdlib calls don't
+		// get a false fail for "undeclared library function". Real syntax errors
+		// (wrong types, bad grammar, etc.) still surface correctly.
+		preamble := "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n"
+		path, cleanup, err := writeTemp(".c", preamble+code)
 		if err != nil {
 			return true, "check unavailable"
 		}
