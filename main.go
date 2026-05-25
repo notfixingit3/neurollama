@@ -31,7 +31,7 @@ import (
 	goPDF "github.com/ledongthuc/pdf"
 )
 
-const appVersion = "v0.2.14"
+const appVersion = "v0.2.15"
 
 var (
 	appStartTime = time.Now()

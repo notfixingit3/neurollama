@@ -543,11 +543,15 @@ async function init() {
     'benchmark-model-select',
     'optimizer-model-select',
     'rag-model-select',
+    'code-bench-model',
+    'code-judge-model-select',
+    'halluc-model',
   ].forEach(id => {
     const el = document.getElementById(id);
     if (el) makeSearchableSelect(el);
   });
 
+  initCodeBenchLangGrid();
   switchWorkspace(savedWorkspace);
 }
 
@@ -1184,6 +1188,9 @@ function populateModelDropdowns() {
   const optimizerSelect = document.getElementById('optimizer-model-select');
   const ragSelect = document.getElementById('rag-model-select');
   const chatRagSelect = document.getElementById('chat-rag-model-select');
+  const codeBenchModel = document.getElementById('code-bench-model');
+  const codeJudgeModel = document.getElementById('code-judge-model-select');
+  const hallucModel = document.getElementById('halluc-model');
 
   // Filter out models that might not have values
   const options = models.map(m => {
@@ -1200,6 +1207,9 @@ function populateModelDropdowns() {
     if (optimizerSelect) optimizerSelect.innerHTML = noModels;
     if (ragSelect) ragSelect.innerHTML = noModels;
     if (chatRagSelect) chatRagSelect.innerHTML = noModels;
+    if (codeBenchModel) codeBenchModel.innerHTML = noModels;
+    if (codeJudgeModel) codeJudgeModel.innerHTML = noModels;
+    if (hallucModel) hallucModel.innerHTML = noModels;
   } else {
     if (chatSelect) {
       const currentSelected = chatSelect.value || getPref('neurollama-chat-model') || '';
@@ -1243,6 +1253,21 @@ function populateModelDropdowns() {
       if (currentSelected && completionSelect.querySelector(`option[value="${CSS.escape(currentSelected)}"]`)) {
         completionSelect.value = currentSelected;
       }
+    }
+    if (codeBenchModel) {
+      const cur = codeBenchModel.value;
+      codeBenchModel.innerHTML = options;
+      if (cur && codeBenchModel.querySelector(`option[value="${CSS.escape(cur)}"]`)) codeBenchModel.value = cur;
+    }
+    if (codeJudgeModel) {
+      const cur = codeJudgeModel.value;
+      codeJudgeModel.innerHTML = options;
+      if (cur && codeJudgeModel.querySelector(`option[value="${CSS.escape(cur)}"]`)) codeJudgeModel.value = cur;
+    }
+    if (hallucModel) {
+      const cur = hallucModel.value;
+      hallucModel.innerHTML = options;
+      if (cur && hallucModel.querySelector(`option[value="${CSS.escape(cur)}"]`)) hallucModel.value = cur;
     }
   }
 }
@@ -7613,8 +7638,8 @@ function switchBenchmarkSubtab(tab) {
   });
   if (tab === 'optimizer') loadOptimizerHistory();
   if (tab === 'nodevnode') loadNvnPanel();
-  if (tab === 'code') { initCodeBenchLangGrid(); populateCodeBenchModelSelects(); fetchCodeBenchRuns(); }
-  if (tab === 'hallucination') { populateCodeBenchModelSelects(); fetchHallucinationRuns(); }
+  if (tab === 'code') { initCodeBenchLangGrid(); fetchCodeBenchRuns(); }
+  if (tab === 'hallucination') { fetchHallucinationRuns(); }
 }
 
 // ── Node vs Node ─────────────────────────────────────────────────────────────
@@ -8801,7 +8826,7 @@ let selectedCodeRunId = null;
 
 function initCodeBenchLangGrid() {
   const grid = document.getElementById('code-bench-lang-grid');
-  if (!grid) return;
+  if (!grid || grid.children.length > 0) return;
   grid.innerHTML = CODE_LANGS.map(l => `
     <label class="flex items-center gap-1.5 cursor-pointer group">
       <input type="checkbox" class="code-lang-cb checkbox checkbox-xs border-[#4c566a]" value="${l.lang}" checked>
@@ -8820,9 +8845,9 @@ function toggleAllCodeLangs() {
 
 function toggleJudgeModelSelect() {
   const cb = document.getElementById('code-judge-different');
-  const sel = document.getElementById('code-judge-model-select');
-  if (!cb || !sel) return;
-  sel.classList.toggle('hidden', !cb.checked);
+  const wrap = document.getElementById('code-judge-model-wrap');
+  if (!cb || !wrap) return;
+  wrap.classList.toggle('hidden', !cb.checked);
 }
 
 function populateCodeBenchModelSelects() {
@@ -8879,10 +8904,15 @@ function startCodeBenchmark() {
     codeBenchEventSource?.close();
     codeBenchEventSource = null;
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-play text-[10px]"></i>RUN CODE BENCHMARK'; }
+    try {
+      const d = JSON.parse(e.data);
+      appendCodeConsole(`✓ Done — Quality: ${(d.avg_quality_score || 0).toFixed(1)}/10 | TPS: ${(d.avg_tps || 0).toFixed(1)} | Score: ${d.overall_score} | Syntax: ${d.langs_passing_syntax}/${d.langs_total}`);
+    } catch { appendCodeConsole('✓ Benchmark complete.'); }
     await fetchCodeBenchRuns();
   });
 
   codeBenchEventSource.onerror = () => {
+    appendCodeConsole('✗ Connection lost — benchmark may have completed or timed out.');
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-play text-[10px]"></i>RUN CODE BENCHMARK'; }
     codeBenchEventSource?.close();
   };
@@ -8890,6 +8920,15 @@ function startCodeBenchmark() {
 
 function appendCodeConsole(msg) {
   const el = document.getElementById('code-bench-console');
+  if (!el) return;
+  const div = document.createElement('div');
+  div.textContent = msg;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+function appendHallucConsole(msg) {
+  const el = document.getElementById('halluc-console');
   if (!el) return;
   const div = document.createElement('div');
   div.textContent = msg;
@@ -9099,14 +9138,33 @@ function startHallucinationTest() {
     } catch { /* ignore */ }
   });
 
+  hallucinationEventSource.addEventListener('error', e => {
+    appendHallucConsole('ERROR: ' + e.data);
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-play text-[10px]"></i>RUN HALLUCINATION TEST'; }
+    hallucinationEventSource?.close();
+  });
+
   hallucinationEventSource.addEventListener('done', async e => {
     hallucinationEventSource?.close();
     hallucinationEventSource = null;
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-play text-[10px]"></i>RUN HALLUCINATION TEST'; }
+    try {
+      const d = JSON.parse(e.data);
+      appendHallucConsole(`✓ Done — Recall: ${(d.recall_pct || 0).toFixed(1)}% | Hallucinations: ${(d.hallucination_pct || 0).toFixed(1)}%`);
+      const statsEl = document.getElementById('halluc-stats');
+      if (statsEl) {
+        statsEl.innerHTML = `
+          <span class="text-[#a3be8c]">Recall: ${(d.recall_pct || 0).toFixed(1)}%</span>
+          <span class="text-[#bf616a]">Hallucinations: ${(d.hallucination_pct || 0).toFixed(1)}%</span>
+          <span class="text-[#8fbcbb]">Model: ${escapeHTML(d.model_name || '')}</span>
+        `;
+      }
+    } catch { appendHallucConsole('✓ Test complete.'); }
     await fetchHallucinationRuns();
   });
 
   hallucinationEventSource.onerror = () => {
+    appendHallucConsole('✗ Connection lost — test may have completed or timed out.');
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-play text-[10px]"></i>RUN HALLUCINATION TEST'; }
     hallucinationEventSource?.close();
   };

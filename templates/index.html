@@ -1788,7 +1788,9 @@
                     <input type="checkbox" id="code-judge-different" class="checkbox checkbox-xs border-[#4c566a]" onchange="toggleJudgeModelSelect()">
                     <span class="text-[10px] font-mono text-[#d8dee9]">Use different model as judge</span>
                   </div>
-                  <select id="code-judge-model-select" class="hidden select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full"></select>
+                  <div id="code-judge-model-wrap" class="hidden">
+                    <select id="code-judge-model-select" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full"></select>
+                  </div>
                 </div>
 
                 <button id="code-bench-run-btn" onclick="startCodeBenchmark()" class="btn btn-sm btn-outline btn-info font-tech tracking-wider w-full gap-2 hover:tech-glow-blue">
