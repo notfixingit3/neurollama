@@ -3810,16 +3810,10 @@ func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judge
 		if jErr == nil {
 			var jRespBuilder, jThinkBuilder strings.Builder
 			jScanner := newStreamScanner(jStream)
-			firstChunk := true
 			for jScanner.Scan() {
 				line := jScanner.Bytes()
 				if len(line) == 0 {
 					continue
-				}
-				// Log the very first chunk raw so we can see what fields the model uses
-				if firstChunk {
-					logFunc(fmt.Sprintf("[%s] Judge chunk[0] raw: %.300s", t.Label, string(line)))
-					firstChunk = false
 				}
 				var chunk struct {
 					Response string `json:"response"`
@@ -3834,7 +3828,6 @@ func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judge
 
 			respStr  := strings.TrimSpace(jRespBuilder.String())
 			thinkStr := strings.TrimSpace(jThinkBuilder.String())
-			logFunc(fmt.Sprintf("[%s] Judge raw: resp=%dB think=%dB", t.Label, len(respStr), len(thinkStr)))
 
 			// Try each source in priority order: response-only, thinking-only, combined.
 			// For each candidate: strip think-tags, find the last valid {...} JSON block.
