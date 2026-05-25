@@ -32,7 +32,7 @@ import (
 	goPDF "github.com/ledongthuc/pdf"
 )
 
-const appVersion = "v0.2.16"
+const appVersion = "v0.2.17"
 
 var (
 	appStartTime = time.Now()
@@ -3157,6 +3157,36 @@ var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 // stripANSI removes ANSI escape codes so raw checker output is readable in our console.
 func stripANSI(s string) string { return ansiRE.ReplaceAllString(s, "") }
 
+// warmupModel sends a single-token request to ensure the model is loaded into
+// VRAM and Metal/CUDA kernels are compiled before the real benchmark begins.
+// The first inference after a model load is 5-10x slower (cold-start); this
+// absorbs that cost so it doesn't skew TTFT numbers. Errors are ignored — if
+// the warmup fails the benchmark will surface the real error on its own calls.
+func warmupModel(ctx context.Context, client *OllamaClient, model string, numCtx int, logFunc func(string)) {
+	logFunc(fmt.Sprintf("Warming up %s...", model))
+	opts := map[string]interface{}{
+		"temperature": 0.0,
+		"num_predict": 1, // one token is enough to load & prime kernels
+	}
+	if numCtx > 0 {
+		opts["num_ctx"] = numCtx
+	}
+	req := GenerateRequest{
+		Model:   model,
+		Prompt:  "Hi",
+		Stream:  true,
+		Options: opts,
+	}
+	stream, err := client.StreamGenerate(ctx, req)
+	if err != nil {
+		return // best-effort; benchmark will handle real errors itself
+	}
+	defer func() { _ = stream.Close() }()
+	scanner := newStreamScanner(stream)
+	for scanner.Scan() {
+	} // drain fully so the connection is clean
+}
+
 // nodeBuiltins is the set of bare Node.js core module names that Deno requires
 // to be prefixed with "node:" (e.g. "timers" → "node:timers").
 var nodeBuiltins = map[string]bool{
@@ -3886,6 +3916,15 @@ func codeSyntaxCheckersHandler(c *gin.Context) {
 
 // runCodeBenchmarkRun tests a list of languages, returning per-language results.
 func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judgeModel string, langs []string, numCtx int, logFunc func(string), debug bool) ([]map[string]interface{}, error) {
+	// Warmup: load the model into VRAM and prime Metal/CUDA kernels so the
+	// cold-start latency doesn't inflate the first language's TTFT.
+	warmupModel(ctx, client, model, numCtx, logFunc)
+	// If a separate judge model is configured, warm it up too so judge scoring
+	// on the first language isn't artificially slow.
+	if judgeModel != "" && judgeModel != model {
+		warmupModel(ctx, client, judgeModel, numCtx, logFunc)
+	}
+
 	// Build a lookup map for the requested languages
 	taskMap := make(map[string]struct{ Label, Task, Prompt string })
 	for _, t := range codeBenchTasks {
@@ -4364,6 +4403,12 @@ func runHallucinationSSEHandler(c *gin.Context) {
 
 	LogActivity("benchmark", fmt.Sprintf("Hallucination test started: %s (max %dk, %d cells)", model, maxK, total))
 
+	// Warmup before first test cell so cold-start latency doesn't skew TTFT.
+	warmupModel(ctx, client, model, 0, func(msg string) {
+		c.SSEvent("log", msg)
+		c.Writer.Flush()
+	})
+
 	// Override buildHallucinationPrompt to use the (potentially custom) fillerUnit
 	buildPrompt := func(targetK, positionPct int) string {
 		targetChars := targetK * 1000 * 4
@@ -4672,6 +4717,12 @@ func runBenchmarkSSEHandler(c *gin.Context) {
 
 	c.Stream(func(w io.Writer) bool {
 		c.SSEvent("status", fmt.Sprintf("Initializing %s benchmark for %s...", strings.ToUpper(benchType), model))
+
+		// Warmup: one-token request to load model and prime kernels before timing starts.
+		warmupModel(ctx, client, model, 0, func(msg string) {
+			c.SSEvent("status", msg)
+			c.Writer.Flush()
+		})
 
 		var (
 			avgTtft, avgTps, avgLatency float64
