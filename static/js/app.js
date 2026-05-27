@@ -292,6 +292,59 @@ function setPref(key, val) {
 }
 // ── End preferences helpers ──────────────────────────────────────────────────
 
+// ── Theme Management ──────────────────────────────────────────────────────────
+// Maps user preference string → DaisyUI data-theme value.
+// "dark"   → "nord"  (fully styled, default)
+// "light"  → "light" (DaisyUI light; hardcoded panel colors won't change — beta)
+// "system" → auto-detect prefers-color-scheme
+
+function resolveThemePref(pref) {
+  if (pref === 'system') {
+    return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'nord';
+  }
+  return pref === 'light' ? 'light' : 'nord';
+}
+
+// applyTheme is called from radio onchange handlers and on init.
+function applyTheme(pref) {
+  document.documentElement.setAttribute('data-theme', resolveThemePref(pref));
+  localStorage.setItem('neurollama_theme', pref);
+  // Keep radio buttons in sync (in case called programmatically)
+  const radio = document.querySelector(`input[name="theme-select"][value="${pref}"]`);
+  if (radio) radio.checked = true;
+}
+
+function initTheme() {
+  // Prefer DB-persisted value (loaded by loadPreferences), fall back to localStorage
+  const pref = getPref('theme', localStorage.getItem('neurollama_theme') || 'dark');
+  applyTheme(pref);
+  // Re-apply on system preference change when "system" is selected
+  window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+    if (getPref('theme', 'dark') === 'system') applyTheme('system');
+  });
+}
+
+function togglePreferences() {
+  const panel   = document.getElementById('preferences-panel');
+  const chevron = document.getElementById('pref-chevron');
+  if (!panel) return;
+  const isOpen = !panel.classList.contains('hidden');
+  if (isOpen) {
+    closePreferences();
+  } else {
+    panel.classList.remove('hidden');
+    if (chevron) chevron.style.transform = 'rotate(180deg)';
+  }
+}
+
+function closePreferences() {
+  const panel   = document.getElementById('preferences-panel');
+  const chevron = document.getElementById('pref-chevron');
+  if (panel)   panel.classList.add('hidden');
+  if (chevron) chevron.style.transform = 'rotate(0deg)';
+}
+// ── End Theme Management ─────────────────────────────────────────────────────
+
 // Initialization
 document.addEventListener('DOMContentLoaded', () => {
   init();
@@ -302,11 +355,20 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!panel || panel.classList.contains('hidden')) return;
     if (!panel.contains(e.target) && !btn?.contains(e.target)) closeNodeSlideout();
   });
+  // Close preferences panel when clicking outside of it or its trigger button
+  document.addEventListener('click', e => {
+    const panel = document.getElementById('preferences-panel');
+    const btn   = document.getElementById('user-badge-btn');
+    if (!panel || panel.classList.contains('hidden')) return;
+    if (!panel.contains(e.target) && !btn?.contains(e.target)) closePreferences();
+  });
 });
 
 async function init() {
   // Load all user preferences from DB before restoring any state.
   await loadPreferences();
+  // Apply theme from DB pref (may override the localStorage early-apply)
+  initTheme();
 
   initAccordionRow();
   // Non-blocking: fire and forget — page renders immediately, server cards and

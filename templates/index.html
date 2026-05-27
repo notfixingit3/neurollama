@@ -15,6 +15,18 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
   <!-- PDF.js library for client-side PDF parsing (vendored locally — no CDN dependency) -->
   <script src="/static/js/pdf.min.js"></script>
+  <!-- Apply saved theme before first paint — prevents flash of wrong theme -->
+  <script>
+    (function(){
+      var t = localStorage.getItem('neurollama_theme') || 'dark';
+      document.documentElement.setAttribute('data-theme',
+        t === 'light' ? 'light'
+        : t === 'system'
+          ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'nord')
+          : 'nord'
+      );
+    })();
+  </script>
 </head>
 <body class="bg-[#2e3440] text-[#e5e9f0] h-screen overflow-hidden cyber-grid flex flex-col font-sans">
 
@@ -54,6 +66,62 @@
           <span id="global-active-server-status-indicator" class="h-2.5 w-2.5 rounded-full bg-[#bf616a] inline-block"></span>
           <span id="global-active-server-status-text" class="text-xs uppercase text-[#bf616a]">OFFLINE</span>
         </span>
+      </div>
+    </div>
+
+    <!-- User Badge (future auth placeholder, top-right) -->
+    <div class="relative mt-3 sm:mt-0">
+      <button id="user-badge-btn" onclick="togglePreferences()"
+              class="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#4c566a]/60 hover:border-[#88c0d0]/50 hover:bg-[#3b4252]/40 transition-all group"
+              title="Preferences">
+        <div class="h-7 w-7 rounded-full bg-gradient-to-br from-[#5e81ac] to-[#81a1c1] flex items-center justify-center text-[#2e3440] shrink-0">
+          <i class="fa-solid fa-user text-xs"></i>
+        </div>
+        <span class="text-[10px] font-tech text-[#88c0d0] uppercase tracking-wider hidden sm:block">GUEST</span>
+        <i id="pref-chevron" class="fa-solid fa-chevron-down text-[8px] text-[#4c566a] group-hover:text-[#88c0d0] transition-colors"></i>
+      </button>
+
+      <!-- Preferences Popover (anchored below badge, right-aligned) -->
+      <div id="preferences-panel" class="hidden absolute right-0 top-full mt-2 w-56 bg-[#242933] border border-[#4c566a]/60 rounded-xl shadow-2xl z-50 p-3">
+        <div class="text-[10px] font-tech uppercase tracking-wider text-[#4c566a] mb-3 pb-2 border-b border-[#4c566a]/30">
+          <i class="fa-solid fa-sliders mr-1"></i>Preferences
+        </div>
+
+        <!-- Theme Section -->
+        <div class="mb-3">
+          <div class="text-[10px] font-tech uppercase text-[#88c0d0] tracking-wider mb-2 flex items-center gap-1.5">
+            <i class="fa-solid fa-palette text-[9px]"></i> Theme
+          </div>
+          <div class="space-y-0.5">
+            <label class="flex items-center gap-2.5 cursor-pointer py-1.5 px-2 rounded-lg hover:bg-[#3b4252] transition-colors">
+              <input type="radio" name="theme-select" value="dark" class="radio radio-xs radio-info"
+                     onchange="applyTheme('dark'); setPref('theme','dark');" />
+              <i class="fa-solid fa-moon text-[10px] text-[#81a1c1] w-3 text-center"></i>
+              <span class="text-xs text-[#d8dee9] flex-1">Dark</span>
+              <span class="text-[9px] text-[#4c566a] font-mono">Nord</span>
+            </label>
+            <label class="flex items-center gap-2.5 cursor-pointer py-1.5 px-2 rounded-lg hover:bg-[#3b4252] transition-colors">
+              <input type="radio" name="theme-select" value="light" class="radio radio-xs radio-info"
+                     onchange="applyTheme('light'); setPref('theme','light');" />
+              <i class="fa-solid fa-sun text-[10px] text-[#ebcb8b] w-3 text-center"></i>
+              <span class="text-xs text-[#d8dee9] flex-1">Light</span>
+              <span class="text-[9px] text-[#bf616a] font-mono">beta</span>
+            </label>
+            <label class="flex items-center gap-2.5 cursor-pointer py-1.5 px-2 rounded-lg hover:bg-[#3b4252] transition-colors">
+              <input type="radio" name="theme-select" value="system" class="radio radio-xs radio-info"
+                     onchange="applyTheme('system'); setPref('theme','system');" />
+              <i class="fa-solid fa-circle-half-stroke text-[10px] text-[#88c0d0] w-3 text-center"></i>
+              <span class="text-xs text-[#d8dee9] flex-1">System</span>
+              <span class="text-[9px] text-[#4c566a] font-mono">auto</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Auth placeholder -->
+        <div class="pt-2 border-t border-[#4c566a]/30 flex items-center gap-2">
+          <i class="fa-solid fa-lock text-[9px] text-[#4c566a]"></i>
+          <span class="text-[9px] text-[#4c566a] font-mono">auth · coming soon</span>
+        </div>
       </div>
     </div>
   </header>
