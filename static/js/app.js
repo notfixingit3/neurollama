@@ -8132,13 +8132,27 @@ function startNodeVsNode() {
     try { renderNvnResults(JSON.parse(e.data)); } catch (_) {}
   });
 
-  nvnES.addEventListener('done', () => {
+  nvnES.addEventListener('done', async () => {
     nvnES.close(); nvnES = null;
     document.getElementById('nvn-run-btn')?.classList.remove('hidden');
     document.getElementById('nvn-stop-btn')?.classList.add('hidden');
     refreshNvnModels().then(updateNvnAvailability);
     fetchBenchmarks(); // refresh standard leaderboard
     loadNvnLeaderboard(); // refresh win/loss board
+    // Refresh untested filter so the just-tested model disappears from the select
+    if (nvnUntestedFilter) {
+      try {
+        const r = await fetch('/api/benchmarks/nvn-matches');
+        if (r.ok) {
+          nvnTestedModels = {};
+          (await r.json()).forEach(m => {
+            if (!nvnTestedModels[m.bench_type]) nvnTestedModels[m.bench_type] = new Set();
+            nvnTestedModels[m.bench_type].add(m.model_name);
+          });
+        }
+      } catch { /* ignore */ }
+      populateNvnModelSelect();
+    }
   });
 
   nvnES.onerror = () => {
@@ -9305,6 +9319,14 @@ function startCodeBenchmark() {
     codeBenchEventSource = null;
     codeBenchDone();
     await fetchCodeBenchRuns();
+    // Refresh untested filter so the just-tested model disappears from the select
+    if (codeUntestedFilter) {
+      try {
+        const r = await fetch('/api/benchmarks/code');
+        if (r.ok) codeTestedModels = new Set((await r.json()).map(run => run.model_name));
+      } catch { /* ignore */ }
+      populateCodeBenchModelSelects();
+    }
   });
 
   codeBenchEventSource.onerror = () => {
@@ -9857,6 +9879,14 @@ function startHallucinationTest() {
       }
     } catch { /* ignore */ }
     await fetchHallucinationRuns();
+    // Refresh untested filter so the just-tested model disappears from the select
+    if (halluUntestedFilter) {
+      try {
+        const r = await fetch('/api/benchmarks/hallucination');
+        if (r.ok) halluTestedModels = new Set((await r.json()).map(run => run.model_name));
+      } catch { /* ignore */ }
+      populateCodeBenchModelSelects();
+    }
   });
 
   hallucinationEventSource.onerror = () => {
