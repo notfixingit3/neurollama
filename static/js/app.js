@@ -6317,7 +6317,11 @@ function renderCrossNodeResults(results, q) {
         </td>
         <td>
           ${isActiveNode
-            ? `<button onclick="inspectModel('${r.name}')" class="btn btn-xs btn-neutral border-[#4c566a] text-[10px] font-tech">INSPECT</button>`
+            ? `<div class="flex items-center gap-1.5">
+                <button onclick="inspectModelFromSearch('${r.name}')" class="btn btn-xs btn-neutral border-[#4c566a] text-[10px] font-tech w-[62px]" title="Inspect">INSPECT</button>
+                <button onclick="cloneModelPrompt('${r.name}')" class="btn btn-xs btn-outline btn-info text-[10px] font-tech" title="Clone Model">CLONE</button>
+                <button onclick="deleteSingleModel('${r.name}')" class="btn btn-xs btn-ghost text-[#bf616a] hover:bg-[#bf616a]/15 p-1" title="Delete Model"><i class="fa-solid fa-trash-can"></i></button>
+               </div>`
             : `<button onclick="selectServer('${r.node_id}')" class="btn btn-xs btn-outline btn-info text-[9px] font-tech">SET ACTIVE</button>`}
         </td>
       </tr>
@@ -6347,6 +6351,15 @@ function clearCrossNodeSearch(resetInput = true) {
 
   // Re-render normal inventory
   renderModels();
+}
+
+// inspectModelFromSearch clears the cross-node search (which restores normal
+// inventory rows) then opens the accordion for the model. The setTimeout gives
+// renderModels() a tick to populate the correct row IDs before inspectModel()
+// tries to scroll to and open them.
+function inspectModelFromSearch(name) {
+  clearCrossNodeSearch(true);
+  setTimeout(() => inspectModel(name), 50);
 }
 
 // ── Telemetry SSE ─────────────────────────────────────────────────────────────
