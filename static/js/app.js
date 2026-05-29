@@ -2263,7 +2263,7 @@ async function fetchModelBenchSummary() {
     if (!res.ok) return;
     modelBenchSummary = await res.json();
     // Re-render inventory if it's currently visible so badges appear without a reload
-    const listBody = document.getElementById('model-list-body');
+    const listBody = document.getElementById('models-list-body');
     if (listBody && listBody.children.length > 0) renderModels();
   } catch { /* silently ignore */ }
 }
