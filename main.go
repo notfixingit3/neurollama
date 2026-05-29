@@ -3950,6 +3950,47 @@ func noThinkPrompt(model, prompt string) string {
 	return prompt
 }
 
+// isRefusalResponse returns true when the generated text looks like a safety
+// refusal or capability refusal rather than actual code. These responses should
+// be flagged as REFUSED in the benchmark rather than fed to the syntax checker
+// or the judge (which wastes time and produces misleading 0-quality scores).
+func isRefusalResponse(text string) bool {
+	if len(text) == 0 {
+		return false
+	}
+	// Only inspect the first 120 chars — real code doesn't start with prose.
+	head := strings.ToLower(text)
+	if len(head) > 120 {
+		head = head[:120]
+	}
+	for _, pat := range []string{
+		"i cannot fulfill",
+		"i can't fulfill",
+		"i'm unable to",
+		"i am unable to",
+		"i cannot generate",
+		"i can't generate",
+		"i'm not able to",
+		"i am not able to",
+		"i cannot provide",
+		"i can't provide",
+		"violates safety",
+		"against my guidelines",
+		"i cannot assist",
+		"i can't assist",
+		"as an ai",
+		"as a language model",
+		"i don't feel comfortable",
+		"i'm sorry, but i",
+		"i apologize, but i",
+	} {
+		if strings.Contains(head, pat) {
+			return true
+		}
+	}
+	return false
+}
+
 // codeBenchSystemPrompt is injected into every code-generation request.
 // IMPORTANT: avoid role-description language like "code generation assistant" —
 // some models interpret that literally and write a function that generates code
@@ -4091,6 +4132,18 @@ func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judge
 		ttft := float64(firstTok.Milliseconds())
 
 		logFunc(fmt.Sprintf("[%s] Generated (%d tokens, %.1f TPS). Running syntax check...", t.Label, toks, tps))
+
+		// --- Refusal check: skip syntax + judge if model refused the task ---
+		if isRefusalResponse(generatedCode) {
+			logFunc(fmt.Sprintf("[%s] ⚠ REFUSED — model declined to generate code (safety/policy refusal)", t.Label))
+			results = append(results, map[string]interface{}{
+				"lang": lang, "label": t.Label, "task": t.Task,
+				"error": "model refused", "syntax_ok": false,
+				"judge": map[string]interface{}{"correctness": 0, "completeness": 0, "style": 0, "brief_critique": "model refused to generate code"},
+				"quality_score": 0.0, "tps": tps, "ttft_ms": ttft,
+			})
+			continue
+		}
 
 		// --- Pass 2: Syntax check ---
 		syntaxOK, syntaxMsg := checkCodeSyntax(lang, generatedCode)
