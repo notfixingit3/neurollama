@@ -3927,6 +3927,37 @@ func codeSyntaxCheckersHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+// isThinkingModel returns true when the model name strongly suggests it uses
+// chain-of-thought / reasoning mode by default (Qwen3, QwQ, DeepSeek-R1, etc.).
+// These models need /no_think in the prompt to suppress thinking tokens that
+// would otherwise eat the generation budget without producing visible output.
+func isThinkingModel(name string) bool {
+	lower := strings.ToLower(name)
+	for _, pat := range []string{"qwen3", "qwq", "deepseek-r1", "r1-", "-r1:", "marco-o1", "skywork-o1", "llama-nemotron"} {
+		if strings.Contains(lower, pat) {
+			return true
+		}
+	}
+	return false
+}
+
+// noThinkPrompt appends /no_think to a prompt for models that support it,
+// preventing chain-of-thought mode so the model outputs code directly.
+func noThinkPrompt(model, prompt string) string {
+	if isThinkingModel(model) {
+		return prompt + " /no_think"
+	}
+	return prompt
+}
+
+// codeBenchSystemPrompt is injected into every code-generation request so that
+// models with aggressive default personas (self-introduction, refusals, etc.)
+// skip preamble and output code immediately.
+const codeBenchSystemPrompt = "You are a code generation assistant. Output ONLY the raw code requested. Do not introduce yourself, add explanations, add markdown fences, or include any text other than the code itself."
+
+// judgeSystemPrompt keeps the judge on-task when it would otherwise self-introduce.
+const judgeSystemPrompt = "You are a code evaluation assistant. Respond ONLY with a valid JSON object. No explanations, no preamble, no markdown."
+
 // runCodeBenchmarkRun tests a list of languages, returning per-language results.
 func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judgeModel string, langs []string, numCtx int, logFunc func(string), debug bool) ([]map[string]interface{}, error) {
 	// Normalise judgeModel: the SSE handler passes "same" as sentinel when no
@@ -3964,7 +3995,8 @@ func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judge
 		// --- Pass 1: Generate code ---
 		genReq := GenerateRequest{
 			Model:  model,
-			Prompt: t.Prompt,
+			Prompt: noThinkPrompt(model, t.Prompt),
+			System: codeBenchSystemPrompt,
 			Stream: true,
 			Options: func() map[string]interface{} {
 				o := map[string]interface{}{
@@ -4078,14 +4110,12 @@ func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judge
 
 		judgeReq := GenerateRequest{
 			Model:  judgeTarget,
-			Prompt: judgeCodePrompt(t.Label, t.Task, generatedCode),
+			Prompt: noThinkPrompt(judgeTarget, judgeCodePrompt(t.Label, t.Task, generatedCode)),
+			System: judgeSystemPrompt,
 			Stream: true,
 			Options: func() map[string]interface{} {
 				o := map[string]interface{}{
 					"temperature": 0.0,
-					// Thinking models exhaust their token budget on internal reasoning
-					// before emitting visible output — 2048 gives them room to think
-					// AND write the JSON score.
 					"num_predict": 2048,
 				}
 				if numCtx > 0 {
@@ -4499,11 +4529,12 @@ func runHallucinationSSEHandler(c *gin.Context) {
 
 				req := GenerateRequest{
 					Model:  model,
-					Prompt: prompt,
+					Prompt: noThinkPrompt(model, prompt),
+					System: "You are a fact-recall assistant. Answer with only the exact value requested. Be concise. One sentence maximum.",
 					Stream: true,
 					Options: map[string]interface{}{
 						"temperature": 0.0,
-						"num_predict": 30,
+						"num_predict": 60, // bumped from 30 — /no_think takes ~4 tokens; thinking models need headroom
 						"num_ctx":     numCtx,
 					},
 				}
