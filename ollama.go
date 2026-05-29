@@ -39,13 +39,14 @@ type VersionResponse struct {
 }
 
 type ShowResponse struct {
-	License    string                 `json:"license"`
-	Modelfile  string                 `json:"modelfile"`
-	Parameters string                 `json:"parameters"`
-	Template   string                 `json:"template"`
-	System     string                 `json:"system"`
-	Details    ModelDetails           `json:"details"`
-	ModelInfo  map[string]interface{} `json:"model_info"`
+	License      string                 `json:"license"`
+	Modelfile    string                 `json:"modelfile"`
+	Parameters   string                 `json:"parameters"`
+	Template     string                 `json:"template"`
+	System       string                 `json:"system"`
+	Details      ModelDetails           `json:"details"`
+	ModelInfo    map[string]interface{} `json:"model_info"`
+	Capabilities []string               `json:"capabilities,omitempty"` // e.g. ["completion","tools","vision","thinking","embedding"]
 }
 
 type PullProgress struct {

@@ -1508,13 +1508,20 @@
                       <select id="benchmark-model-select" class="select select-sm flex-1 bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none text-[#d8dee9]">
                         <!-- Populated dynamically -->
                       </select>
-                      <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
-                        <button id="run-benchmark-btn" onclick="startBenchmark()" class="btn btn-sm btn-info font-tech uppercase tracking-wide px-4 min-h-9">
+                      <div class="flex flex-wrap gap-2">
+                        <button id="run-benchmark-btn" onclick="startBenchmark()" class="btn btn-sm btn-info font-tech uppercase tracking-wide px-4 min-h-9 flex-1">
                           <i class="fa-solid fa-play mr-1.5"></i>Start Measurement
+                        </button>
+                        <button id="run-all-benchmark-btn" onclick="startBatchBenchmark()" title="Run all compatible models sequentially" class="btn btn-sm btn-outline btn-info font-tech uppercase tracking-wide px-3 min-h-9">
+                          <i class="fa-solid fa-forward-step mr-1"></i>Run All
                         </button>
                         <button id="cancel-benchmark-btn" onclick="cancelBenchmark()" class="btn btn-sm btn-outline btn-error font-tech uppercase tracking-wide px-3 min-h-9 hidden">
                           <i class="fa-solid fa-stop mr-1.5"></i>Stop
                         </button>
+                      </div>
+                      <div id="batch-progress" class="hidden text-[9px] font-mono text-[#4c566a] mt-1 flex items-center gap-1.5">
+                        <i class="fa-solid fa-layer-group text-[8px]"></i>
+                        <span id="batch-progress-text"></span>
                       </div>
                     </div>
                   </div>

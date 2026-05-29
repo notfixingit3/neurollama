@@ -353,7 +353,8 @@ func main() {
 		api.POST("/models/copy", copyModelHandler)       // POST clone model
 		api.GET("/models/pull", pullModelSSEHandler)     // GET /api/models/pull?name=llama3 (SSE)
 		api.GET("/models/card", getModelCardHandler)     // GET /api/models/card?name=llama3
-		api.GET("/models/ctx-lengths", modelCtxLengthsHandler) // GET /api/models/ctx-lengths
+		api.GET("/models/ctx-lengths",   modelCtxLengthsHandler)    // GET /api/models/ctx-lengths
+		api.GET("/models/capabilities", modelCapabilitiesHandler) // GET /api/models/capabilities
 
 		// Handlers for v0.0.2
 		api.GET("/models/active", getActiveModelsHandler)
@@ -973,6 +974,53 @@ func modelCtxLengthsHandler(c *gin.Context) {
 	for r := range ch {
 		if r.ctx > 0 {
 			out[r.name] = r.ctx
+		}
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+// modelCapabilitiesHandler returns a map of model_name → []string of Ollama-reported
+// capabilities (e.g. "completion", "tools", "vision", "thinking", "embedding") sourced
+// from /api/show for every model on the active server.  Fanned out in parallel.
+func modelCapabilitiesHandler(c *gin.Context) {
+	activeSrv, err := GetActiveServer()
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{})
+		return
+	}
+	client := NewOllamaClient(activeSrv)
+
+	modelList, err := client.ListModels()
+	if err != nil || len(modelList) == 0 {
+		c.JSON(http.StatusOK, gin.H{})
+		return
+	}
+
+	type result struct {
+		name string
+		caps []string
+	}
+	ch := make(chan result, len(modelList))
+	var wg sync.WaitGroup
+	for _, m := range modelList {
+		wg.Add(1)
+		go func(name string) {
+			defer wg.Done()
+			details, err := client.GetModelDetails(name)
+			if err != nil || details == nil || len(details.Capabilities) == 0 {
+				ch <- result{name, nil}
+				return
+			}
+			ch <- result{name, details.Capabilities}
+		}(m.Name)
+	}
+	wg.Wait()
+	close(ch)
+
+	out := make(map[string][]string, len(modelList))
+	for r := range ch {
+		if len(r.caps) > 0 {
+			out[r.name] = r.caps
 		}
 	}
 	c.JSON(http.StatusOK, out)

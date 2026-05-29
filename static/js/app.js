@@ -1,7 +1,8 @@
 // State Management
 let servers = [];
 let models = [];
-let modelCtxLengths = {}; // model_name → trained context length (int)
+let modelCtxLengths   = {}; // model_name → trained context length (int)
+let modelCapabilities = {}; // model_name → string[] from /api/show e.g. ["completion","tools","vision","thinking"]
 let modelBenchSummary = {}; // model_name → { std_grade, std_tps, code_grade, code_quality, hallu_recall, hallu_ctx_k }
 let selectedModels = new Set();
 let inspectedModel = null;
@@ -1699,28 +1700,28 @@ function renderServers() {
     return `
       <div class="p-3 border rounded-lg flex flex-col justify-between gap-2 transition-all ${activeBorder} group">
         <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2 cursor-pointer flex-1" onclick="selectServer('${srv.id}')">
+          <div class="flex items-center gap-2 cursor-pointer flex-1" onclick="selectServer('${escapeHTML(srv.id)}')">
             ${statusDot}
             <div>
               <h3 class="font-bold text-xs truncate max-w-[130px] text-[#e5e9f0] group-hover:text-[#88c0d0] transition-colors flex items-center">
-                ${srv.name}${authLock}
+                ${escapeHTML(srv.name)}${authLock}
               </h3>
-              <p class="text-[9px] font-mono text-[#4c566a] truncate max-w-[130px]">${srv.url}</p>
+              <p class="text-[9px] font-mono text-[#4c566a] truncate max-w-[130px]" title="${escapeHTML(srv.url)}">${escapeHTML(srv.url)}</p>
             </div>
           </div>
           <div class="flex items-center gap-1 opacity-40 group-hover:opacity-100 transition-opacity">
-            <button onclick="openEditServerModal('${srv.id}')" class="btn btn-ghost btn-xs p-1 text-[#88c0d0]" title="Edit Node">
+            <button onclick="openEditServerModal('${escapeHTML(srv.id)}')" class="btn btn-ghost btn-xs p-1 text-[#88c0d0]" title="Edit Node">
               <i class="fa-solid fa-pen"></i>
             </button>
-            <button onclick="deleteServer('${srv.id}')" class="btn btn-ghost btn-xs p-1 text-[#bf616a]" title="Delete Node">
+            <button onclick="deleteServer('${escapeHTML(srv.id)}')" class="btn btn-ghost btn-xs p-1 text-[#bf616a]" title="Delete Node">
               <i class="fa-solid fa-trash-can"></i>
             </button>
           </div>
         </div>
         <div class="flex items-center justify-between text-[9px] font-mono text-[#4c566a]">
-          <span>${isOnline ? `Version: ${srv.version}` : 'UNREACHABLE'}</span>
+          <span>${isOnline ? `Version: ${escapeHTML(srv.version || '?')}` : 'UNREACHABLE'}</span>
           <div class="flex items-center gap-1">
-            <span>${isOnline ? `${srv.latency} ms` : ''}</span>
+            <span>${isOnline ? `${escapeHTML(String(srv.latency ?? '—'))} ms` : ''}</span>
             <span class="opacity-60">${serverLastSeen[srv.id] ? timeAgoShort(serverLastSeen[srv.id]) : ''}</span>
             <button onclick="event.stopPropagation(); refreshNode('${srv.id}')"
                     class="opacity-0 group-hover:opacity-100 transition-opacity text-[#4c566a] hover:text-[#88c0d0] leading-none"
@@ -2244,8 +2245,9 @@ async function fetchModels() {
     updateInventorySyncBadge();
     // Keep all model dropdowns in sync regardless of which workspace is active.
     populateModelDropdowns();
-    // Fetch context lengths and benchmark summaries in background.
+    // Fetch context lengths, capabilities, and benchmark summaries in background.
     fetchModelCtxLengths();
+    fetchModelCapabilities();
     fetchModelBenchSummary();
     // Persist for stale-while-revalidate on next page load.
     try {
@@ -2268,6 +2270,19 @@ async function fetchModelCtxLengths() {
     document.querySelectorAll('select[id]').forEach(sel => {
       if (sel._ssWidget) sel._ssWidget.refresh();
     });
+  } catch { /* silently ignore */ }
+}
+
+// Fetch Ollama-reported capabilities for all models and store in modelCapabilities.
+// Falls back to heuristic detection in getModelCapabilities() when a model has no entry.
+async function fetchModelCapabilities() {
+  try {
+    const res = await fetch('/api/models/capabilities');
+    if (!res.ok) return;
+    modelCapabilities = await res.json();
+    // Re-render inventory if visible so new TOOLS/THINK badges appear
+    const listBody = document.getElementById('models-list-body');
+    if (listBody && listBody.children.length > 0) renderModels();
   } catch { /* silently ignore */ }
 }
 
@@ -2585,8 +2600,10 @@ function renderModels() {
     // Capability badges
     const caps = getModelCapabilities(model);
     const capBadgeHtml = [
-      caps.includes('vision')    ? '<span class="inline-flex items-center gap-0.5 border border-[#b48ead] text-[#b48ead] rounded px-1 text-[8px] font-mono font-bold"><i class="fa-solid fa-eye text-[7px]"></i>VIS</span>' : '',
-      caps.includes('embedding') ? '<span class="inline-flex items-center gap-0.5 border border-[#ebcb8b] text-[#ebcb8b] rounded px-1 text-[8px] font-mono font-bold"><i class="fa-solid fa-layer-group text-[7px]"></i>EMB</span>' : '',
+      caps.includes('vision')    ? '<span class="inline-flex items-center gap-0.5 border border-[#b48ead] text-[#b48ead] rounded px-1 text-[8px] font-mono font-bold" title="Vision / multimodal"><i class="fa-solid fa-eye text-[7px]"></i>VIS</span>' : '',
+      caps.includes('embedding') ? '<span class="inline-flex items-center gap-0.5 border border-[#ebcb8b] text-[#ebcb8b] rounded px-1 text-[8px] font-mono font-bold" title="Embedding model"><i class="fa-solid fa-layer-group text-[7px]"></i>EMB</span>' : '',
+      caps.includes('tools')     ? '<span class="inline-flex items-center gap-0.5 border border-[#a3be8c] text-[#a3be8c] rounded px-1 text-[8px] font-mono font-bold" title="Supports tool / function calling"><i class="fa-solid fa-wrench text-[7px]"></i>TOOLS</span>' : '',
+      caps.includes('thinking')  ? '<span class="inline-flex items-center gap-0.5 border border-[#8fbcbb] text-[#8fbcbb] rounded px-1 text-[8px] font-mono font-bold" title="Chain-of-thought / reasoning model"><i class="fa-solid fa-lightbulb text-[7px]"></i>THINK</span>' : '',
     ].filter(Boolean).join('');
 
     // Context length badge
@@ -4941,11 +4958,13 @@ let currentPullSource = 'ollama';
 let catalogCategoryFilter = 'all';
 
 const CAP_BADGES = {
-  vision:    { label: 'VIS',    cls: 'border-[#b48ead] text-[#b48ead]', icon: 'fa-eye' },
-  embedding: { label: 'EMB',    cls: 'border-[#ebcb8b] text-[#ebcb8b]', icon: 'fa-layer-group' },
-  moe:       { label: 'MoE',    cls: 'border-[#d08770] text-[#d08770]', icon: 'fa-network-wired' },
-  code:      { label: 'CODE',   cls: 'border-[#88c0d0] text-[#88c0d0]', icon: 'fa-code' },
-  reasoning: { label: 'REASON', cls: 'border-[#a3be8c] text-[#a3be8c]', icon: 'fa-brain' },
+  vision:    { label: 'VIS',    cls: 'border-[#b48ead] text-[#b48ead]', icon: 'fa-eye',         title: 'Vision / multimodal' },
+  embedding: { label: 'EMB',    cls: 'border-[#ebcb8b] text-[#ebcb8b]', icon: 'fa-layer-group', title: 'Embedding model' },
+  tools:     { label: 'TOOLS',  cls: 'border-[#a3be8c] text-[#a3be8c]', icon: 'fa-wrench',      title: 'Tool / function calling' },
+  thinking:  { label: 'THINK',  cls: 'border-[#8fbcbb] text-[#8fbcbb]', icon: 'fa-lightbulb',   title: 'Chain-of-thought / reasoning' },
+  moe:       { label: 'MoE',    cls: 'border-[#d08770] text-[#d08770]', icon: 'fa-network-wired', title: 'Mixture of Experts' },
+  code:      { label: 'CODE',   cls: 'border-[#88c0d0] text-[#88c0d0]', icon: 'fa-code',         title: 'Code-focused model' },
+  reasoning: { label: 'REASON', cls: 'border-[#a3be8c] text-[#a3be8c]', icon: 'fa-brain',        title: 'Reasoning / math' },
 };
 
 const SOURCE_BADGE = {
@@ -5025,7 +5044,7 @@ function renderCatalog() {
     const capBadgesHtml = (item.caps || []).map(cap => {
       const b = CAP_BADGES[cap];
       if (!b) return '';
-      return `<span class="inline-flex items-center gap-0.5 border ${b.cls} rounded px-1 text-[7px] font-mono font-bold"><i class="fa-solid ${b.icon} text-[6px]"></i>${b.label}</span>`;
+      return `<span class="inline-flex items-center gap-0.5 border ${b.cls} rounded px-1 text-[7px] font-mono font-bold" title="${b.title || b.label}"><i class="fa-solid ${b.icon} text-[6px]"></i>${b.label}</span>`;
     }).join('');
 
     // Params / ctx / size meta line
@@ -6270,8 +6289,8 @@ function renderFleetGrid(nodes) {
           <div class="flex items-center gap-2 min-w-0">
             <span class="h-2 w-2 rounded-full shrink-0 ${dotColor}"></span>
             <div class="min-w-0">
-              <p class="font-bold text-xs text-[#e5e9f0] truncate" title="${node.name}">${node.name}</p>
-              <p class="text-[9px] font-mono text-[#4c566a] truncate" title="${node.url}">${node.url}</p>
+              <p class="font-bold text-xs text-[#e5e9f0] truncate" title="${escapeHTML(node.name)}">${escapeHTML(node.name)}</p>
+              <p class="text-[9px] font-mono text-[#4c566a] truncate" title="${escapeHTML(node.url)}">${escapeHTML(node.url)}</p>
             </div>
           </div>
           ${isActive ? '<span class="shrink-0 text-[8px] font-mono font-bold text-[#88c0d0] border border-[#88c0d0]/40 rounded px-1 py-0.5">ACTIVE</span>' : ''}
@@ -6280,29 +6299,29 @@ function renderFleetGrid(nodes) {
         <!-- Stats row -->
         <div class="grid grid-cols-2 gap-x-3 gap-y-1 text-[9px] font-mono">
           <div class="text-[#4c566a]">Status</div>
-          <div class="${isOnline ? 'text-[#a3be8c]' : 'text-[#bf616a]'} font-semibold uppercase">${node.status}</div>
+          <div class="${isOnline ? 'text-[#a3be8c]' : 'text-[#bf616a]'} font-semibold uppercase">${escapeHTML(node.status)}</div>
 
           <div class="text-[#4c566a]">Latency</div>
-          <div class="text-[#d8dee9]">${isOnline ? node.latency_ms + ' ms' : '—'}</div>
+          <div class="text-[#d8dee9]">${isOnline ? escapeHTML(String(node.latency_ms)) + ' ms' : '—'}</div>
 
           <div class="text-[#4c566a]">Version</div>
-          <div class="text-[#d8dee9] truncate">${node.version || '—'}</div>
+          <div class="text-[#d8dee9] truncate">${escapeHTML(node.version || '—')}</div>
 
           <div class="text-[#4c566a]">Models</div>
-          <div class="text-[#d8dee9]">${node.model_count}</div>
+          <div class="text-[#d8dee9]">${escapeHTML(String(node.model_count ?? '—'))}</div>
 
           <div class="text-[#4c566a]">Updated</div>
-          <div class="text-[#4c566a]">${seenAgo}</div>
+          <div class="text-[#4c566a]">${escapeHTML(seenAgo)}</div>
         </div>
 
         <!-- Action row -->
         <div class="flex items-center gap-1 pt-1 border-t border-[#4c566a]/20">
           ${!isActive ? `
-            <button onclick="selectServer('${node.id}')" class="btn btn-xs btn-outline btn-info flex-1 font-tech text-[9px] h-6 min-h-0">
+            <button onclick="selectServer('${escapeHTML(node.id)}')" class="btn btn-xs btn-outline btn-info flex-1 font-tech text-[9px] h-6 min-h-0">
               SET ACTIVE
             </button>` : `
             <span class="flex-1 text-[9px] font-mono text-[#88c0d0] text-center">Active node</span>`}
-          <button onclick="refreshNode('${node.id}')" class="btn btn-xs btn-ghost text-[#4c566a] hover:text-[#88c0d0] p-1 h-6 min-h-0" title="Refresh">
+          <button onclick="refreshNode('${escapeHTML(node.id)}')" class="btn btn-xs btn-ghost text-[#4c566a] hover:text-[#88c0d0] p-1 h-6 min-h-0" title="Refresh">
             <i class="fa-solid fa-rotate text-[9px]"></i>
           </button>
         </div>
@@ -6678,9 +6697,9 @@ function renderTelemetryModels(activeModels) {
           <div class="flex justify-between items-start">
             <div>
               <h3 class="font-bold text-sm text-[#e5e9f0] truncate max-w-[200px]">${escapeHTML(model.name)}</h3>
-              <span class="badge badge-outline border-[#4c566a] text-[#81a1c1] text-[9px] mt-1 font-mono">${(model.details && model.details.parameter_size) || 'N/A'}</span>
+              <span class="badge badge-outline border-[#4c566a] text-[#81a1c1] text-[9px] mt-1 font-mono">${escapeHTML((model.details && model.details.parameter_size) || 'N/A')}</span>
             </div>
-            <button onclick="unloadModel('${model.name}')" class="btn btn-xs btn-error font-tech text-[9px] gap-1">
+            <button onclick="unloadModel('${escapeHTML(model.name)}')" class="btn btn-xs btn-error font-tech text-[9px] gap-1">
               <i class="fa-solid fa-power-off"></i> EVICT
             </button>
           </div>
@@ -6889,8 +6908,8 @@ async function fetchSchedulerLogs() {
       return `
         <div class="border-b border-[#4c566a]/20 pb-1.5 mb-1.5 last:border-0 last:pb-0 font-mono text-[10px]">
           <div class="flex justify-between text-[8px] text-[#4c566a]">
-            <span>${l.created_at}</span>
-            <span class="${statusColor} font-bold uppercase">${l.status}</span>
+            <span>${escapeHTML(l.created_at)}</span>
+            <span class="${statusColor} font-bold uppercase">${escapeHTML(l.status)}</span>
           </div>
           <div class="text-[#e5e9f0] mt-0.5">
             <span class="text-[#88c0d0] font-bold">[${escapeHTML(l.model_name)}]</span> ${escapeHTML(l.message)}
@@ -6962,28 +6981,47 @@ async function triggerManualCompression() {
 // --- MODEL CAPABILITY DETECTION ---
 
 /**
- * Returns array of capability strings for a model object.
- * Capabilities: 'vision', 'embedding', 'llm'
+ * Returns capability strings for a model.
+ * Prefers authoritative data from /api/show (stored in modelCapabilities),
+ * falls back to name/family heuristics.
+ * Possible values: 'vision', 'embedding', 'tools', 'thinking', 'llm'
  */
 function getModelCapabilities(model) {
-  const caps = [];
+  const name    = (model.name || '').toLowerCase();
+  const fromAPI = modelCapabilities[model.name];
+
+  // --- Authoritative: use Ollama-reported capabilities when available ---
+  if (fromAPI && fromAPI.length > 0) {
+    const caps = [];
+    if (fromAPI.includes('vision'))    caps.push('vision');
+    if (fromAPI.includes('embedding')) caps.push('embedding');
+    if (fromAPI.includes('tools'))     caps.push('tools');
+    if (fromAPI.includes('thinking'))  caps.push('thinking');
+    if (!caps.includes('embedding'))   caps.push('llm');
+    return caps;
+  }
+
+  // --- Heuristic fallback ---
+  const caps     = [];
   const families = (model.details && model.details.families) || [];
-  const name = (model.name || '').toLowerCase();
 
   // Vision: Ollama sets 'clip' family for multimodal models
   if (families.some(f => f === 'clip') ||
       /llava|gemma3|minicpm[\-_]v|bakllava|moondream|cogvlm|internvl|vision|qwen.*vl|phi.*vision|pixtral/.test(name)) {
     caps.push('vision');
   }
-  // Embedding: Ollama sets 'bert' / 'nomic-bert' families for embedding models
+  // Embedding: Ollama sets 'bert' / 'nomic-bert' families
   if (families.some(f => /bert/.test(f)) ||
       /embed|nomic|mxbai|bge[-_]|e5[-_]|minilm|all-minilm|gte[-_]/.test(name)) {
     caps.push('embedding');
   }
-  // Anything that isn't a pure embedding model can run standard/reasoning/longctx
-  if (!caps.includes('embedding')) {
-    caps.push('llm');
+  // Thinking: known reasoning model name patterns
+  if (!caps.includes('embedding') &&
+      /qwen3|qwq|deepseek-r1|r1-|-r1:|marco-o1|skywork-o1|llama-nemotron/.test(name)) {
+    caps.push('thinking');
   }
+  // Standard LLM (everything that isn't a pure embedding model)
+  if (!caps.includes('embedding')) caps.push('llm');
   return caps;
 }
 
@@ -6992,6 +7030,11 @@ function getModelCapabilities(model) {
 let benchmarkEventSource = null;
 let benchmarkStartTime   = null;
 let currentBenchmarkType = 'standard';
+
+// Batch benchmark state
+let batchQueue   = []; // ordered model names
+let batchIdx     = 0;  // index of current/next model
+let batchRunning = false;
 let currentLbFilter      = 'all';
 let currentScoreFilter   = 'all'; // grade filter: 'S'|'A'|'B'|'C'|'F'|'all'
 
@@ -7235,11 +7278,10 @@ async function toggleUntestedFilter() {
   populateBenchmarkModelSelect();
 }
 
-function populateBenchmarkModelSelect() {
-  const select = document.getElementById('benchmark-model-select');
-  if (!select) return;
-
-  // 1. Capability filter (existing)
+// Returns the list of model names compatible with the current benchmark type + filters.
+// Used by both populateBenchmarkModelSelect and startBatchBenchmark.
+function getCompatibleBenchmarkModels({ applyUntestedFilter = false } = {}) {
+  // 1. Capability filter
   let filtered = models;
   if (currentBenchmarkType === 'vision') {
     filtered = models.filter(m => getModelCapabilities(m).includes('vision'));
@@ -7248,21 +7290,37 @@ function populateBenchmarkModelSelect() {
   } else {
     filtered = models.filter(m => getModelCapabilities(m).includes('llm'));
   }
-
-  // 2. Untested filter
-  if (benchUntestedFilter) {
+  // 2. Optional untested filter
+  if (applyUntestedFilter && benchUntestedFilter) {
     const tested = testedModelsByType[currentBenchmarkType] || new Set();
     filtered = filtered.filter(m => !tested.has(m.name));
   }
-
   // 3. Param size filter
   const maxParams = PARAM_STEPS[benchParamSliderIdx];
   if (maxParams !== Infinity) {
     filtered = filtered.filter(m => {
       const pb = parseParamBillions((m.details && m.details.parameter_size) || '');
-      return pb === null || pb <= maxParams; // unknown size → always include
+      return pb === null || pb <= maxParams;
     });
   }
+  return filtered.map(m => m.name);
+}
+
+function populateBenchmarkModelSelect() {
+  const select = document.getElementById('benchmark-model-select');
+  if (!select) return;
+
+  // Delegate to shared helper; untested filter applies here
+  const names = getCompatibleBenchmarkModels({ applyUntestedFilter: true });
+
+  if (names.length === 0) {
+    const reason = benchUntestedFilter ? 'untested models' : 'compatible models';
+    select.innerHTML = `<option value="">-- No ${reason} found --</option>`;
+    return;
+  }
+
+  // Build a temporary filtered array for the rest of the function
+  let filtered = models.filter(m => names.includes(m.name));
 
   if (filtered.length === 0) {
     const reason = benchUntestedFilter ? 'untested models' : 'compatible models';
@@ -7357,7 +7415,8 @@ function setLbSort(col) {
 }
 
 function setBenchmarkRunning(isRunning) {
-  const runBtn = document.getElementById('run-benchmark-btn');
+  const runBtn    = document.getElementById('run-benchmark-btn');
+  const runAllBtn = document.getElementById('run-all-benchmark-btn');
   const cancelBtn = document.getElementById('cancel-benchmark-btn');
 
   if (runBtn) {
@@ -7366,6 +7425,7 @@ function setBenchmarkRunning(isRunning) {
       ? '<span class="loading loading-spinner loading-xs mr-1.5"></span>Measuring'
       : '<i class="fa-solid fa-play mr-1.5"></i>Start Measurement';
   }
+  if (runAllBtn) runAllBtn.disabled = isRunning;
   if (cancelBtn) {
     cancelBtn.classList.toggle('hidden', !isRunning);
     cancelBtn.disabled = !isRunning;
@@ -7480,6 +7540,7 @@ function startBenchmark() {
       showToast('Benchmark completed and saved to leaderboard!', 'success');
       fetchBenchmarks();
       fetchModelBenchSummary(); // refresh inventory grade badges
+      advanceBatchQueue();      // advance to next model if batch is running
     } catch (err) {
       console.error(err);
     } finally {
@@ -7496,6 +7557,7 @@ function startBenchmark() {
     benchmarkEventSource = null;
     setBenchmarkRunning(false);
     recordStreamFailure('benchmark', 'Connection to benchmark stream was interrupted.', { model, node: activeServerLabel() });
+    advanceBatchQueue(); // skip failed model and continue batch
   };
 }
 
@@ -7503,6 +7565,13 @@ function cancelBenchmark() {
   if (!benchmarkEventSource) return;
   benchmarkEventSource.close();
   benchmarkEventSource = null;
+  // Also abort any in-progress batch
+  if (batchRunning) {
+    batchRunning = false;
+    batchQueue   = [];
+    batchIdx     = 0;
+    updateBatchProgress();
+  }
   setBenchmarkRunning(false);
   benchmarkStartTime = null;
   const logContainer = document.getElementById('benchmark-log');
@@ -7514,6 +7583,79 @@ function cancelBenchmark() {
     logContainer.scrollTop = logContainer.scrollHeight;
   }
   showToast('Benchmark run stopped', 'warning');
+}
+
+// ── Batch benchmark (Run All) ────────────────────────────────────────────────
+
+function startBatchBenchmark() {
+  if (batchRunning || benchmarkEventSource) {
+    showToast('A benchmark is already running', 'warning');
+    return;
+  }
+  const queue = getCompatibleBenchmarkModels(); // ignores untested filter — run all
+  if (queue.length === 0) {
+    showToast('No compatible models for this benchmark type', 'warning');
+    return;
+  }
+  if (queue.length === 1) {
+    // Single model — just use the normal start flow
+    const sel = document.getElementById('benchmark-model-select');
+    if (sel) sel.value = queue[0];
+    startBenchmark();
+    return;
+  }
+  batchQueue   = queue;
+  batchIdx     = 0;
+  batchRunning = true;
+  updateBatchProgress();
+  _runBatchStep();
+}
+
+function _runBatchStep() {
+  if (!batchRunning || batchIdx >= batchQueue.length) {
+    _finishBatch();
+    return;
+  }
+  const model = batchQueue[batchIdx];
+  const sel = document.getElementById('benchmark-model-select');
+  if (sel) sel.value = model;
+  updateBatchProgress();
+  startBenchmark();
+}
+
+function advanceBatchQueue() {
+  if (!batchRunning) return;
+  batchIdx++;
+  if (batchIdx >= batchQueue.length) {
+    _finishBatch();
+  } else {
+    // Brief pause so the leaderboard can update before the next run
+    setTimeout(_runBatchStep, 800);
+  }
+}
+
+function _finishBatch() {
+  batchRunning = false;
+  batchQueue   = [];
+  batchIdx     = 0;
+  updateBatchProgress();
+  showToast('Batch benchmark complete — all models tested!', 'success');
+}
+
+function updateBatchProgress() {
+  const el   = document.getElementById('batch-progress');
+  const text = document.getElementById('batch-progress-text');
+  if (!el) return;
+  if (!batchRunning || batchQueue.length === 0) {
+    el.classList.add('hidden');
+    return;
+  }
+  const done    = batchIdx;
+  const total   = batchQueue.length;
+  const current = batchQueue[batchIdx] || '';
+  const short   = current.split(':')[0];
+  if (text) text.textContent = `${done + 1}/${total} · ${short}`;
+  el.classList.remove('hidden');
 }
 
 async function fetchBenchmarks() {
