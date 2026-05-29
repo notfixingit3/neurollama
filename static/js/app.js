@@ -2224,7 +2224,13 @@ async function fetchModels() {
     if (data.lastUpdated) lastModelSyncTs = data.lastUpdated;
     inventoryPage = 1; // reset to first page on fresh load
     modelsLoaded = true;
-    renderModels();
+    // If a cross-node search is active, re-run it so the filtered list reflects
+    // the new model state (e.g. after a delete). Otherwise show the full list.
+    if (crossNodeSearchQuery) {
+      runCrossNodeSearch(crossNodeSearchQuery);
+    } else {
+      renderModels();
+    }
     updateInventorySyncBadge();
     // Keep all model dropdowns in sync regardless of which workspace is active.
     populateModelDropdowns();
