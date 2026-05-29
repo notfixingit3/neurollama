@@ -3941,13 +3941,17 @@ func isThinkingModel(name string) bool {
 	return false
 }
 
-// noThinkPrompt appends /no_think to a prompt for models that support it,
-// preventing chain-of-thought mode so the model outputs code directly.
-func noThinkPrompt(model, prompt string) string {
+// boolPtr returns a pointer to a bool — used for optional JSON fields.
+func boolPtr(b bool) *bool { return &b }
+
+// thinkParam returns think=false for thinking models so Ollama suppresses
+// chain-of-thought via the API (equivalent to /set nothink in the REPL).
+// Returns nil for non-thinking models so Ollama uses the model's default.
+func thinkParam(model string) *bool {
 	if isThinkingModel(model) {
-		return prompt + " /no_think"
+		return boolPtr(false)
 	}
-	return prompt
+	return nil
 }
 
 // isRefusalResponse returns true when the generated text looks like a safety
@@ -3991,13 +3995,11 @@ func isRefusalResponse(text string) bool {
 	return false
 }
 
-// codeBenchSystemPrompt is injected into every code-generation request.
-// IMPORTANT: avoid role-description language like "code generation assistant" —
-// some models interpret that literally and write a function that generates code
-// rather than writing the actual requested code. Use constraint language only.
-const codeBenchSystemPrompt = "Write only the code asked for. No explanations, no markdown fences, no preamble, no self-introduction."
-
-// judgeSystemPrompt keeps the judge on-task when it would otherwise self-introduce.
+// judgeSystemPrompt keeps the judge on-task.
+// NOTE: We do NOT override the system prompt for code generation — replacing the
+// model's Modelfile system prompt removes the safety/helpfulness context it relies
+// on, causing over-aligned models to issue refusals for benign tasks (FizzBuzz,
+// debounce, etc.). Use Think=false via the API instead of a system prompt override.
 const judgeSystemPrompt = "Output only a JSON object. No explanations, no markdown, no preamble."
 
 // runCodeBenchmarkRun tests a list of languages, returning per-language results.
@@ -4037,8 +4039,8 @@ func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judge
 		// --- Pass 1: Generate code ---
 		genReq := GenerateRequest{
 			Model:  model,
-			Prompt: noThinkPrompt(model, t.Prompt),
-			System: codeBenchSystemPrompt,
+			Prompt: t.Prompt,
+			Think:  thinkParam(model), // think=false for Qwen3/QwQ/etc via API (no System override needed)
 			Stream: true,
 			Options: func() map[string]interface{} {
 				o := map[string]interface{}{
@@ -4164,8 +4166,9 @@ func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judge
 
 		judgeReq := GenerateRequest{
 			Model:  judgeTarget,
-			Prompt: noThinkPrompt(judgeTarget, judgeCodePrompt(t.Label, t.Task, generatedCode)),
-			System: judgeSystemPrompt,
+			Prompt: judgeCodePrompt(t.Label, t.Task, generatedCode),
+			System: judgeSystemPrompt, // judge needs JSON-only constraint; model's safety context is kept via Modelfile
+			Think:  thinkParam(judgeTarget),
 			Stream: true,
 			Options: func() map[string]interface{} {
 				o := map[string]interface{}{
@@ -4583,12 +4586,12 @@ func runHallucinationSSEHandler(c *gin.Context) {
 
 				req := GenerateRequest{
 					Model:  model,
-					Prompt: noThinkPrompt(model, prompt),
-					System: "You are a fact-recall assistant. Answer with only the exact value requested. Be concise. One sentence maximum.",
+					Prompt: prompt,
+					Think:  thinkParam(model),
 					Stream: true,
 					Options: map[string]interface{}{
 						"temperature": 0.0,
-						"num_predict": 60, // bumped from 30 — /no_think takes ~4 tokens; thinking models need headroom
+						"num_predict": 30,
 						"num_ctx":     numCtx,
 					},
 				}

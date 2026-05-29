@@ -367,6 +367,7 @@ type GenerateRequest struct {
 	System   string                 `json:"system,omitempty"`
 	Template string                 `json:"template,omitempty"`
 	Stream   bool                   `json:"stream"`
+	Think    *bool                  `json:"think,omitempty"` // Ollama think=false disables chain-of-thought (Qwen3, etc.)
 	Options  map[string]interface{} `json:"options,omitempty"`
 }
 
