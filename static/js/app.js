@@ -6918,6 +6918,12 @@ let currentScoreFilter   = 'all'; // grade filter: 'S'|'A'|'B'|'C'|'F'|'all'
 
 // Benchmark model-select filters
 let benchUntestedFilter  = false;
+let nvnUntestedFilter    = false;
+let nvnTestedModels      = {}; // bench_type → Set<model_name>, populated on first untested toggle
+let codeUntestedFilter   = false;
+let codeTestedModels     = new Set();
+let halluUntestedFilter  = false;
+let halluTestedModels    = new Set();
 let benchParamSliderIdx  = 7;   // index into PARAM_STEPS; 7 = All
 const PARAM_STEPS  = [0.5, 1, 3, 7, 13, 30, 70, Infinity];
 const PARAM_LABELS = ['≤0.5B', '≤1B', '≤3B', '≤7B', '≤13B', '≤30B', '≤70B', 'All'];
@@ -7878,6 +7884,8 @@ function setNvnType(type) {
     const btn = document.getElementById(`nvn-type-${t}`);
     if (btn) btn.classList.toggle('bench-type-btn-active', t === type);
   });
+  // Re-filter model list when untested is active (tested set is per bench type)
+  if (nvnUntestedFilter) populateNvnModelSelect();
 }
 
 function _setNvnFilterBadge(id, active) {
@@ -7901,6 +7909,24 @@ function toggleNvnBothFilter() {
   nvnFilterBoth = !nvnFilterBoth;
   if (nvnFilterBoth) { nvnFilterNodeA = false; _setNvnFilterBadge('nvn-filter-node-a-btn', false); }
   _setNvnFilterBadge('nvn-filter-both-btn', nvnFilterBoth);
+  populateNvnModelSelect();
+}
+
+async function toggleNvnUntestedFilter() {
+  nvnUntestedFilter = !nvnUntestedFilter;
+  _setNvnFilterBadge('nvn-filter-untested-btn', nvnUntestedFilter);
+  if (nvnUntestedFilter) {
+    try {
+      const r = await fetch('/api/benchmarks/nvn-matches');
+      if (r.ok) {
+        nvnTestedModels = {};
+        (await r.json()).forEach(m => {
+          if (!nvnTestedModels[m.bench_type]) nvnTestedModels[m.bench_type] = new Set();
+          nvnTestedModels[m.bench_type].add(m.model_name);
+        });
+      }
+    } catch { /* silently ignore — filter will just show all */ }
+  }
   populateNvnModelSelect();
 }
 
@@ -7990,9 +8016,18 @@ function populateNvnModelSelect() {
     });
   }
 
-  const emptyMsg = nvnFilterBoth   ? '— No shared models on A & B —'
-                 : nvnFilterNodeA  ? '— No models on Node A —'
-                 :                   '— No models found —';
+  // Untested filter: remove models that already have NvN results for this type
+  if (nvnUntestedFilter) {
+    const tested = nvnTestedModels[nvnType] || new Set();
+    for (const name of [...seen.keys()]) {
+      if (tested.has(name)) seen.delete(name);
+    }
+  }
+
+  const emptyMsg = nvnFilterBoth      ? '— No shared models on A & B —'
+                 : nvnFilterNodeA     ? '— No models on Node A —'
+                 : nvnUntestedFilter  ? '— No untested models found —'
+                 :                      '— No models found —';
 
   const sorted = [...seen.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   const prev = select.value;
@@ -9132,18 +9167,70 @@ function toggleJudgeModelSelect() {
   wrap.classList.toggle('hidden', !cb.checked);
 }
 
+async function toggleCodeUntestedFilter() {
+  codeUntestedFilter = !codeUntestedFilter;
+  const btn = document.getElementById('code-untested-btn');
+  if (btn) btn.classList.toggle('bench-type-btn-active', codeUntestedFilter);
+  if (codeUntestedFilter) {
+    try {
+      const r = await fetch('/api/benchmarks/code');
+      if (r.ok) codeTestedModels = new Set((await r.json()).map(run => run.model_name));
+    } catch { /* silently ignore */ }
+  }
+  populateCodeBenchModelSelects();
+}
+
+async function toggleHalluUntestedFilter() {
+  halluUntestedFilter = !halluUntestedFilter;
+  const btn = document.getElementById('hallu-untested-btn');
+  if (btn) btn.classList.toggle('bench-type-btn-active', halluUntestedFilter);
+  if (halluUntestedFilter) {
+    try {
+      const r = await fetch('/api/benchmarks/hallucination');
+      if (r.ok) halluTestedModels = new Set((await r.json()).map(run => run.model_name));
+    } catch { /* silently ignore */ }
+  }
+  populateCodeBenchModelSelects();
+}
+
 function populateCodeBenchModelSelects() {
   const modelNames = models.map(m => m.name);
-  const selects = ['code-bench-model', 'code-judge-model-select', 'halluc-model'];
-  selects.forEach(id => {
-    const sel = document.getElementById(id);
-    if (!sel) return;
-    const cur = sel.value;
-    sel.innerHTML = modelNames.length
+
+  // code-bench-model: honour untested filter
+  const codeEl = document.getElementById('code-bench-model');
+  if (codeEl) {
+    const cur = codeEl.value;
+    const filtered = (codeUntestedFilter && codeTestedModels.size > 0)
+      ? modelNames.filter(n => !codeTestedModels.has(n))
+      : modelNames;
+    codeEl.innerHTML = filtered.length
+      ? filtered.map(n => `<option value="${escapeHTML(n)}">${escapeHTML(n)}</option>`).join('')
+      : '<option value="">— No untested models found —</option>';
+    if (cur && filtered.includes(cur)) codeEl.value = cur;
+  }
+
+  // code-judge-model-select: no untested filter (judge can be any model)
+  const judgeEl = document.getElementById('code-judge-model-select');
+  if (judgeEl) {
+    const cur = judgeEl.value;
+    judgeEl.innerHTML = modelNames.length
       ? modelNames.map(n => `<option value="${escapeHTML(n)}">${escapeHTML(n)}</option>`).join('')
       : '<option value="">No models available</option>';
-    if (cur && modelNames.includes(cur)) sel.value = cur;
-  });
+    if (cur && modelNames.includes(cur)) judgeEl.value = cur;
+  }
+
+  // halluc-model: honour untested filter
+  const halluEl = document.getElementById('halluc-model');
+  if (halluEl) {
+    const cur = halluEl.value;
+    const filtered = (halluUntestedFilter && halluTestedModels.size > 0)
+      ? modelNames.filter(n => !halluTestedModels.has(n))
+      : modelNames;
+    halluEl.innerHTML = filtered.length
+      ? filtered.map(n => `<option value="${escapeHTML(n)}">${escapeHTML(n)}</option>`).join('')
+      : '<option value="">— No untested models found —</option>';
+    if (cur && filtered.includes(cur)) halluEl.value = cur;
+  }
 }
 
 function startCodeBenchmark() {

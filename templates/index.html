@@ -1723,6 +1723,11 @@
                               class="badge badge-outline font-tech text-[9px] px-2 py-2.5 border-[#4c566a] text-[#4c566a] hover:border-[#88c0d0] hover:text-[#88c0d0] cursor-pointer select-none transition-colors uppercase gap-1">
                         <i class="fa-solid fa-link-slash text-[7px]"></i>A &amp; B
                       </button>
+                      <button id="nvn-filter-untested-btn" onclick="toggleNvnUntestedFilter()"
+                              class="badge badge-outline font-tech text-[9px] px-2 py-2.5 border-[#4c566a] text-[#4c566a] hover:border-[#88c0d0] hover:text-[#88c0d0] cursor-pointer select-none transition-colors uppercase gap-1"
+                              title="Show only models not yet run in node vs node">
+                        <i class="fa-solid fa-circle-question text-[7px]"></i>Untested
+                      </button>
                     </div>
                   </label>
                   <select id="nvn-model-select" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none text-[#d8dee9] w-full" onchange="updateNvnAvailability()">
@@ -1834,7 +1839,14 @@
 
                 <!-- Model -->
                 <div class="form-control">
-                  <label class="label py-1"><span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">Model</span></label>
+                  <label class="label py-1 flex items-center justify-between">
+                    <span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">Model</span>
+                    <button id="code-untested-btn" onclick="toggleCodeUntestedFilter()"
+                            class="bench-type-btn text-[9px] px-2 py-1 flex items-center gap-1"
+                            title="Show only models not yet run in code benchmark">
+                      <i class="fa-solid fa-circle-question text-[9px]"></i>Untested only
+                    </button>
+                  </label>
                   <select id="code-bench-model" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full"></select>
                 </div>
 
@@ -1984,7 +1996,14 @@
 
                 <!-- Model -->
                 <div class="form-control">
-                  <label class="label py-1"><span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">Model</span></label>
+                  <label class="label py-1 flex items-center justify-between">
+                    <span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">Model</span>
+                    <button id="hallu-untested-btn" onclick="toggleHalluUntestedFilter()"
+                            class="bench-type-btn text-[9px] px-2 py-1 flex items-center gap-1"
+                            title="Show only models not yet run in hallucination benchmark">
+                      <i class="fa-solid fa-circle-question text-[9px]"></i>Untested only
+                    </button>
+                  </label>
                   <select id="halluc-model" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full"></select>
                 </div>
 
