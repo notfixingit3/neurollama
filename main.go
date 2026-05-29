@@ -405,6 +405,9 @@ func main() {
 		api.GET("/benchmarks/code/checkers", codeSyntaxCheckersHandler)
 		api.DELETE("/benchmarks/code/:id", deleteCodeBenchmarkHandler)
 
+		// Inventory badges summary (lightweight, used by inventory tab)
+		api.GET("/benchmarks/model-summary", modelBenchSummaryHandler)
+
 		// Hallucination
 		api.GET("/benchmarks/hallucination", getHallucinationRunsHandler)
 		api.GET("/benchmarks/hallucination/run", runHallucinationSSEHandler)
@@ -4663,6 +4666,71 @@ func getCodeBenchmarksHandler(c *gin.Context) {
 		runs = []CodeBenchmarkRun{}
 	}
 	c.JSON(http.StatusOK, runs)
+}
+
+// ModelBenchSummaryEntry is the per-model record returned by modelBenchSummaryHandler.
+type ModelBenchSummaryEntry struct {
+	// Standard benchmark best across all types (by grade rank S>A>B>C>D>F)
+	StdGrade string  `json:"std_grade,omitempty"` // "S","A","B","C","D","F"
+	StdTPS   float64 `json:"std_tps,omitempty"`   // TPS from that best run
+	StdType  string  `json:"std_type,omitempty"`  // "standard","vision","embedding","long_ctx","reasoning"
+	// Code benchmark best run
+	CodeGrade   string  `json:"code_grade,omitempty"`
+	CodeQuality float64 `json:"code_quality,omitempty"` // avg quality score /10
+	// Hallucination best run
+	HalluRecall float64 `json:"hallu_recall,omitempty"` // recall %
+	HalluCtxK   int     `json:"hallu_ctx_k,omitempty"`  // max context K tested
+}
+
+// gradeRank maps letter grades to a numeric rank (higher = better).
+var gradeRank = map[string]int{"S": 6, "A": 5, "B": 4, "C": 3, "D": 2, "F": 1, "": 0}
+
+// GET /api/benchmarks/model-summary
+// Returns a flat map[model_name]ModelBenchSummaryEntry with the best result
+// for each benchmark category, suitable for rendering inventory badges.
+func modelBenchSummaryHandler(c *gin.Context) {
+	out := make(map[string]ModelBenchSummaryEntry)
+
+	// ── Standard benchmarks ──────────────────────────────────────────────────
+	if resp, err := GetGroupedBenchmarks("all", "model", "asc"); err == nil && resp != nil {
+		for _, g := range resp.Groups {
+			cur := out[g.ModelName]
+			if gradeRank[g.DisplayScore] > gradeRank[cur.StdGrade] {
+				cur.StdGrade = g.DisplayScore
+				cur.StdTPS = g.SummaryRun.Tps
+				cur.StdType = g.BenchmarkType
+			}
+			out[g.ModelName] = cur
+		}
+	}
+
+	// ── Code benchmarks ───────────────────────────────────────────────────────
+	if runs, err := GetCodeBenchmarkRuns(); err == nil {
+		for _, r := range runs {
+			cur := out[r.ModelName]
+			if gradeRank[r.OverallScore] > gradeRank[cur.CodeGrade] {
+				cur.CodeGrade = r.OverallScore
+				cur.CodeQuality = r.AvgQualityScore
+			}
+			out[r.ModelName] = cur
+		}
+	}
+
+	// ── Hallucination benchmarks ──────────────────────────────────────────────
+	if runs, err := GetHallucinationRuns(); err == nil {
+		for _, r := range runs {
+			cur := out[r.ModelName]
+			// Best = highest recall; on tie prefer larger context
+			if r.RecallPct > cur.HalluRecall ||
+				(r.RecallPct == cur.HalluRecall && r.MaxContextK > cur.HalluCtxK) {
+				cur.HalluRecall = r.RecallPct
+				cur.HalluCtxK = r.MaxContextK
+			}
+			out[r.ModelName] = cur
+		}
+	}
+
+	c.JSON(http.StatusOK, out)
 }
 
 func deleteCodeBenchmarkHandler(c *gin.Context) {

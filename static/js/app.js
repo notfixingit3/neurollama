@@ -2,6 +2,7 @@
 let servers = [];
 let models = [];
 let modelCtxLengths = {}; // model_name → trained context length (int)
+let modelBenchSummary = {}; // model_name → { std_grade, std_tps, code_grade, code_quality, hallu_recall, hallu_ctx_k }
 let selectedModels = new Set();
 let inspectedModel = null;
 let openAccordionModel = null;
@@ -2227,8 +2228,9 @@ async function fetchModels() {
     updateInventorySyncBadge();
     // Keep all model dropdowns in sync regardless of which workspace is active.
     populateModelDropdowns();
-    // Fetch context lengths in the background — widgets re-read on next open.
+    // Fetch context lengths and benchmark summaries in background.
     fetchModelCtxLengths();
+    fetchModelBenchSummary();
     // Persist for stale-while-revalidate on next page load.
     try {
       localStorage.setItem('neurollama-model-cache', JSON.stringify({ models, ts: Date.now() }));
@@ -2253,12 +2255,87 @@ async function fetchModelCtxLengths() {
   } catch { /* silently ignore */ }
 }
 
+// Fetch benchmark summary for all models and store in modelBenchSummary.
+// Called once after models load; inventory rows read from this map at render time.
+async function fetchModelBenchSummary() {
+  try {
+    const res = await fetch('/api/benchmarks/model-summary');
+    if (!res.ok) return;
+    modelBenchSummary = await res.json();
+    // Re-render inventory if it's currently visible so badges appear without a reload
+    const listBody = document.getElementById('model-list-body');
+    if (listBody && listBody.children.length > 0) renderModels();
+  } catch { /* silently ignore */ }
+}
+
 // Format a raw context token count into a human-readable badge string.
 function fmtCtx(n) {
   if (!n || n <= 0) return '';
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1) + 'M ctx';
   if (n >= 1024)      return Math.round(n / 1024) + 'K ctx';
   return n + ' ctx';
+}
+
+// Grade → colour classes for inventory benchmark badges.
+const GRADE_STYLE = {
+  S: { border: 'border-[#ebcb8b]/70', text: 'text-[#ebcb8b]' },
+  A: { border: 'border-[#a3be8c]/70', text: 'text-[#a3be8c]' },
+  B: { border: 'border-[#88c0d0]/70', text: 'text-[#88c0d0]' },
+  C: { border: 'border-[#d08770]/70', text: 'text-[#d08770]' },
+  D: { border: 'border-[#d08770]/50', text: 'text-[#d08770]/80' },
+  F: { border: 'border-[#bf616a]/60', text: 'text-[#bf616a]' },
+};
+
+// Standard bench type → short label for the tooltip.
+const STD_TYPE_LABEL = {
+  standard:  'Standard TPS',
+  vision:    'Vision TPS',
+  embedding: 'Embedding',
+  long_ctx:  'Long-Context',
+  reasoning: 'Reasoning',
+};
+
+// Build the compact benchmark badge HTML for one inventory row.
+function buildBenchBadges(b) {
+  const badges = [];
+
+  // Standard benchmark grade
+  if (b.std_grade) {
+    const s = GRADE_STYLE[b.std_grade] || GRADE_STYLE.F;
+    const typeLabel = STD_TYPE_LABEL[b.std_type] || b.std_type || 'Benchmark';
+    const tpsStr = b.std_tps > 0 ? ` · ${b.std_tps.toFixed(1)} TPS` : '';
+    badges.push(
+      `<span class="inline-flex items-center gap-0.5 border ${s.border} ${s.text} rounded px-1 text-[8px] font-mono font-bold cursor-default" ` +
+      `title="${typeLabel}${tpsStr}">` +
+      `<i class="fa-solid fa-gauge text-[7px]"></i>${b.std_grade}</span>`
+    );
+  }
+
+  // Code benchmark grade
+  if (b.code_grade) {
+    const s = GRADE_STYLE[b.code_grade] || GRADE_STYLE.F;
+    const qStr = b.code_quality > 0 ? ` · ${b.code_quality.toFixed(1)}/10 quality` : '';
+    badges.push(
+      `<span class="inline-flex items-center gap-0.5 border ${s.border} ${s.text} rounded px-1 text-[8px] font-mono font-bold cursor-default" ` +
+      `title="Code benchmark${qStr}">` +
+      `<i class="fa-solid fa-code text-[7px]"></i>${b.code_grade}</span>`
+    );
+  }
+
+  // Hallucination recall badge
+  if (b.hallu_recall > 0) {
+    const pct = Math.round(b.hallu_recall);
+    const borderCls = pct >= 80 ? 'border-[#a3be8c]/60' : pct >= 60 ? 'border-[#d08770]/60' : 'border-[#bf616a]/60';
+    const textCls   = pct >= 80 ? 'text-[#a3be8c]'      : pct >= 60 ? 'text-[#d08770]'      : 'text-[#bf616a]';
+    const ctxStr = b.hallu_ctx_k > 0 ? ` @ ${b.hallu_ctx_k}K ctx` : '';
+    badges.push(
+      `<span class="inline-flex items-center gap-0.5 border ${borderCls} ${textCls} rounded px-1 text-[8px] font-mono cursor-default" ` +
+      `title="Hallucination recall${ctxStr}">` +
+      `<i class="fa-solid fa-brain text-[7px]"></i>${pct}%</span>`
+    );
+  }
+
+  return badges.join('');
 }
 
 function initAccordionRow() {
@@ -2446,6 +2523,16 @@ function renderModels() {
       caps.includes('embedding') ? '<span class="inline-flex items-center gap-0.5 border border-[#ebcb8b] text-[#ebcb8b] rounded px-1 text-[8px] font-mono font-bold"><i class="fa-solid fa-layer-group text-[7px]"></i>EMB</span>' : '',
     ].filter(Boolean).join('');
 
+    // Context length badge
+    const ctxLabel = fmtCtx(modelCtxLengths[model.name]);
+    const ctxBadge = ctxLabel
+      ? `<span class="inline-flex items-center gap-0.5 border border-[#88c0d0]/40 text-[#88c0d0] rounded px-1 text-[8px] font-mono" title="Trained context window">${ctxLabel}</span>`
+      : '';
+
+    // Benchmark badges from summary
+    const bsum = modelBenchSummary[model.name];
+    const benchBadgeHtml = bsum ? buildBenchBadges(bsum) : '';
+
     return `
       <tr id="${rowId}" class="hover:bg-[#3b4252]/30 border-b border-[#4c566a]/30 transition-colors${isOpen ? ' bg-[#3b4252]/20' : ''}">
         <td>
@@ -2457,7 +2544,11 @@ function renderModels() {
             <span class="font-bold text-[#e5e9f0] cursor-pointer hover:text-[#88c0d0] transition-colors" onclick="inspectModel('${model.name}')">${model.name}</span>
             ${capBadgeHtml}
           </div>
-          <span class="text-[9px] text-[#4c566a] block sm:hidden">${sizeFormatted} // ${paramSize}</span>
+          <div class="flex items-center gap-1 flex-wrap mt-0.5">
+            ${ctxBadge}
+            ${benchBadgeHtml}
+          </div>
+          <span class="text-[9px] text-[#4c566a] block sm:hidden mt-0.5">${sizeFormatted} // ${paramSize}</span>
           <span class="text-[9px] text-[#4c566a] block">Modified: ${dateFormatted}</span>
         </td>
         <td class="hidden sm:table-cell">${sizeFormatted}</td>
