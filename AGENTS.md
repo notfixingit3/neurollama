@@ -1,6 +1,6 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2025-05-22
+**Generated:** 2026-05-29
 **Commit:** HEAD
 **Branch:** main
 
@@ -56,6 +56,8 @@ Self-hosted Go web app for managing local & remote Ollama nodes. Nord-themed das
 - **Never** use Node.js/npm for local CSS build — use the standalone Tailwind CLI binary
 - **Never** commit the `tailwindcss` binary (it's gitignored, 81MB)
 - **Never** use `-bordered` DaisyUI input variants (removed in v5)
+- **Never** override the Modelfile `System` prompt for code/hallucination generation — it strips safety context and causes some models to refuse benign tasks. Use `Think: false` + `/no_think` prompt suffix instead for thinking models (Qwen3, QwQ, DeepSeek-R1, etc.)
+- **Never** use role-description system prompts ("you are a code generation assistant") — lower-quality models interpret them literally and generate a code generator instead of code. Use constraint language ("Write only the code asked for.") in judge prompts only.
 
 ## UNIQUE STYLES
 - **Low-config philosophy**: No `.eslintrc`, `.editorconfig`, or `pyproject.toml` — conventions enforced via `CLAUDE.md` and Go compiler
@@ -87,4 +89,4 @@ docker-compose up -d
 - Data stored in `data/neurollama.db` (auto-created on first launch)
 - Server credentials (Bearer tokens, Basic Auth passwords) are redacted from API responses
 - Remote node limitation: Ollama API doesn't expose total VRAM capacity — VRAM percentage bars not meaningful for remote servers
-- CI release workflow uses `npx tailwindcss` (npm) for CSS build — different from local standalone CLI approach
+- CI release workflow does NOT build CSS — `static/css/output.css` is pre-compiled and committed; the CI job only compiles the Go binary

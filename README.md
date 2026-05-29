@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.2.18-bf616a?style=for-the-badge&logo=git&logoColor=white" alt="Version v0.2.18" />
+  <img src="https://img.shields.io/badge/version-v0.2.19-bf616a?style=for-the-badge&logo=git&logoColor=white" alt="Version v0.2.19" />
   <a href="https://golang.org/"><img src="https://img.shields.io/badge/Go-1.26.3-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go Version" /></a>
   <a href="https://tailwindcss.com/"><img src="https://img.shields.io/badge/Tailwind_CSS-4.3%2B-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white" alt="Tailwind CSS" /></a>
   <a href="https://daisyui.com/"><img src="https://img.shields.io/badge/daisyUI-5.5%2B-5A0EF8?style=for-the-badge&logo=daisyui&logoColor=white" alt="DaisyUI" /></a>
@@ -46,6 +46,7 @@ The **Node selector** lives in the footer status bar as a bordered pill badge �
 ### 📦 Model Hub & Inventory
 - View all installed models with parameters, size, quantization, and serialization details.
 - **Trained context-length badge** shown in every model dropdown: e.g. `128K ctx`, `40K ctx`. Sourced from Ollama's `/api/show` model info in parallel at startup.
+- **Benchmark grade badges** on every inventory row: compact colour-coded badges show the model's best standard grade (S/A/B/C/F), code benchmark grade, and hallucination recall % — all sourced from your local benchmark history at a glance.
 - Capability badges (**VIS** / **EMB**) on inventory rows and catalog cards — detected from model-family metadata and name heuristics.
 - Inspect full Modelfiles, templates, parameters, system prompts, and sanitized model cards with raw/source view controls.
 - Unified **Model Hub** panel: pull directly from the **Ollama Library** or **Hugging Face** (GGUFs) with real-time download speed and progress bars. Browse a curated 35-model catalog filterable by category, source, and capabilities.
@@ -78,7 +79,9 @@ Five benchmark types: **Standard** (TPS), **Vision** (multimodal TPS), **Embeddi
 - Models are automatically evicted from VRAM after every benchmark run so the next model starts with a clean slate.
 
 ### 💻 Code Benchmark
-Evaluate a model's code-generation capability across up to 12 languages simultaneously:
+Evaluate a model's code-generation capability across up to 12 languages simultaneously.
+
+**Thinking-model aware**: Qwen3, QwQ, DeepSeek-R1, and similar chain-of-thought models are automatically detected. A `/no_think` suffix is injected into the prompt and `think: false` is sent in the API request to suppress reasoning tokens during benchmark runs, preventing KV-cache bloat and misleading latency numbers.
 
 **Python · Go · JavaScript · TypeScript · Node.js · Bash · sh · PHP · Ruby · Rust · C · SQL**
 
@@ -136,10 +139,12 @@ Validate SQLite, data-directory writability, static assets, active Ollama reacha
 
 ## 🎨 UI / UX Details
 
+- **User preferences badge** in the header: click the avatar to open a dropdown for **Dark / Light / System** theme selection. Preference is persisted to the database. An anti-FOUC inline script in `<head>` applies the saved theme before the first paint.
 - **Searchable select widget** on all model dropdowns: type to filter, keyboard-navigable, shows param-size badge + trained context-length badge inline.
 - **Fixed layout**: header and footer always visible — workspace content scrolls independently.
 - Instantly toggle Node Registry, Chat History, and Config sidebars; preferences persist in localStorage.
 - Nord colour palette throughout: Polar Night backgrounds, Snow Storm text, Frost blue accents.
+- **Untested only filter** on Node vs Node, Code Benchmark, and Hallucination tabs: toggle to show only models that have no prior runs of that benchmark type. Automatically refreshes after each completed run so newly-tested models drop off immediately.
 
 ---
 
@@ -239,7 +244,7 @@ The Dockerfile uses a two-stage build. No Node/npm steps — CSS is pre-compiled
 
 ```dockerfile
 # builder
-FROM golang:1.26-alpine AS builder
+FROM golang:1.26.3-alpine AS builder
 WORKDIR /app
 COPY . .
 RUN go build -ldflags="-s -w" -o neurollama .
