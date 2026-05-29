@@ -8,16 +8,22 @@ on:
 permissions:
   contents: write
 
+# Opt into Node.js 24 for all actions ahead of the June 2, 2026 forced migration.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     strategy:
       matrix:
         include:
+          # darwin/arm64 — native macOS Apple Silicon runner
           - os: macos-latest
             goos: darwin
             goarch: arm64
             binary: neurollama-darwin-arm64
-          - os: macos-13
+          # darwin/amd64 — cross-compiled from Linux (CGO_ENABLED=0, no macos-13 runner needed)
+          - os: ubuntu-latest
             goos: darwin
             goarch: amd64
             binary: neurollama-darwin-amd64
