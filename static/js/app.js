@@ -429,6 +429,16 @@ async function init() {
     }
   });
 
+  // Context-size warning listeners — fire on model or ctx select change
+  ['chat-model-select', 'chat-ctx-limit'].forEach(id => {
+    document.getElementById(id)?.addEventListener('change', () =>
+      updateCtxWarning('chat-model-select', 'chat-ctx-limit', 'chat-ctx-warn'));
+  });
+  ['code-bench-model', 'code-bench-ctx'].forEach(id => {
+    document.getElementById(id)?.addEventListener('change', () =>
+      updateCtxWarning('code-bench-model', 'code-bench-ctx', 'code-ctx-warn'));
+  });
+
   // Initialize RAG chat sidebar controls
   const chatRagEnabledEl = document.getElementById('chat-rag-enabled');
   const chatRagModelContainer = document.getElementById('chat-rag-model-container');
@@ -2274,6 +2284,23 @@ async function fetchModelBenchSummary() {
   } catch { /* silently ignore */ }
 }
 
+// Show/hide a context-size warning when the selected ctx exceeds the model's
+// trained context length. warnId element should be a <span> near the ctx select.
+function updateCtxWarning(modelId, ctxId, warnId) {
+  const warnEl = document.getElementById(warnId);
+  if (!warnEl) return;
+  const model     = document.getElementById(modelId)?.value;
+  const ctxRaw    = document.getElementById(ctxId)?.value;
+  const ctxVal    = ctxRaw ? parseInt(ctxRaw, 10) : 0;
+  const trained   = model ? (modelCtxLengths[model] || 0) : 0;
+  if (!ctxVal || !trained || ctxVal <= trained) {
+    warnEl.classList.add('hidden');
+    return;
+  }
+  warnEl.title = `${fmtCtx(ctxVal)} exceeds this model's trained context (${fmtCtx(trained)}) — Ollama will silently clamp it`;
+  warnEl.classList.remove('hidden');
+}
+
 // Format a raw context token count into a human-readable badge string.
 function fmtCtx(n) {
   if (!n || n <= 0) return '';
@@ -2342,6 +2369,39 @@ function buildBenchBadges(b) {
   }
 
   return badges.join('');
+}
+
+// Build a tiny SVG bar-chart sparkline for a multi-run benchmark group.
+// runs[] is newest-first (as returned by the server); sparkline renders oldest→newest left→right.
+// Returns an empty string when there are fewer than 2 runs.
+function buildSparkline(runs, bType) {
+  if (!runs || runs.length < 2) return '';
+
+  const values = [...runs].reverse().map(r => {
+    try {
+      if (bType === 'embedding') return JSON.parse(r.extra_json || '{}').chunks_per_sec || 0;
+      if (bType === 'reasoning') return JSON.parse(r.extra_json || '{}').accuracy_pct   || 0;
+      return r.tps || 0;
+    } catch { return 0; }
+  });
+
+  const max  = Math.max(...values, 0.001);
+  const W = 52, H = 14, n = values.length;
+  // Pack bars with 1px gap; minimum bar width 2px
+  const barW = Math.max(2, Math.floor((W - (n - 1)) / n));
+  const step  = n > 1 ? (W - barW) / (n - 1) : 0;
+
+  const bars = values.map((v, i) => {
+    const h    = Math.max(2, Math.round((v / max) * H));
+    const x    = Math.round(i * step);
+    const fill = i === n - 1 ? '#88c0d0' : '#4c566a'; // newest bar highlighted
+    return `<rect x="${x}" y="${H - h}" width="${barW}" height="${h}" fill="${fill}" rx="0.5"/>`;
+  }).join('');
+
+  const unit = bType === 'embedding' ? 'ch/s' : bType === 'reasoning' ? '%acc' : 'TPS';
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" ` +
+    `class="inline-block align-middle ml-2 opacity-60 hover:opacity-100 transition-opacity shrink-0 cursor-default" ` +
+    `title="${unit} across ${n} runs — oldest ← → newest (right bar = latest)">${bars}</svg>`;
 }
 
 function initAccordionRow() {
@@ -7419,6 +7479,7 @@ function startBenchmark() {
 
       showToast('Benchmark completed and saved to leaderboard!', 'success');
       fetchBenchmarks();
+      fetchModelBenchSummary(); // refresh inventory grade badges
     } catch (err) {
       console.error(err);
     } finally {
@@ -7579,7 +7640,8 @@ async function fetchBenchmarks() {
 
     // Build the three metric TD cells for one run row.
     // sr is either a full Benchmark run or a BenchmarkSummaryRun (same field names).
-    function metricCells(sr, bType) {
+    // sparkHtml: optional sparkline SVG injected after the primary metric value (multi-run summary only).
+    function metricCells(sr, bType, sparkHtml = '') {
       let extra = {};
       try { extra = JSON.parse(sr.extra_json || '{}'); } catch (_) {}
       const isAvg = !!sr.is_avg;
@@ -7590,14 +7652,14 @@ async function fetchBenchmarks() {
         const rng = (isAvg && sr.min_chunks_per_sec != null && sr.max_chunks_per_sec != null && sr.max_chunks_per_sec !== sr.min_chunks_per_sec)
           ? `<span class="text-[9px] text-[#4c566a] font-normal ml-1">±${((sr.max_chunks_per_sec - sr.min_chunks_per_sec) / 2).toFixed(1)}</span>` : '';
         ttftCell   = `<td class="text-center text-[#4c566a]">—</td>`;
-        metricCell = `<td class="text-center font-bold text-[#ebcb8b]">${cps}${rng} <span class="text-[9px] text-[#4c566a] font-normal">ch/s</span></td>`;
+        metricCell = `<td class="text-center font-bold text-[#ebcb8b]">${cps}${rng} <span class="text-[9px] text-[#4c566a] font-normal">ch/s</span>${sparkHtml}</td>`;
         latCell    = `<td class="text-center text-[#4c566a]">—</td>`;
       } else if (bType === 'reasoning') {
         const acc = extra.accuracy_pct != null ? extra.accuracy_pct.toFixed(0) + '%' : '—';
         const rng = (isAvg && sr.min_accuracy_pct != null && sr.max_accuracy_pct != null && sr.max_accuracy_pct !== sr.min_accuracy_pct)
           ? `<span class="text-[9px] text-[#4c566a] font-normal ml-1">±${((sr.max_accuracy_pct - sr.min_accuracy_pct) / 2).toFixed(1)}%</span>` : '';
         ttftCell   = `<td class="text-center text-[#4c566a]">—</td>`;
-        metricCell = `<td class="text-center font-bold text-[#a3be8c]">${acc}${rng} <span class="text-[9px] text-[#4c566a] font-normal">acc</span></td>`;
+        metricCell = `<td class="text-center font-bold text-[#a3be8c]">${acc}${rng} <span class="text-[9px] text-[#4c566a] font-normal">acc</span>${sparkHtml}</td>`;
         latCell    = `<td class="text-center">${(sr.avg_latency_ms || 0).toFixed(0)} ms</td>`;
       } else if (bType === 'longctx') {
         const deg    = extra.degradation_pct != null ? extra.degradation_pct.toFixed(1) + '%' : '';
@@ -7605,14 +7667,14 @@ async function fetchBenchmarks() {
         const rng    = (isAvg && sr.min_tps != null && sr.max_tps != null && sr.max_tps !== sr.min_tps)
           ? `<span class="text-[9px] text-[#4c566a] font-normal ml-1">±${((sr.max_tps - sr.min_tps) / 2).toFixed(1)}</span>` : '';
         ttftCell   = `<td class="text-center">${(sr.ttft_ms || 0).toFixed(1)} ms</td>`;
-        metricCell = `<td class="text-center font-bold text-[#88c0d0]">${(sr.tps || 0).toFixed(1)}${degHtml}${rng}</td>`;
+        metricCell = `<td class="text-center font-bold text-[#88c0d0]">${(sr.tps || 0).toFixed(1)}${degHtml}${rng}${sparkHtml}</td>`;
         latCell    = `<td class="text-center">${(sr.avg_latency_ms || 0).toFixed(0)} ms</td>`;
       } else {
         // standard / vision
         const rng = (isAvg && sr.min_tps != null && sr.max_tps != null && sr.max_tps !== sr.min_tps)
           ? `<span class="text-[9px] text-[#4c566a] font-normal ml-1">±${((sr.max_tps - sr.min_tps) / 2).toFixed(1)}</span>` : '';
         ttftCell   = `<td class="text-center">${(sr.ttft_ms || 0).toFixed(1)} ms</td>`;
-        metricCell = `<td class="text-center font-bold text-[#88c0d0]">${(sr.tps || 0).toFixed(1)}${rng} <span class="text-[9px] text-[#4c566a] font-normal">TPS</span></td>`;
+        metricCell = `<td class="text-center font-bold text-[#88c0d0]">${(sr.tps || 0).toFixed(1)}${rng} <span class="text-[9px] text-[#4c566a] font-normal">TPS</span>${sparkHtml}</td>`;
         latCell    = `<td class="text-center">${(sr.avg_latency_ms || 0).toFixed(0)} ms</td>`;
       }
       return { ttftCell, metricCell, latCell };
@@ -7636,7 +7698,8 @@ async function fetchBenchmarks() {
       const typeBadgeHtml = `<span class="border px-1.5 rounded text-[8px] font-bold font-mono ${tb.cls}">${tb.label}</span>`;
 
       // Summary row uses pre-computed summary_run from server
-      const { ttftCell, metricCell, latCell } = metricCells(group.summary_run, bType);
+      const sparkSvg = multiRun ? buildSparkline(group.runs, bType) : '';
+      const { ttftCell, metricCell, latCell } = metricCells(group.summary_run, bType, sparkSvg);
 
       const displayScore = group.display_score || 'F';
       const scoreClass   = scoreBadgeClass(displayScore);
@@ -7656,9 +7719,18 @@ async function fetchBenchmarks() {
         : '';
 
       const userNotes = (group.latest_notes && group.latest_notes !== 'auto') ? group.latest_notes : '';
-      const noteHtml  = (userNotes && !multiRun)
-        ? `<div class="text-[10px] text-[#4c566a] mt-0.5 max-w-[200px] truncate" title="${escapeHTML(userNotes)}">${escapeHTML(userNotes)}</div>`
-        : '';
+      // Always render a clickable note area; click to edit inline (single & multi-run rows)
+      const noteHtml = userNotes
+        ? `<div class="bench-note-area text-[10px] leading-none mt-0.5 cursor-text"
+                data-bench-id="${group.latest_id}" data-bench-score="${escapeHTML(displayScore)}" data-bench-notes="${escapeHTML(userNotes)}"
+                onclick="event.stopPropagation(); startBenchNoteEdit(this)">
+             <span class="max-w-[180px] truncate inline-block text-[#4c566a] hover:text-[#88c0d0]/80 transition-colors">${escapeHTML(userNotes)}</span>
+           </div>`
+        : `<div class="bench-note-area text-[10px] leading-none mt-0.5 cursor-text"
+                data-bench-id="${group.latest_id}" data-bench-score="${escapeHTML(displayScore)}" data-bench-notes=""
+                onclick="event.stopPropagation(); startBenchNoteEdit(this)">
+             <span class="text-[#3b4252] hover:text-[#4c566a] transition-colors font-mono text-[9px]">+ note</span>
+           </div>`;
 
       const rateNotes   = userNotes || '';
       const singleActions = !multiRun ? `
@@ -7726,11 +7798,24 @@ async function fetchBenchmarks() {
             ? `<span class="text-[8px] text-[#4c566a] font-mono ml-1.5 bg-[#3b4252] px-1.5 rounded" title="Ollama version">v${escapeHTML(run.ollama_version)}</span>`
             : '';
 
+          const runNoteHtml = runUserNotes
+            ? `<div class="bench-note-area text-[9px] leading-none mt-0.5 cursor-text"
+                    data-bench-id="${run.id}" data-bench-score="${escapeHTML(runDisplayScore)}" data-bench-notes="${escapeHTML(runUserNotes)}"
+                    onclick="event.stopPropagation(); startBenchNoteEdit(this)">
+                 <span class="max-w-[160px] truncate inline-block text-[#4c566a] hover:text-[#88c0d0]/80 transition-colors">${escapeHTML(runUserNotes)}</span>
+               </div>`
+            : `<div class="bench-note-area text-[9px] leading-none mt-0.5 cursor-text"
+                    data-bench-id="${run.id}" data-bench-score="${escapeHTML(runDisplayScore)}" data-bench-notes=""
+                    onclick="event.stopPropagation(); startBenchNoteEdit(this)">
+                 <span class="text-[#3b4252] hover:text-[#4c566a] transition-colors font-mono" style="font-size:8px">+ note</span>
+               </div>`;
+
           html += `
             <tr id="sub-${gkey}-${idx}" data-group="${gkey}"
                 class="bench-sub-row bg-[#2e3440]/60 border-b border-[#4c566a]/10 text-[11px] hidden">
               <td class="py-2 pl-8 font-mono text-[#4c566a]">
-                ${escapeHTML(runDate)}${newestTag}${verTag}
+                <div>${escapeHTML(runDate)}${newestTag}${verTag}</div>
+                ${runNoteHtml}
               </td>
               <td class="text-[10px] text-[#4c566a]">run #${run.id}</td>
               ${rt}
@@ -7773,6 +7858,63 @@ function toggleBenchGroup(gkey) {
   const isExpanded = [...rows].some(r => !r.classList.contains('hidden'));
   rows.forEach(r => r.classList.toggle('hidden', isExpanded));
   if (icon) icon.style.transform = isExpanded ? '' : 'rotate(180deg)';
+}
+
+// Click-to-edit note on a leaderboard row — replaces the display div with an
+// <input>, saves on blur/Enter, cancels on Escape.  el must carry data-bench-id,
+// data-bench-score, and data-bench-notes attributes.
+function startBenchNoteEdit(el) {
+  const id           = el.dataset.benchId;
+  const currentScore = el.dataset.benchScore || '';
+  const currentNotes = el.dataset.benchNotes || '';
+
+  const input = document.createElement('input');
+  input.type  = 'text';
+  input.value = currentNotes;
+  input.placeholder = 'add note…';
+  input.className   = 'bg-transparent border-b border-[#4c566a] text-[10px] text-[#d8dee9] ' +
+                      'font-mono outline-none focus:border-[#88c0d0] py-0.5 w-[180px] max-w-full';
+
+  el.replaceWith(input);
+  input.focus();
+  if (currentNotes) input.select();
+
+  let committed = false;
+
+  function buildNoteEl(notes) {
+    const div = document.createElement('div');
+    div.className = 'bench-note-area text-[10px] leading-none mt-0.5 cursor-text';
+    div.dataset.benchId    = id;
+    div.dataset.benchScore = currentScore;
+    div.dataset.benchNotes = notes;
+    div.addEventListener('click', e => { e.stopPropagation(); startBenchNoteEdit(div); });
+    if (notes) {
+      div.innerHTML = `<span class="max-w-[180px] truncate inline-block text-[#4c566a] hover:text-[#88c0d0]/80 transition-colors">${escapeHTML(notes)}</span>`;
+    } else {
+      div.innerHTML = `<span class="text-[#3b4252] hover:text-[#4c566a] transition-colors font-mono text-[9px]">+ note</span>`;
+    }
+    return div;
+  }
+
+  function commit(cancel) {
+    if (committed) return;
+    committed = true;
+    const newNotes = cancel ? currentNotes : input.value.trim();
+    input.replaceWith(buildNoteEl(newNotes));
+    if (!cancel && newNotes !== currentNotes) {
+      fetch(`/api/benchmarks/${id}/score`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ score: currentScore, notes: newNotes }),
+      }).catch(() => {});
+    }
+  }
+
+  input.addEventListener('blur',    ()  => commit(false));
+  input.addEventListener('keydown', e  => {
+    if (e.key === 'Enter')  { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { e.preventDefault(); commit(true); }
+  });
 }
 
 function retestBenchmark(modelName, benchType) {
@@ -8139,6 +8281,7 @@ function startNodeVsNode() {
     refreshNvnModels().then(updateNvnAvailability);
     fetchBenchmarks(); // refresh standard leaderboard
     loadNvnLeaderboard(); // refresh win/loss board
+    fetchModelBenchSummary(); // refresh inventory grade badges
     // Refresh untested filter so the just-tested model disappears from the select
     if (nvnUntestedFilter) {
       try {
@@ -9319,6 +9462,7 @@ function startCodeBenchmark() {
     codeBenchEventSource = null;
     codeBenchDone();
     await fetchCodeBenchRuns();
+    fetchModelBenchSummary(); // refresh inventory grade badges
     // Refresh untested filter so the just-tested model disappears from the select
     if (codeUntestedFilter) {
       try {
@@ -9879,6 +10023,7 @@ function startHallucinationTest() {
       }
     } catch { /* ignore */ }
     await fetchHallucinationRuns();
+    fetchModelBenchSummary(); // refresh inventory grade badges
     // Refresh untested filter so the just-tested model disappears from the select
     if (halluUntestedFilter) {
       try {
