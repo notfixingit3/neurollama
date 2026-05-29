@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.2.19-bf616a?style=for-the-badge&logo=git&logoColor=white" alt="Version v0.2.19" />
+  <img src="https://img.shields.io/badge/version-v0.2.20-bf616a?style=for-the-badge&logo=git&logoColor=white" alt="Version v0.2.20" />
   <a href="https://golang.org/"><img src="https://img.shields.io/badge/Go-1.26.3-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go Version" /></a>
   <a href="https://tailwindcss.com/"><img src="https://img.shields.io/badge/Tailwind_CSS-4.3%2B-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white" alt="Tailwind CSS" /></a>
   <a href="https://daisyui.com/"><img src="https://img.shields.io/badge/daisyUI-5.5%2B-5A0EF8?style=for-the-badge&logo=daisyui&logoColor=white" alt="DaisyUI" /></a>
@@ -46,7 +46,8 @@ The **Node selector** lives in the footer status bar as a bordered pill badge �
 ### 📦 Model Hub & Inventory
 - View all installed models with parameters, size, quantization, and serialization details.
 - **Trained context-length badge** shown in every model dropdown: e.g. `128K ctx`, `40K ctx`. Sourced from Ollama's `/api/show` model info in parallel at startup.
-- **Benchmark grade badges** on every inventory row: compact colour-coded badges show the model's best standard grade (S/A/B/C/F), code benchmark grade, and hallucination recall % — all sourced from your local benchmark history at a glance.
+- **Benchmark grade badges** on every inventory row: compact colour-coded badges show the model's best standard grade (S/A/B/C/F), code benchmark grade, and hallucination recall % — all sourced from your local benchmark history at a glance. Badges refresh automatically after any benchmark run completes.
+- **Capability badges** — **VIS** (vision/multimodal), **EMB** (embedding), **TOOLS** (function calling), **THINK** (chain-of-thought reasoning) — sourced from Ollama's `/api/show` `capabilities` field where available, with heuristic fallback for older Ollama versions.
 - Capability badges (**VIS** / **EMB**) on inventory rows and catalog cards — detected from model-family metadata and name heuristics.
 - Inspect full Modelfiles, templates, parameters, system prompts, and sanitized model cards with raw/source view controls.
 - Unified **Model Hub** panel: pull directly from the **Ollama Library** or **Hugging Face** (GGUFs) with real-time download speed and progress bars. Browse a curated 35-model catalog filterable by category, source, and capabilities.
@@ -75,6 +76,9 @@ Five benchmark types: **Standard** (TPS), **Vision** (multimodal TPS), **Embeddi
 
 - Model select auto-filtered to match the selected benchmark type.
 - Sortable leaderboard with clickable headers, per-type filtering, letter-score ratings (S/A/B/C/D/F), and inline notes.
+- **Inline note editing**: click any note area on a leaderboard row (summary or sub-run) to edit in-place — Enter/blur saves, Escape cancels.
+- **TPS sparkline** on multi-run rows: tiny SVG bar chart in the metric cell shows the trend across all runs (oldest → newest, latest bar highlighted).
+- **Run All** button queues all compatible models for the selected benchmark type and runs them sequentially with a live `N/total · modelname` progress indicator.
 - **Retest** button on each leaderboard row: switches tab, pre-selects model and type, and starts the run.
 - Models are automatically evicted from VRAM after every benchmark run so the next model starts with a clean slate.
 
@@ -145,6 +149,8 @@ Validate SQLite, data-directory writability, static assets, active Ollama reacha
 - Instantly toggle Node Registry, Chat History, and Config sidebars; preferences persist in localStorage.
 - Nord colour palette throughout: Polar Night backgrounds, Snow Storm text, Frost blue accents.
 - **Untested only filter** on Node vs Node, Code Benchmark, and Hallucination tabs: toggle to show only models that have no prior runs of that benchmark type. Automatically refreshes after each completed run so newly-tested models drop off immediately.
+- **Context-size warning (⚠)** on chat and code bench ctx selects: appears when the chosen `num_ctx` exceeds the model's trained context length, with a tooltip explaining Ollama will silently clamp it.
+- **RAG embedding model selector** groups embedding-capable models at the top of the select, making it immediately clear which models produce valid embeddings.
 
 ---
 

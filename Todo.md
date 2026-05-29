@@ -42,8 +42,8 @@
 - [ ] **README Screenshot Refresh**
   - Take a new screenshot of the current UI (accordion inspection panel, updated tab order, playground layout) and replace `static/img/screenshot.png`. Chrome extension was unavailable during v0.2.0 release.
 
-- [ ] **RAG Embedding Model Selector — Filter to Embedding Models Only**
-  - `rag-model-select` currently shows all Ollama models including chat/completion models. Selecting a chat model produces garbage or mismatched-dimension embeddings. Add filtering or at minimum label/group embedding models separately (detect by name: `embed`, `nomic`, `bge`, `mxbai`, `minilm`, etc.).
+- [x] **RAG Embedding Model Selector — Filter to Embedding Models Only**
+  - `rag-model-select` now uses `getModelCapabilities()` to group embedding models first in an optgroup, with other models below. Falls back to all models if no embedding models are detected.
 
 - [ ] **RAG: Image-Only / Scanned PDF Handling**
   - If PDF.js extracts empty or near-empty text (image-based PDF, scanned book), the current error "No extractable text found" is a dead end. Add a note in the UI suggesting the user convert via OCR first (e.g. `ocrmypdf`), and consider auto-detecting the scenario by checking if `text.length < 100` despite `numPages > 1`.
@@ -74,10 +74,10 @@
   - Make the bind host configurable and default local installs to `127.0.0.1` instead of listening on all interfaces.
   - Update Docker examples to publish `127.0.0.1:8080:8080` by default, with explicit reverse-proxy guidance for public deployments.
 
-- [ ] **Stored XSS Hardening Pass**
-  - Escape or DOM-build all user/server/model/chat/RAG values before rendering them into `innerHTML`.
-  - Prioritize server registry cards, model inventory rows, chat history rows, benchmark/optimizer tables, scheduler logs, RAG document/query output, and upload logs.
-  - Add a small safe-render helper so future table/card templates do not accidentally interpolate raw values.
+- [x] **Stored XSS Hardening Pass (partial — v0.2.20)**
+  - Server registry cards, fleet node cards, scheduler logs, and telemetry active-model rows are now fully escaped via `escapeHTML()`.
+  - Remaining exposure: optimizer tables, RAG document/query output, upload logs — still need a pass.
+  - A safe-render helper (`escapeHTML`) already exists; usage needs to be audited across remaining `innerHTML` sites.
 
 - [ ] **Auto-Compression Current-Turn Fix**
   - When auto-compressing, summarize older history but preserve the current user message in the request sent to Ollama.
@@ -259,15 +259,15 @@
 - [x] **Improved live log formatting** — Highlighted timing numbers (`TPS`, `ms`, `ch/s`, `%`) in accent colours. `[COMPLETED]` lines bold green, `[ERROR]` lines bold red, `[CANCELLED]` bold yellow. Run separators highlighted cyan.
 
 ### Medium effort
-- [ ] **TPS sparkline per multi-run group** — For rows with 2+ runs, render a tiny SVG bar chart (inline, ~60px wide) in the Metric column showing the TPS trend across runs chronologically. Makes consistency visible at a glance.
+- [x] **TPS sparkline per multi-run group** — Tiny SVG bar chart inline in the Metric column for multi-run groups; oldest → newest, latest bar highlighted in accent blue. Works for all benchmark types.
 
 - [x] **Sort + filter persistence** — Save `lbSortCol`, `lbSortDir`, and `currentLbFilter` to `localStorage` so leaderboard state survives page refresh. Keys: `neurollama-bench-sort-col`, `neurollama-bench-sort-dir`, `neurollama-bench-filter`.
 
 - [x] **Run duration display** — Record elapsed wall-clock time from benchmark start to `done` event on the client side. Displayed in the completion log line as `42s` or `1m 18s`. No backend change needed.
 
-- [ ] **Inline notes on leaderboard rows** — Make the notes line in the model-name cell directly editable (click-to-edit) instead of requiring the RATE modal. Save on blur via `PUT /api/benchmarks/:id/score` with the current score and new notes text.
+- [x] **Inline notes on leaderboard rows** — Click-to-edit note area on all rows (summary + sub-rows). Enter/blur saves, Escape cancels. Always shows faint `+ note` hint when empty.
 
 ### Higher effort
 - [ ] **Bar chart view** — Add a "Chart" toggle above the leaderboard that replaces the table with an SVG or canvas bar chart comparing the primary metric (TPS / accuracy / cps) across all visible model groups. Same filter state as the table. Toggle back with "Table".
 
-- [ ] **Batch run mode** — "Run All" button queues every installed compatible model for the selected benchmark type and runs them sequentially, one at a time, with a queue progress indicator. Skip models that already have a run from the last 24h (configurable).
+- [x] **Batch run mode** — "Run All" button on standard benchmarks queues all compatible models for the current type/size filter and runs them sequentially. Progress indicator shows `N/total · modelname`. Stop aborts the queue; errors skip to the next model.

@@ -1304,11 +1304,27 @@ function populateModelDropdowns() {
   const codeJudgeModel = document.getElementById('code-judge-model-select');
   const hallucModel = document.getElementById('halluc-model');
 
-  // Filter out models that might not have values
+  // All-model option string (chat, completion, builder, benchmark, etc.)
   const options = models.map(m => {
     const paramSize = (m.details && m.details.parameter_size) || '?';
     return `<option value="${m.name}">${m.name} (${paramSize})</option>`;
   }).join('');
+
+  // Embedding-only option string for RAG selects.
+  // Falls back to all models (with a separator) if no embedding models are detected,
+  // so installs without explicit embedding models still work.
+  const embedModels = models.filter(m => getModelCapabilities(m).includes('embedding'));
+  const otherModels = models.filter(m => !getModelCapabilities(m).includes('embedding'));
+  const ragOptions = embedModels.length > 0
+    ? [
+        embedModels.length > 0
+          ? `<optgroup label="── Embedding models ──">${embedModels.map(m => `<option value="${m.name}">${m.name}</option>`).join('')}</optgroup>`
+          : '',
+        otherModels.length > 0
+          ? `<optgroup label="── Other models ──">${otherModels.map(m => `<option value="${m.name}">${m.name}</option>`).join('')}</optgroup>`
+          : '',
+      ].join('')
+    : options; // no embedding models detected — show all
 
   if (models.length === 0) {
     const noModels = '<option value="">-- No models available --</option>';
@@ -1347,14 +1363,14 @@ function populateModelDropdowns() {
     }
     if (ragSelect) {
       const currentSelected = ragSelect.value || getPref('neurollama-rag-model') || '';
-      ragSelect.innerHTML = options;
+      ragSelect.innerHTML = ragOptions;
       if (currentSelected && ragSelect.querySelector(`option[value="${CSS.escape(currentSelected)}"]`)) {
         ragSelect.value = currentSelected;
       }
     }
     if (chatRagSelect) {
       const currentSelected = chatRagSelect.value || getPref('chat-rag-model-select') || '';
-      chatRagSelect.innerHTML = options;
+      chatRagSelect.innerHTML = ragOptions;
       if (currentSelected && chatRagSelect.querySelector(`option[value="${CSS.escape(currentSelected)}"]`)) {
         chatRagSelect.value = currentSelected;
       }
@@ -2270,6 +2286,11 @@ async function fetchModelCtxLengths() {
     document.querySelectorAll('select[id]').forEach(sel => {
       if (sel._ssWidget) sel._ssWidget.refresh();
     });
+    // Run an initial ctx warning check now that lengths are known — the change
+    // listeners only fire on user interaction, so a previously-saved high ctx
+    // would never show the warning without this explicit call.
+    updateCtxWarning('chat-model-select',  'chat-ctx-limit', 'chat-ctx-warn');
+    updateCtxWarning('code-bench-model',   'code-bench-ctx', 'code-ctx-warn');
   } catch { /* silently ignore */ }
 }
 
@@ -7319,14 +7340,9 @@ function populateBenchmarkModelSelect() {
     return;
   }
 
-  // Build a temporary filtered array for the rest of the function
-  let filtered = models.filter(m => names.includes(m.name));
-
-  if (filtered.length === 0) {
-    const reason = benchUntestedFilter ? 'untested models' : 'compatible models';
-    select.innerHTML = `<option value="">-- No ${reason} found --</option>`;
-    return;
-  }
+  // Build model-object array preserving order; use a Set for O(1) name lookup
+  const nameSet   = new Set(names);
+  const filtered  = models.filter(m => nameSet.has(m.name));
   const currentSelected = select.value || getPref('neurollama-bench-model') || '';
   select.innerHTML = filtered.map(m => {
     const paramSize = (m.details && m.details.parameter_size) || '?';
