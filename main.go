@@ -3950,13 +3950,14 @@ func noThinkPrompt(model, prompt string) string {
 	return prompt
 }
 
-// codeBenchSystemPrompt is injected into every code-generation request so that
-// models with aggressive default personas (self-introduction, refusals, etc.)
-// skip preamble and output code immediately.
-const codeBenchSystemPrompt = "You are a code generation assistant. Output ONLY the raw code requested. Do not introduce yourself, add explanations, add markdown fences, or include any text other than the code itself."
+// codeBenchSystemPrompt is injected into every code-generation request.
+// IMPORTANT: avoid role-description language like "code generation assistant" —
+// some models interpret that literally and write a function that generates code
+// rather than writing the actual requested code. Use constraint language only.
+const codeBenchSystemPrompt = "Write only the code asked for. No explanations, no markdown fences, no preamble, no self-introduction."
 
 // judgeSystemPrompt keeps the judge on-task when it would otherwise self-introduce.
-const judgeSystemPrompt = "You are a code evaluation assistant. Respond ONLY with a valid JSON object. No explanations, no preamble, no markdown."
+const judgeSystemPrompt = "Output only a JSON object. No explanations, no markdown, no preamble."
 
 // runCodeBenchmarkRun tests a list of languages, returning per-language results.
 func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judgeModel string, langs []string, numCtx int, logFunc func(string), debug bool) ([]map[string]interface{}, error) {
