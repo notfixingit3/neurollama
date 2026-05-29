@@ -3944,14 +3944,29 @@ func isThinkingModel(name string) bool {
 // boolPtr returns a pointer to a bool — used for optional JSON fields.
 func boolPtr(b bool) *bool { return &b }
 
-// thinkParam returns think=false for thinking models so Ollama suppresses
-// chain-of-thought via the API (equivalent to /set nothink in the REPL).
-// Returns nil for non-thinking models so Ollama uses the model's default.
+// thinkParam returns think=false for thinking models.
+// Sent as a top-level JSON field on the request; Ollama honours it on the chat
+// API. For the generate API the field may be silently ignored on older Ollama
+// builds, so noThinkPrompt() also appends /no_think as a belt-and-suspenders
+// fallback that works at the prompt level.
 func thinkParam(model string) *bool {
 	if isThinkingModel(model) {
 		return boolPtr(false)
 	}
 	return nil
+}
+
+// noThinkPrompt appends /no_think to a prompt for thinking models.
+// This is a prompt-level signal that works even when the generate API does not
+// honour the Think field. Safe to pass for non-thinking models — it's just
+// ignored. We intentionally do NOT set a System prompt override alongside this:
+// overriding the Modelfile system prompt removes safety/helpfulness context and
+// causes some models to refuse benign tasks (FizzBuzz, debounce, etc.).
+func noThinkPrompt(model, prompt string) string {
+	if isThinkingModel(model) {
+		return prompt + " /no_think"
+	}
+	return prompt
 }
 
 // isRefusalResponse returns true when the generated text looks like a safety
@@ -4039,8 +4054,8 @@ func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judge
 		// --- Pass 1: Generate code ---
 		genReq := GenerateRequest{
 			Model:  model,
-			Prompt: t.Prompt,
-			Think:  thinkParam(model), // think=false for Qwen3/QwQ/etc via API (no System override needed)
+			Prompt: noThinkPrompt(model, t.Prompt), // /no_think in prompt (generate API) + Think field (chat API)
+			Think:  thinkParam(model),
 			Stream: true,
 			Options: func() map[string]interface{} {
 				o := map[string]interface{}{
@@ -4166,8 +4181,8 @@ func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judge
 
 		judgeReq := GenerateRequest{
 			Model:  judgeTarget,
-			Prompt: judgeCodePrompt(t.Label, t.Task, generatedCode),
-			System: judgeSystemPrompt, // judge needs JSON-only constraint; model's safety context is kept via Modelfile
+			Prompt: noThinkPrompt(judgeTarget, judgeCodePrompt(t.Label, t.Task, generatedCode)),
+			System: judgeSystemPrompt, // JSON-only constraint; doesn't trigger safety refusals on judge prompts
 			Think:  thinkParam(judgeTarget),
 			Stream: true,
 			Options: func() map[string]interface{} {
@@ -4586,12 +4601,12 @@ func runHallucinationSSEHandler(c *gin.Context) {
 
 				req := GenerateRequest{
 					Model:  model,
-					Prompt: prompt,
+					Prompt: noThinkPrompt(model, prompt),
 					Think:  thinkParam(model),
 					Stream: true,
 					Options: map[string]interface{}{
 						"temperature": 0.0,
-						"num_predict": 30,
+						"num_predict": 40, // +10 headroom for /no_think token on thinking models
 						"num_ctx":     numCtx,
 					},
 				}
