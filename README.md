@@ -31,7 +31,12 @@ With NEUROLLAMA you can manage multiple Ollama nodes, inspect VRAM telemetry, be
 ## 📸 Screenshots
 
 <p align="center">
-  <img src="static/img/screenshot.png" alt="NEUROLLAMA Dashboard Interface" width="100%" style="border-radius: 12px; border: 1px solid #4c566a; box-shadow: 0 10px 25px rgba(0,0,0,0.3);" />
+  <img src="static/img/screenshot.png" alt="Model Inventory — capability badges, benchmark grades, ctx lengths" width="100%" style="border-radius: 12px; border: 1px solid #4c566a; box-shadow: 0 10px 25px rgba(0,0,0,0.3);" />
+</p>
+
+<p align="center">
+  <img src="static/img/screenshot-benchmarks.png" alt="Benchmark Leaderboard — TPS sparklines, Run All, inline notes" width="49%" style="border-radius: 8px; border: 1px solid #4c566a;" />
+  <img src="static/img/screenshot-fleet.png" alt="Fleet Overview — multi-node status, latency, model counts" width="49%" style="border-radius: 8px; border: 1px solid #4c566a;" />
 </p>
 
 ---

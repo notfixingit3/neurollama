@@ -39,8 +39,8 @@
 
 ## v0.2.x Session Notes
 
-- [ ] **README Screenshot Refresh**
-  - Take a new screenshot of the current UI (accordion inspection panel, updated tab order, playground layout) and replace `static/img/screenshot.png`. Chrome extension was unavailable during v0.2.0 release.
+- [x] **README Screenshot Refresh**
+  - Replaced `static/img/screenshot.png` with v0.2.20 inventory view (178 models, capability badges, benchmark grade badges). Added `screenshot-benchmarks.png` (leaderboard with sparklines + Run All) and `screenshot-fleet.png` (multi-node fleet overview) as a 2-up row below the hero shot.
 
 - [x] **RAG Embedding Model Selector — Filter to Embedding Models Only**
   - `rag-model-select` now uses `getModelCapabilities()` to group embedding models first in an optgroup, with other models below. Falls back to all models if no embedding models are detected.
