@@ -1,5 +1,9 @@
 # NEUROLLAMA Roadmap & Feature Todo List
 
+<!-- v0.2.22 — 2026-06-03 -->
+<!-- CI: dev compile-check, auto pre-release detection via merge-base -->
+<!-- chore: scrubbed all Co-Authored-By trailers from git history (git filter-repo) -->
+
 - [x] **Real-time Telemetry & Performance Graphs**
   - Plot live VRAM/RAM utilization, CPU/GPU temperatures, and generation speed (Tokens Per Second, Time to First Token) on the Memory tab.
 - [ ] **Local Document RAG (Retrieval-Augmented Generation) Panel**

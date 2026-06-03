@@ -4,6 +4,17 @@ All notable changes to NEUROLLAMA are documented here.
 
 ---
 
+## [v0.2.22] — 2026-06-03
+
+### Added
+- **CI: compile-check on dev pushes** — new `build-check` job runs `go build` on every push to `dev` so broken commits are caught before tagging.
+- **CI: auto pre-release detection** — `check-stable` job uses `git merge-base --is-ancestor` to determine if a tagged commit is on `main`; tags on `dev` produce GitHub pre-releases automatically, tags after main promotion produce stable releases.
+
+### Changed
+- **Commit history scrubbed** — all `Co-Authored-By` trailers removed from the full commit history via `git filter-repo`. All 127 commits rewritten; all tags recreated on new SHAs.
+
+---
+
 ## [v0.2.21] — 2026-06-03
 
 ### Added
