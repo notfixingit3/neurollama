@@ -24,6 +24,10 @@ let inventoryPage = 1;
 let inventoryPageSize = 50;
 let lastModelSyncTs = 0; // unix seconds from API lastUpdated field
 
+// Inventory sort state
+let inventorySortCol = 'name';
+let inventorySortDir = 'asc';
+
 // Server last-seen timestamps (ms) — updated on fetchServers and nodeStatus SSE events
 const serverLastSeen = {};
 
@@ -366,12 +370,259 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
+// ── Tooltip engine ───────────────────────────────────────────────────────────
+// Lightweight cursor-following tooltip. Add data-tip="..." to any element.
+// Supports \n for line breaks. Positioned below+right of cursor, clamped to viewport.
+
+function initTooltip() {
+  const tip = document.createElement('div');
+  tip.id = 'app-tooltip';
+  tip.style.cssText = 'position:fixed;z-index:9999;pointer-events:none;display:none;' +
+    'padding:4px 8px;border-radius:4px;' +
+    'background:#1e2430;border:1px solid rgba(76,86,106,0.7);' +
+    'color:#d8dee9;font-size:10px;font-family:ui-monospace,monospace;' +
+    'line-height:1.4;max-width:260px;white-space:pre-wrap;word-break:break-word;' +
+    'box-shadow:0 4px 12px rgba(0,0,0,0.4);';
+  document.body.appendChild(tip);
+
+  let showTimer = null;
+  let currentTarget = null;
+
+  function place(x, y) {
+    const ox = 14, oy = 18;
+    tip.style.left = '0px'; tip.style.top = '0px'; tip.style.display = 'block';
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    tip.style.display = 'none';
+    const cx = Math.min(x + ox, window.innerWidth  - tw - 8);
+    const cy = Math.min(y + oy, window.innerHeight - th - 8);
+    tip.style.left = cx + 'px';
+    tip.style.top  = cy + 'px';
+  }
+
+  document.addEventListener('mouseover', e => {
+    const target = e.target.closest('[data-tip]');
+    if (!target || target === currentTarget) return;
+    clearTimeout(showTimer);
+    currentTarget = target;
+    showTimer = setTimeout(() => {
+      tip.textContent = target.dataset.tip;
+      place(e.clientX, e.clientY);
+      tip.style.display = 'block';
+    }, 130);
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (tip.style.display !== 'none') {
+      const tw = tip.offsetWidth, th = tip.offsetHeight;
+      const cx = Math.min(e.clientX + 14, window.innerWidth  - tw - 8);
+      const cy = Math.min(e.clientY + 18, window.innerHeight - th - 8);
+      tip.style.left = cx + 'px';
+      tip.style.top  = cy + 'px';
+    }
+  });
+
+  document.addEventListener('mouseout', e => {
+    const target = e.target.closest('[data-tip]');
+    if (target && !target.contains(e.relatedTarget)) {
+      clearTimeout(showTimer);
+      tip.style.display = 'none';
+      currentTarget = null;
+    }
+  });
+}
+
+// ── Modelfile Fix Wizard ──────────────────────────────────────────────────────
+
+let _mfwOriginalName = '';
+let _mfwCreatedName  = '';
+let _mfwAbortCtrl    = null;
+
+function openModelFixWizard(name) {
+  _mfwOriginalName = name;
+  _mfwCreatedName  = '';
+  const modal = document.getElementById('modelfix-modal');
+  if (!modal) return;
+
+  document.getElementById('modelfix-title-name').textContent = name;
+  _mfwShowStep('loading');
+  modal.showModal();
+
+  fetch(`/api/models/detail?name=${encodeURIComponent(name)}`)
+    .then(r => r.ok ? r.json() : Promise.reject(new Error('Failed to load model details')))
+    .then(details => {
+      const sys = details.system || '';
+      document.getElementById('modelfix-system-input').value = sys;
+      document.getElementById('modelfix-system-label').textContent =
+        sys ? `(${sys.length} chars — currently set)` : '(none — may be in TEMPLATE or model weights)';
+
+      // Default new name: strip existing -clean suffix if re-running, then append -clean
+      const base = name.replace(/-clean$/, '');
+      document.getElementById('modelfix-name-input').value = base + '-clean';
+
+      modelFixUpdatePreview();
+      _mfwShowStep('configure');
+    })
+    .catch(e => { showToast(e.message, 'error'); closeModelFixWizard(); });
+}
+
+function _mfwShowStep(step) {
+  ['loading', 'configure', 'creating', 'done'].forEach(s => {
+    const el = document.getElementById(`modelfix-step-${s}`);
+    if (el) el.classList.toggle('hidden', s !== step);
+  });
+}
+
+function modelFixClearSystem() {
+  document.getElementById('modelfix-system-input').value = '';
+  document.getElementById('modelfix-system-label').textContent = '(will be cleared)';
+  modelFixUpdatePreview();
+}
+
+function modelFixUpdatePreview() {
+  const nameEl    = document.getElementById('modelfix-name-input');
+  const sysEl     = document.getElementById('modelfix-system-input');
+  const previewEl = document.getElementById('modelfix-preview');
+  const warnEl    = document.getElementById('modelfix-overwrite-warn');
+  if (!nameEl || !sysEl || !previewEl) return;
+
+  const newName = nameEl.value.trim();
+  const sysText = sysEl.value;
+
+  if (warnEl) warnEl.classList.toggle('hidden', newName !== _mfwOriginalName);
+
+  let mf = `FROM ${_mfwOriginalName}\n`;
+  if (sysText) {
+    mf += (sysText.includes('\n') || sysText.includes('"'))
+      ? `SYSTEM """\n${sysText}\n"""\n`
+      : `SYSTEM "${sysText}"\n`;
+  } else {
+    mf += `SYSTEM ""\n`;
+  }
+  previewEl.textContent = mf;
+}
+
+function _mfwBuildModelfile() {
+  const sysText = document.getElementById('modelfix-system-input').value;
+  let mf = `FROM ${_mfwOriginalName}\n`;
+  if (sysText) {
+    mf += (sysText.includes('\n') || sysText.includes('"'))
+      ? `SYSTEM """\n${sysText}\n"""\n`
+      : `SYSTEM "${sysText}"\n`;
+  } else {
+    mf += `SYSTEM ""\n`;
+  }
+  return mf;
+}
+
+async function confirmModelFix() {
+  const newName = document.getElementById('modelfix-name-input')?.value.trim();
+  if (!newName) { showToast('Enter a model name', 'error'); return; }
+
+  const modelfile = _mfwBuildModelfile();
+  _mfwCreatedName = newName;
+
+  _mfwShowStep('creating');
+  const logBox   = document.getElementById('modelfix-create-log');
+  const closeBtn = document.getElementById('modelfix-close-creating-btn');
+  const nameSpan = document.getElementById('modelfix-creating-name');
+  logBox.innerHTML = '';
+  if (nameSpan) nameSpan.textContent = ` "${newName}"`;
+  if (closeBtn) closeBtn.disabled = true;
+
+  try {
+    _mfwAbortCtrl = new AbortController();
+    const response = await fetch('/api/models/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newName, modelfile }),
+      signal: _mfwAbortCtrl.signal,
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || 'Create request failed');
+    }
+
+    const reader  = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let succeeded = false;
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (!line.trim() || !line.startsWith('data:')) continue;
+        try {
+          const chunk = JSON.parse(line.substring(5).trim());
+          if (chunk.status) {
+            const s = chunk.status.toUpperCase();
+            const cls = (s.includes('SUCCESS') || s.includes('COMPLETE'))
+              ? 'text-[#a3be8c] font-bold'
+              : (s.includes('ERR') || s.includes('FAIL'))
+              ? 'text-[#bf616a] font-bold'
+              : 'text-[#d8dee9]';
+            logBox.insertAdjacentHTML('beforeend', `<div class="${cls}">>> ${s}</div>`);
+            logBox.scrollTop = logBox.scrollHeight;
+            if (s.includes('SUCCESS')) succeeded = true;
+          }
+        } catch {}
+      }
+    }
+
+    if (closeBtn) closeBtn.disabled = false;
+    const doneMsg = document.getElementById('modelfix-done-msg');
+    const chatBtn = document.getElementById('modelfix-chat-btn');
+    if (doneMsg) doneMsg.innerHTML = succeeded
+      ? `<span class="text-[#a3be8c]"><i class="fa-solid fa-circle-check mr-2"></i>Model <strong class="font-mono">${escapeHTML(newName)}</strong> created successfully.</span>`
+      : `<span class="text-[#88c0d0]"><i class="fa-solid fa-circle-info mr-2"></i>Model <strong class="font-mono">${escapeHTML(newName)}</strong> created.</span>`;
+    if (chatBtn) chatBtn.classList.remove('hidden');
+    _mfwShowStep('done');
+    showToast(`Model '${newName}' created`, 'success');
+    fetchModels();
+    populateModelDropdowns();
+
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    if (closeBtn) closeBtn.disabled = false;
+    const doneMsg = document.getElementById('modelfix-done-msg');
+    if (doneMsg) doneMsg.innerHTML = `<span class="text-[#bf616a]"><i class="fa-solid fa-circle-exclamation mr-2"></i>${escapeHTML(e.message)}</span>`;
+    _mfwShowStep('done');
+  }
+}
+
+function modelFixOpenInChat() {
+  if (!_mfwCreatedName) return;
+  closeModelFixWizard();
+  switchWorkspace('chat');
+  setTimeout(() => {
+    const sel = document.getElementById('chat-model-select');
+    if (sel) {
+      sel.value = _mfwCreatedName;
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      if (sel._ssWidget) sel._ssWidget.refresh();
+    }
+  }, 350);
+}
+
+function closeModelFixWizard() {
+  const modal = document.getElementById('modelfix-modal');
+  if (modal) modal.close();
+  if (_mfwAbortCtrl) { _mfwAbortCtrl.abort(); _mfwAbortCtrl = null; }
+  setTimeout(() => _mfwShowStep('loading'), 200); // reset after close animation
+}
+
 async function init() {
   // Load all user preferences from DB before restoring any state.
   await loadPreferences();
   // Apply theme from DB pref (may override the localStorage early-apply)
   initTheme();
 
+  initTooltip();
   initAccordionRow();
   // Non-blocking: fire and forget — page renders immediately, server cards and
   // status dots fill in once the (now-instant) cache read completes.
@@ -1798,6 +2049,7 @@ async function checkOllamaVersionDot(version) {
 
   dot.className = `h-2 w-2 rounded-full shrink-0 cursor-default transition-colors ${color}`;
   dot.title = title;
+  dot.dataset.tip = title;
   dot.classList.remove('hidden');
   // Now that ollamaLatestInfo is populated, refine the footer badge too
   updateFooterNodeBadge();
@@ -2233,7 +2485,7 @@ async function fetchModels() {
   const listBody = document.getElementById('models-list-body');
   listBody.innerHTML = `
     <tr>
-      <td colspan="5" class="py-8 text-center text-[#4c566a]">
+      <td colspan="6" class="py-8 text-center text-[#4c566a]">
         <i class="fa-solid fa-circle-notch animate-spin mr-2"></i> Querying inventory...
       </td>
     </tr>
@@ -2333,7 +2585,9 @@ function updateCtxWarning(modelId, ctxId, warnId) {
     warnEl.classList.add('hidden');
     return;
   }
-  warnEl.title = `${fmtCtx(ctxVal)} exceeds this model's trained context (${fmtCtx(trained)}) — Ollama will silently clamp it`;
+  const warnMsg = `${fmtCtx(ctxVal)} exceeds this model's trained context (${fmtCtx(trained)})\nOllama will silently clamp it`;
+  warnEl.title = warnMsg;
+  warnEl.dataset.tip = warnMsg;
   warnEl.classList.remove('hidden');
 }
 
@@ -2372,10 +2626,11 @@ function buildBenchBadges(b) {
   if (b.std_grade) {
     const s = GRADE_STYLE[b.std_grade] || GRADE_STYLE.F;
     const typeLabel = STD_TYPE_LABEL[b.std_type] || b.std_type || 'Benchmark';
-    const tpsStr = b.std_tps > 0 ? ` · ${b.std_tps.toFixed(1)} TPS` : '';
+    const tpsStr = b.std_tps > 0 ? `\n${b.std_tps.toFixed(1)} tokens/sec` : '';
+    const gradeDesc = { S:'Top tier (≥90%)', A:'Strong (75–89%)', B:'Good (60–74%)', C:'Fair (45–59%)', D:'Weak (30–44%)', F:'Poor (<30%)' };
     badges.push(
       `<span class="inline-flex items-center gap-0.5 border ${s.border} ${s.text} rounded px-1 text-[8px] font-mono font-bold cursor-default" ` +
-      `title="${typeLabel}${tpsStr}">` +
+      `data-tip="Standard benchmark · ${typeLabel}\nGrade ${b.std_grade}: ${gradeDesc[b.std_grade] || ''}${tpsStr}">` +
       `<i class="fa-solid fa-gauge text-[7px]"></i>${b.std_grade}</span>`
     );
   }
@@ -2383,10 +2638,11 @@ function buildBenchBadges(b) {
   // Code benchmark grade
   if (b.code_grade) {
     const s = GRADE_STYLE[b.code_grade] || GRADE_STYLE.F;
-    const qStr = b.code_quality > 0 ? ` · ${b.code_quality.toFixed(1)}/10 quality` : '';
+    const qStr = b.code_quality > 0 ? `\n${b.code_quality.toFixed(1)}/10 quality score` : '';
+    const gradeDesc = { S:'Top tier (≥90%)', A:'Strong (75–89%)', B:'Good (60–74%)', C:'Fair (45–59%)', D:'Weak (30–44%)', F:'Poor (<30%)' };
     badges.push(
       `<span class="inline-flex items-center gap-0.5 border ${s.border} ${s.text} rounded px-1 text-[8px] font-mono font-bold cursor-default" ` +
-      `title="Code benchmark${qStr}">` +
+      `data-tip="Code benchmark\nGrade ${b.code_grade}: ${gradeDesc[b.code_grade] || ''}${qStr}">` +
       `<i class="fa-solid fa-code text-[7px]"></i>${b.code_grade}</span>`
     );
   }
@@ -2397,9 +2653,10 @@ function buildBenchBadges(b) {
     const borderCls = pct >= 80 ? 'border-[#a3be8c]/60' : pct >= 60 ? 'border-[#d08770]/60' : 'border-[#bf616a]/60';
     const textCls   = pct >= 80 ? 'text-[#a3be8c]'      : pct >= 60 ? 'text-[#d08770]'      : 'text-[#bf616a]';
     const ctxStr = b.hallu_ctx_k > 0 ? ` @ ${b.hallu_ctx_k}K ctx` : '';
+    const quality = pct >= 80 ? 'Strong factual recall' : pct >= 60 ? 'Moderate factual recall' : 'Hallucination-prone';
     badges.push(
       `<span class="inline-flex items-center gap-0.5 border ${borderCls} ${textCls} rounded px-1 text-[8px] font-mono cursor-default" ` +
-      `title="Hallucination recall${ctxStr}">` +
+      `data-tip="Hallucination benchmark${ctxStr}\n${pct}% recall — ${quality}">` +
       `<i class="fa-solid fa-brain text-[7px]"></i>${pct}%</span>`
     );
   }
@@ -2435,9 +2692,12 @@ function buildSparkline(runs, bType) {
   }).join('');
 
   const unit = bType === 'embedding' ? 'ch/s' : bType === 'reasoning' ? '%acc' : 'TPS';
+  const latest = values[values.length - 1];
+  const latestStr = bType === 'reasoning' ? `${latest.toFixed(1)}%` : latest.toFixed(1);
+  const tipText = `${n} runs · latest: ${latestStr} ${unit}\nOldest ← → newest`;
   return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" ` +
     `class="inline-block align-middle ml-2 opacity-60 hover:opacity-100 transition-opacity shrink-0 cursor-default" ` +
-    `title="${unit} across ${n} runs — oldest ← → newest (right bar = latest)">${bars}</svg>`;
+    `data-tip="${tipText}">${bars}</svg>`;
 }
 
 function initAccordionRow() {
@@ -2445,7 +2705,7 @@ function initAccordionRow() {
   accordionEl.id = 'model-detail-accordion';
   accordionEl.style.display = 'none';
   accordionEl.innerHTML = `
-    <td colspan="5" class="p-0">
+    <td colspan="6" class="p-0">
       <div class="mx-1 mb-1 p-4 bg-[#1e2430] border border-[#88c0d0]/25 border-t-0 rounded-b-lg text-xs">
         <div class="flex items-center justify-between mb-3 pb-2 border-b border-[#4c566a]/40">
           <div class="flex flex-wrap gap-1.5 items-center">
@@ -2456,6 +2716,9 @@ function initAccordionRow() {
             <span id="badge-params" class="badge badge-outline border-[#4c566a] text-[#ebcb8b] text-[10px] font-semibold"></span>
             <span class="text-[10px] text-[#4c566a] font-mono ml-2">Digest: <span id="detail-digest" class="text-[#81a1c1]"></span></span>
           </div>
+          <button onclick="openModelFixWizard(openAccordionModel)" class="btn btn-xs btn-outline border-[#ebcb8b]/50 text-[#ebcb8b] hover:bg-[#ebcb8b]/10 font-tech text-[9px] gap-1 px-2" data-tip="Open Modelfile Fix Wizard\nEdit or clear the SYSTEM prompt">
+            <i class="fa-solid fa-wrench text-[8px]"></i>FIX
+          </button>
           <button onclick="clearInspectedModel()" class="btn btn-xs btn-ghost text-[#4c566a] hover:text-[#bf616a] p-1" title="Close">
             <i class="fa-solid fa-xmark"></i>
           </button>
@@ -2543,6 +2806,62 @@ function refreshInventory() {
   fetchModels();
 }
 
+// ── Inventory sort ────────────────────────────────────────────────────────────
+
+function setInventorySort(col) {
+  if (inventorySortCol === col) {
+    inventorySortDir = inventorySortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    inventorySortCol = col;
+    inventorySortDir = 'asc';
+  }
+  inventoryPage = 1;
+  renderModels();
+}
+
+function _sortedModels() {
+  const col = inventorySortCol;
+  const dir = inventorySortDir === 'asc' ? 1 : -1;
+  return [...models].sort((a, b) => {
+    let av, bv;
+    switch (col) {
+      case 'size':
+        av = a.size || 0; bv = b.size || 0;
+        return dir * (av - bv);
+      case 'params': {
+        av = parseParamBillions((a.details && a.details.parameter_size) || '');
+        bv = parseParamBillions((b.details && b.details.parameter_size) || '');
+        if (av === null && bv === null) return 0;
+        if (av === null) return 1;   // nulls always last
+        if (bv === null) return -1;
+        return dir * (av - bv);
+      }
+      case 'modified':
+        av = new Date(a.modified_at).getTime() || 0;
+        bv = new Date(b.modified_at).getTime() || 0;
+        return dir * (av - bv);
+      case 'name':
+      default:
+        av = (a.name || '').toLowerCase();
+        bv = (b.name || '').toLowerCase();
+        return dir * (av < bv ? -1 : av > bv ? 1 : 0);
+    }
+  });
+}
+
+function _updateInventorySortHeaders() {
+  const cols = ['name', 'size', 'params', 'modified'];
+  cols.forEach(col => {
+    const th = document.getElementById(`inv-th-${col}`);
+    if (!th) return;
+    const labels = { name: 'Model Name', size: 'Size', params: 'Parameters', modified: 'Modified' };
+    const ind = inventorySortCol === col
+      ? (inventorySortDir === 'asc' ? ' ↑' : ' ↓')
+      : ' <span class="opacity-25">↕</span>';
+    th.innerHTML = labels[col] + ind;
+  });
+}
+
 // ── Server last-seen helpers ──────────────────────────────────────────────────
 
 function timeAgoShort(tsMs) {
@@ -2586,7 +2905,7 @@ function renderModels() {
   if (models.length === 0) {
     listBody.innerHTML = `
       <tr>
-        <td colspan="5" class="text-center py-8 text-[#4c566a] italic">
+        <td colspan="6" class="text-center py-8 text-[#4c566a] italic">
           No models found on this server. Pull a model above to begin.
         </td>
       </tr>
@@ -2595,11 +2914,13 @@ function renderModels() {
     return;
   }
 
-  // Client-side page slice
-  const totalPages = Math.ceil(models.length / inventoryPageSize);
-  if (inventoryPage > totalPages) inventoryPage = totalPages;
+  // Client-side sort + page slice
+  _updateInventorySortHeaders();
+  const sorted = _sortedModels();
+  const totalPages = Math.ceil(sorted.length / inventoryPageSize);
+  if (inventoryPage > totalPages) inventoryPage = Math.max(1, totalPages);
   const start = (inventoryPage - 1) * inventoryPageSize;
-  const pageModels = models.slice(start, start + inventoryPageSize);
+  const pageModels = sorted.slice(start, start + inventoryPageSize);
 
   // Detach accordion before wiping innerHTML
   if (accordionEl && accordionEl.parentNode === listBody) {
@@ -2621,16 +2942,17 @@ function renderModels() {
     // Capability badges
     const caps = getModelCapabilities(model);
     const capBadgeHtml = [
-      caps.includes('vision')    ? '<span class="inline-flex items-center gap-0.5 border border-[#b48ead] text-[#b48ead] rounded px-1 text-[8px] font-mono font-bold" title="Vision / multimodal"><i class="fa-solid fa-eye text-[7px]"></i>VIS</span>' : '',
-      caps.includes('embedding') ? '<span class="inline-flex items-center gap-0.5 border border-[#ebcb8b] text-[#ebcb8b] rounded px-1 text-[8px] font-mono font-bold" title="Embedding model"><i class="fa-solid fa-layer-group text-[7px]"></i>EMB</span>' : '',
-      caps.includes('tools')     ? '<span class="inline-flex items-center gap-0.5 border border-[#a3be8c] text-[#a3be8c] rounded px-1 text-[8px] font-mono font-bold" title="Supports tool / function calling"><i class="fa-solid fa-wrench text-[7px]"></i>TOOLS</span>' : '',
-      caps.includes('thinking')  ? '<span class="inline-flex items-center gap-0.5 border border-[#8fbcbb] text-[#8fbcbb] rounded px-1 text-[8px] font-mono font-bold" title="Chain-of-thought / reasoning model"><i class="fa-solid fa-lightbulb text-[7px]"></i>THINK</span>' : '',
+      caps.includes('vision')    ? '<span class="inline-flex items-center gap-0.5 border border-[#b48ead] text-[#b48ead] rounded px-1 text-[8px] font-mono font-bold cursor-default" data-tip="Vision / multimodal\nCan process images alongside text"><i class="fa-solid fa-eye text-[7px]"></i>VIS</span>' : '',
+      caps.includes('embedding') ? '<span class="inline-flex items-center gap-0.5 border border-[#ebcb8b] text-[#ebcb8b] rounded px-1 text-[8px] font-mono font-bold cursor-default" data-tip="Embedding model\nConverts text to vector representations\nNot suited for chat or benchmarks"><i class="fa-solid fa-layer-group text-[7px]"></i>EMB</span>' : '',
+      caps.includes('tools')     ? '<span class="inline-flex items-center gap-0.5 border border-[#a3be8c] text-[#a3be8c] rounded px-1 text-[8px] font-mono font-bold cursor-default" data-tip="Tool / function calling\nSupports structured tool use via Ollama API"><i class="fa-solid fa-wrench text-[7px]"></i>TOOLS</span>' : '',
+      caps.includes('thinking')  ? '<span class="inline-flex items-center gap-0.5 border border-[#8fbcbb] text-[#8fbcbb] rounded px-1 text-[8px] font-mono font-bold cursor-default" data-tip="Chain-of-thought / reasoning\nThink suppression applied automatically in benchmarks"><i class="fa-solid fa-lightbulb text-[7px]"></i>THINK</span>' : '',
     ].filter(Boolean).join('');
 
     // Context length badge
     const ctxLabel = fmtCtx(modelCtxLengths[model.name]);
+    const ctxRaw = modelCtxLengths[model.name];
     const ctxBadge = ctxLabel
-      ? `<span class="inline-flex items-center gap-0.5 border border-[#88c0d0]/40 text-[#88c0d0] rounded px-1 text-[8px] font-mono" title="Trained context window">${ctxLabel}</span>`
+      ? `<span class="inline-flex items-center gap-0.5 border border-[#88c0d0]/40 text-[#88c0d0] rounded px-1 text-[8px] font-mono cursor-default" data-tip="Trained context window\n${ctxRaw ? ctxRaw.toLocaleString() + ' tokens max' : ctxLabel}">${ctxLabel}</span>`
       : '';
 
     // Benchmark badges from summary
@@ -2659,15 +2981,16 @@ function renderModels() {
         <td class="hidden md:table-cell">
           <span class="badge badge-outline border-[#4c566a] text-[#81a1c1] text-[9px] font-mono">${paramSize}</span>
         </td>
+        <td class="hidden lg:table-cell text-[#4c566a] font-mono text-[10px]">${dateFormatted}</td>
         <td>
           <div class="flex items-center gap-1.5">
-            <button onclick="inspectModel('${model.name}')" class="btn btn-xs btn-neutral border-[#4c566a] text-[10px] font-tech w-[62px]" title="Inspect Telemetry">
+            <button onclick="inspectModel('${model.name}')" class="btn btn-xs btn-neutral border-[#4c566a] text-[10px] font-tech w-[62px]" data-tip="${isOpen ? 'Close details panel' : 'Live VRAM telemetry\nmodel info, parameters'}">
               ${isOpen ? 'CLOSE' : 'INSPECT'}
             </button>
-            <button onclick="cloneModelPrompt('${model.name}')" class="btn btn-xs btn-outline btn-info text-[10px] font-tech" title="Clone Model">
+            <button onclick="cloneModelPrompt('${model.name}')" class="btn btn-xs btn-outline btn-info text-[10px] font-tech" data-tip="Clone / copy model\nSaves to same node under a new name">
               CLONE
             </button>
-            <button onclick="deleteSingleModel('${model.name}')" class="btn btn-xs btn-ghost text-[#bf616a] hover:bg-[#bf616a]/15 p-1" title="Delete Model">
+            <button onclick="deleteSingleModel('${model.name}')" class="btn btn-xs btn-ghost text-[#bf616a] hover:bg-[#bf616a]/15 p-1" data-tip="Delete model from active node">
               <i class="fa-solid fa-trash-can"></i>
             </button>
           </div>
@@ -2709,7 +3032,7 @@ function renderModelsEmpty(message) {
   const listBody = document.getElementById('models-list-body');
   listBody.innerHTML = `
     <tr>
-      <td colspan="5" class="text-center py-8 text-[#bf616a]/80 font-semibold italic text-xs">
+      <td colspan="6" class="text-center py-8 text-[#bf616a]/80 font-semibold italic text-xs">
         <i class="fa-solid fa-circle-exclamation mr-1.5"></i> ${message}
       </td>
     </tr>
@@ -2732,9 +3055,10 @@ function toggleSelectModel(name, checked) {
 }
 
 function toggleSelectAllModels(checkbox) {
-  // Operate on the current page slice only
+  // Operate on the current sorted page slice
+  const sorted = _sortedModels();
   const start = (inventoryPage - 1) * inventoryPageSize;
-  const pageModels = models.slice(start, start + inventoryPageSize);
+  const pageModels = sorted.slice(start, start + inventoryPageSize);
   if (checkbox.checked) {
     pageModels.forEach(m => selectedModels.add(m.name));
   } else {
@@ -2744,15 +3068,40 @@ function toggleSelectAllModels(checkbox) {
   updateBatchActionsUI();
 }
 
+function selectAllPagesModels() {
+  models.forEach(m => selectedModels.add(m.name));
+  renderModels();
+  updateBatchActionsUI();
+}
+
+function clearModelSelection() {
+  selectedModels.clear();
+  renderModels();
+  updateBatchActionsUI();
+}
+
 function updateBatchActionsUI() {
   const container = document.getElementById('batch-actions-container');
-  const countSpan = document.getElementById('selected-count');
-  
+  const countSpan  = document.getElementById('selected-count');
+  const allPagesEl = document.getElementById('select-all-pages-hint');
+
   if (selectedModels.size > 0) {
     container.classList.remove('hidden');
     countSpan.textContent = selectedModels.size;
+    // Show "select all N" hint only when there are unselected models on other pages
+    if (allPagesEl) {
+      const allSelected = models.every(m => selectedModels.has(m.name));
+      if (!allSelected && models.length > inventoryPageSize) {
+        allPagesEl.classList.remove('hidden');
+        const allPagesLink = document.getElementById('select-all-pages-link');
+        if (allPagesLink) allPagesLink.textContent = `Select all ${models.length}`;
+      } else {
+        allPagesEl.classList.add('hidden');
+      }
+    }
   } else {
     container.classList.add('hidden');
+    if (allPagesEl) allPagesEl.classList.add('hidden');
   }
 }
 
@@ -6397,13 +6746,14 @@ function renderCrossNodeResults(results, q) {
   if (accordionEl && accordionEl.parentNode === listBody) listBody.removeChild(accordionEl);
 
   if (results.length === 0) {
-    listBody.innerHTML = `<tr><td colspan="5" class="text-center py-8 text-[#4c566a] italic text-xs">No models matching "${q}" found on any node.</td></tr>`;
+    listBody.innerHTML = `<tr><td colspan="6" class="text-center py-8 text-[#4c566a] italic text-xs">No models matching "${q}" found on any node.</td></tr>`;
     return;
   }
 
   listBody.innerHTML = results.map(r => {
     const sizeFormatted = formatBytes(r.size);
     const paramSize     = (r.details && r.details.parameter_size) || 'N/A';
+    const dateFormatted = r.modified_at ? new Date(r.modified_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
     const isActiveNode  = servers.find(s => s.id === r.node_id)?.isActive;
     const nodeBadgeColor = isActiveNode ? 'border-[#88c0d0] text-[#88c0d0]' : 'border-[#4c566a] text-[#4c566a]';
 
@@ -6421,6 +6771,7 @@ function renderCrossNodeResults(results, q) {
         <td class="hidden md:table-cell">
           <span class="badge badge-outline border-[#4c566a] text-[#81a1c1] text-[9px] font-mono">${paramSize}</span>
         </td>
+        <td class="hidden lg:table-cell text-[#4c566a] font-mono text-[10px]">${dateFormatted}</td>
         <td>
           ${isActiveNode
             ? `<div class="flex items-center gap-1.5">
@@ -7868,6 +8219,13 @@ async function fetchBenchmarks() {
       const runsBadge = multiRun
         ? `<span class="ml-1 bg-[#3b4252] border border-[#4c566a] text-[#8fbcbb] text-[8px] font-mono px-1.5 rounded-full">${group.run_count}×</span>`
         : '';
+
+      // Chat-model flag: stored in extra_json when standard benchmark detects greeting response
+      const summaryExtra = (() => { try { return JSON.parse(group.summary_run?.extra_json || '{}'); } catch { return {}; } })();
+      const isChatModel = Array.isArray(summaryExtra.flags) && summaryExtra.flags.includes('chat_model');
+      const chatBadge = isChatModel
+        ? `<span onclick="event.stopPropagation(); openModelFixWizard('${escapeHTML(group.model_name)}')" class="inline-flex items-center gap-0.5 border border-[#ebcb8b]/70 text-[#ebcb8b] rounded px-1 text-[8px] font-mono font-bold cursor-pointer ml-1 hover:bg-[#ebcb8b]/10 transition-colors" data-tip="Chat-only model — ignores task prompts\nCode &amp; hallucination benchmarks will score 0\nClick to fix Modelfile →">CHAT <i class="fa-solid fa-wrench text-[7px]"></i></span>`
+        : '';
       const expandBtn = multiRun
         ? `<button onclick="event.stopPropagation();toggleBenchGroup('${gkey}')" id="expand-btn-${gkey}"
                    title="Show individual runs"
@@ -7902,10 +8260,10 @@ async function fetchBenchmarks() {
         <tr class="hover:bg-[#3b4252]/20 border-b border-[#4c566a]/20 transition-colors${multiRun ? ' cursor-pointer' : ''}"
             ${multiRun ? `onclick="toggleBenchGroup('${gkey}')"` : ''}>
           <td class="py-3 text-left font-mono overflow-hidden">
-            <div class="flex items-center gap-1.5 overflow-hidden">
+            <div class="flex items-center gap-1.5 overflow-hidden flex-wrap">
               ${typeBadgeHtml}
               <span class="font-bold text-[#e5e9f0] truncate min-w-0" title="${escapeHTML(group.model_name)}">${escapeHTML(group.model_name)}</span>
-              ${runsBadge}
+              ${runsBadge}${chatBadge}
             </div>
             ${noteHtml}
           </td>
@@ -9527,44 +9885,53 @@ async function toggleHalluUntestedFilter() {
   populateCodeBenchModelSelects();
 }
 
+// Build a single <option> string with param-size badge text so the
+// makeSearchableSelect widget can parse and display size + ctx badges.
+function _benchModelOption(name) {
+  const m = models.find(x => x.name === name);
+  const p = (m?.details?.parameter_size) || '?';
+  return `<option value="${escapeHTML(name)}">${escapeHTML(name)} (${p})</option>`;
+}
+
+function _setSelectOptions(el, names, emptyMsg) {
+  if (!el) return;
+  const cur = el.value;
+  el.innerHTML = names.length
+    ? names.map(_benchModelOption).join('')
+    : `<option value="">${emptyMsg}</option>`;
+  if (cur && names.includes(cur)) el.value = cur;
+  if (el._ssWidget) el._ssWidget.refresh();
+}
+
 function populateCodeBenchModelSelects() {
   const modelNames = models.map(m => m.name);
 
   // code-bench-model: honour untested filter
-  const codeEl = document.getElementById('code-bench-model');
-  if (codeEl) {
-    const cur = codeEl.value;
-    const filtered = (codeUntestedFilter && codeTestedModels.size > 0)
-      ? modelNames.filter(n => !codeTestedModels.has(n))
-      : modelNames;
-    codeEl.innerHTML = filtered.length
-      ? filtered.map(n => `<option value="${escapeHTML(n)}">${escapeHTML(n)}</option>`).join('')
-      : '<option value="">— No untested models found —</option>';
-    if (cur && filtered.includes(cur)) codeEl.value = cur;
-  }
+  const filteredCode = (codeUntestedFilter && codeTestedModels.size > 0)
+    ? modelNames.filter(n => !codeTestedModels.has(n))
+    : modelNames;
+  _setSelectOptions(
+    document.getElementById('code-bench-model'),
+    filteredCode,
+    '— No untested models found —'
+  );
 
-  // code-judge-model-select: no untested filter (judge can be any model)
-  const judgeEl = document.getElementById('code-judge-model-select');
-  if (judgeEl) {
-    const cur = judgeEl.value;
-    judgeEl.innerHTML = modelNames.length
-      ? modelNames.map(n => `<option value="${escapeHTML(n)}">${escapeHTML(n)}</option>`).join('')
-      : '<option value="">No models available</option>';
-    if (cur && modelNames.includes(cur)) judgeEl.value = cur;
-  }
+  // code-judge-model-select: no untested filter
+  _setSelectOptions(
+    document.getElementById('code-judge-model-select'),
+    modelNames,
+    'No models available'
+  );
 
   // halluc-model: honour untested filter
-  const halluEl = document.getElementById('halluc-model');
-  if (halluEl) {
-    const cur = halluEl.value;
-    const filtered = (halluUntestedFilter && halluTestedModels.size > 0)
-      ? modelNames.filter(n => !halluTestedModels.has(n))
-      : modelNames;
-    halluEl.innerHTML = filtered.length
-      ? filtered.map(n => `<option value="${escapeHTML(n)}">${escapeHTML(n)}</option>`).join('')
-      : '<option value="">— No untested models found —</option>';
-    if (cur && filtered.includes(cur)) halluEl.value = cur;
-  }
+  const filteredHallu = (halluUntestedFilter && halluTestedModels.size > 0)
+    ? modelNames.filter(n => !halluTestedModels.has(n))
+    : modelNames;
+  _setSelectOptions(
+    document.getElementById('halluc-model'),
+    filteredHallu,
+    '— No untested models found —'
+  );
 }
 
 function startCodeBenchmark() {
@@ -10212,6 +10579,28 @@ function stopHallucinationTest() {
   if (stopBtn) stopBtn.classList.add('hidden');
 }
 
+function _halluFmtMs(ms) {
+  if (!ms || ms <= 0) return '';
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
+}
+
+function _halluCellHtml(cell, key) {
+  if (!cell) {
+    return `<div id="heatmap-cell-${key}" class="halluc-cell halluc-cell-pending" data-tip="Pending">·</div>`;
+  }
+  const cls  = cell.pass ? 'halluc-cell-pass' : cell.is_hallucination ? 'halluc-cell-halluc' : 'halluc-cell-refusal';
+  const sym  = cell.pass ? '✓' : cell.is_hallucination ? '✗' : '?';
+  const time = _halluFmtMs(cell.total_ms);
+  const ttft = cell.ttft_ms > 0 ? `TTFT: ${_halluFmtMs(cell.ttft_ms)}` : '';
+  const tot  = cell.total_ms > 0 ? `Total: ${_halluFmtMs(cell.total_ms)}` : '';
+  const status = cell.pass ? 'PASS' : cell.is_hallucination ? 'HALLUCINATION' : 'REFUSAL';
+  const resp = cell.response ? `\n"${cell.response.slice(0, 80)}${cell.response.length > 80 ? '…' : ''}"` : '';
+  const tipParts = [status, ttft, tot].filter(Boolean).join(' · ');
+  const tip = tipParts + resp;
+  const timeHtml = time ? `<span class="halluc-cell-time">${time}</span>` : '';
+  return `<div id="heatmap-cell-${key}" class="halluc-cell ${cls}" data-tip="${escapeHTML(tip)}">${sym}${timeHtml}</div>`;
+}
+
 function renderLiveHeatmap(maxK) {
   const heatmapEl = document.getElementById('halluc-heatmap');
   if (!heatmapEl) return;
@@ -10219,7 +10608,6 @@ function renderLiveHeatmap(maxK) {
   const allSizes = [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 5120, 10240];
   const sizes = allSizes.filter(s => s <= maxK);
   const positions = [10, 50, 90];
-
   const formatK = k => k >= 1024 ? `${k/1024}M` : `${k}k`;
 
   let html = `<table class="w-full text-[9px] font-mono border-collapse">
@@ -10233,13 +10621,7 @@ function renderLiveHeatmap(maxK) {
           <td class="text-[#88c0d0] pr-3 text-right py-1 whitespace-nowrap">${formatK(k)}</td>
           ${positions.map(p => {
             const key = `${k}_${p}`;
-            const cell = liveHeatmapCells[key];
-            return `<td class="px-2 py-1 text-center">
-              <div id="heatmap-cell-${key}" class="halluc-cell ${cell ? (cell.pass ? 'halluc-cell-pass' : cell.is_hallucination ? 'halluc-cell-halluc' : 'halluc-cell-refusal') : 'halluc-cell-pending'}"
-                title="${cell ? escapeHTML(cell.response || '') : 'Pending'}">
-                ${cell ? (cell.pass ? '✓' : cell.is_hallucination ? '✗' : '?') : '·'}
-              </div>
-            </td>`;
+            return `<td class="px-2 py-1 text-center">${_halluCellHtml(liveHeatmapCells[key], key)}</td>`;
           }).join('')}
         </tr>`).join('')}
     </tbody>
@@ -10251,10 +10633,7 @@ function updateHeatmapCell(cell) {
   const key = `${cell.context_k}_${cell.position_pct}`;
   const el = document.getElementById(`heatmap-cell-${key}`);
   if (!el) return;
-
-  el.className = `halluc-cell ${cell.pass ? 'halluc-cell-pass' : cell.is_hallucination ? 'halluc-cell-halluc' : 'halluc-cell-refusal'}`;
-  el.textContent = cell.pass ? '✓' : cell.is_hallucination ? '✗' : '?';
-  el.title = cell.response || '';
+  el.outerHTML = _halluCellHtml(cell, key);
 }
 
 async function fetchHallucinationRuns() {

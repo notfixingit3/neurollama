@@ -32,7 +32,7 @@ import (
 	goPDF "github.com/ledongthuc/pdf"
 )
 
-const appVersion = "v0.2.20"
+const appVersion = "v0.2.21"
 
 var (
 	appStartTime = time.Now()
@@ -3344,7 +3344,9 @@ func buildHallucinationPrompt(targetK int, positionPct int) string {
 
 // --- Benchmark runners ---
 
-func runBenchmarkForPrompt(ctx context.Context, client *OllamaClient, model string, prompt string, logFunc func(string)) (float64, float64, float64, error) {
+// runBenchmarkForPrompt returns (ttft_ms, tps, latency_ms, responseHead, error).
+// responseHead is the first 300 chars of the response, used for greeting/refusal detection.
+func runBenchmarkForPrompt(ctx context.Context, client *OllamaClient, model string, prompt string, logFunc func(string)) (float64, float64, float64, string, error) {
 	req := GenerateRequest{
 		Model:  model,
 		Prompt: prompt,
@@ -3357,13 +3359,14 @@ func runBenchmarkForPrompt(ctx context.Context, client *OllamaClient, model stri
 	start := time.Now()
 	stream, err := client.StreamGenerate(ctx, req)
 	if err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, "", err
 	}
 	defer func() { _ = stream.Close() }()
 
 	var firstTokenTime time.Duration
 	var firstTokenReceived bool
 	var tokenCount int
+	var respHead strings.Builder // capture first 300 chars for greeting/refusal detection
 
 	scanner := newStreamScanner(stream)
 	for scanner.Scan() {
@@ -3383,6 +3386,9 @@ func runBenchmarkForPrompt(ctx context.Context, client *OllamaClient, model stri
 			}
 			if chunk.Response != "" {
 				tokenCount++
+				if respHead.Len() < 300 {
+					respHead.WriteString(chunk.Response)
+				}
 			}
 		}
 	}
@@ -3390,7 +3396,7 @@ func runBenchmarkForPrompt(ctx context.Context, client *OllamaClient, model stri
 	totalDuration := time.Since(start)
 
 	if !firstTokenReceived {
-		return 0, 0, 0, fmt.Errorf("no tokens received from model")
+		return 0, 0, 0, "", fmt.Errorf("no tokens received from model")
 	}
 
 	ttftMs := float64(firstTokenTime.Milliseconds())
@@ -3401,7 +3407,7 @@ func runBenchmarkForPrompt(ctx context.Context, client *OllamaClient, model stri
 	tps := float64(tokenCount) / generationDurationSec
 	avgLatency := float64(totalDuration.Milliseconds())
 
-	return ttftMs, tps, avgLatency, nil
+	return ttftMs, tps, avgLatency, respHead.String(), nil
 }
 
 // runVisionBenchmarkPrompt sends a chat message with an embedded image and measures timing.
@@ -4018,14 +4024,11 @@ func noThinkPrompt(model, prompt string) string {
 }
 
 // isRefusalResponse returns true when the generated text looks like a safety
-// refusal or capability refusal rather than actual code. These responses should
-// be flagged as REFUSED in the benchmark rather than fed to the syntax checker
-// or the judge (which wastes time and produces misleading 0-quality scores).
+// or capability refusal. These should be flagged REFUSED and skipped.
 func isRefusalResponse(text string) bool {
 	if len(text) == 0 {
 		return false
 	}
-	// Only inspect the first 120 chars — real code doesn't start with prose.
 	head := strings.ToLower(text)
 	if len(head) > 120 {
 		head = head[:120]
@@ -4050,6 +4053,46 @@ func isRefusalResponse(text string) bool {
 		"i don't feel comfortable",
 		"i'm sorry, but i",
 		"i apologize, but i",
+	} {
+		if strings.Contains(head, pat) {
+			return true
+		}
+	}
+	return false
+}
+
+// isGreetingResponse returns true when the model outputs a chat welcome message
+// instead of following the task prompt. These models have a Modelfile/system
+// prompt that triggers a canned greeting response — they'll score 0 on code and
+// hallucination benchmarks. Flag as CHAT_MODEL rather than running the judge.
+func isGreetingResponse(text string) bool {
+	if len(text) == 0 {
+		return false
+	}
+	head := strings.ToLower(text)
+	if len(head) > 200 {
+		head = head[:200]
+	}
+	for _, pat := range []string{
+		"i'm ready to help",
+		"i am ready to help",
+		"what would you like to work on",
+		"what would you like me to",
+		"how can i help you",
+		"how can i assist you",
+		"how may i help",
+		"how may i assist",
+		"i'd be happy to help",
+		"i am here to help",
+		"i'm here to help",
+		"what can i help you with",
+		"what can i assist you with",
+		"i'm your assistant",
+		"i am your assistant",
+		"welcome! i",
+		"hello! i",
+		"hi! i",
+		"greetings! i",
 	} {
 		if strings.Contains(head, pat) {
 			return true
@@ -4197,6 +4240,18 @@ func runCodeBenchmarkRun(ctx context.Context, client *OllamaClient, model, judge
 		ttft := float64(firstTok.Milliseconds())
 
 		logFunc(fmt.Sprintf("[%s] Generated (%d tokens, %.1f TPS). Running syntax check...", t.Label, toks, tps))
+
+		// --- Greeting check: model output a chat welcome instead of code ---
+		if isGreetingResponse(generatedCode) {
+			logFunc(fmt.Sprintf("[%s] ⚠ CHAT_MODEL — model ignored the prompt and output a chat greeting", t.Label))
+			results = append(results, map[string]interface{}{
+				"lang": lang, "label": t.Label, "task": t.Task,
+				"error": "chat model", "syntax_ok": false,
+				"judge": map[string]interface{}{"correctness": 0, "completeness": 0, "style": 0, "brief_critique": "model output a chat greeting instead of code"},
+				"quality_score": 0.0, "tps": tps, "ttft_ms": ttft,
+			})
+			continue
+		}
 
 		// --- Refusal check: skip syntax + judge if model refused the task ---
 		if isRefusalResponse(generatedCode) {
@@ -4624,6 +4679,7 @@ func runHallucinationSSEHandler(c *gin.Context) {
 			IsHallucination bool    `json:"is_hallucination"`
 			Response        string  `json:"response"`
 			TtftMs          float64 `json:"ttft_ms"`
+			TotalMs         float64 `json:"total_ms"`
 		}
 
 		var cells []cell
@@ -4692,6 +4748,7 @@ func runHallucinationSSEHandler(c *gin.Context) {
 					}
 				}
 				_ = stream.Close()
+				totalMs := float64(time.Since(start).Milliseconds())
 
 				response := strings.TrimSpace(respBuilder.String())
 				pass := strings.Contains(strings.ToUpper(response), strings.ToUpper(hallucinationNeedle))
@@ -4734,13 +4791,15 @@ func runHallucinationSSEHandler(c *gin.Context) {
 				hemit(fmt.Sprintf("  %s → %q", status, response))
 
 				// Stream cell result to JS for live heat-map update
+				ttftMs := float64(firstTok.Milliseconds())
 				cellBytes, _ := json.Marshal(map[string]interface{}{
 					"context_k":        k,
 					"position_pct":     pos,
 					"pass":             pass,
 					"is_hallucination": isHallucination,
 					"response":         response,
-					"ttft_ms":          float64(firstTok.Milliseconds()),
+					"ttft_ms":          ttftMs,
+					"total_ms":         totalMs,
 				})
 				c.SSEvent("cell", string(cellBytes))
 				c.Writer.Flush()
@@ -4748,7 +4807,7 @@ func runHallucinationSSEHandler(c *gin.Context) {
 				cells = append(cells, cell{
 					ContextK: k, PositionPct: pos,
 					Pass: pass, IsHallucination: isHallucination,
-					Response: response, TtftMs: float64(firstTok.Milliseconds()),
+					Response: response, TtftMs: ttftMs, TotalMs: totalMs,
 				})
 			}
 		}
@@ -5044,15 +5103,22 @@ func runBenchmarkSSEHandler(c *gin.Context) {
 				"Briefly explain the theory of relativity to a 10-year-old in one paragraph.",
 			}
 			var sumTtft, sumTps, sumLatency float64
+			var greetingDetected bool
 			runs := 0
 			for i, prompt := range prompts {
 				c.SSEvent("status", fmt.Sprintf("Prompt %d/3: %q", i+1, prompt))
-				ttft, tps, lat, runErr := runBenchmarkForPrompt(ctx, client, model, prompt, func(msg string) {
+				ttft, tps, lat, respHead, runErr := runBenchmarkForPrompt(ctx, client, model, prompt, func(msg string) {
 					c.SSEvent("status", msg)
 				})
 				if runErr != nil {
 					c.SSEvent("error", fmt.Sprintf("Prompt %d failed: %v", i+1, runErr))
 					continue
+				}
+				// On the first prompt, check if the model is outputting a chat greeting
+				// instead of following the task. Flag it in extraJSON for the leaderboard.
+				if i == 0 && isGreetingResponse(respHead) {
+					greetingDetected = true
+					c.SSEvent("status", "⚠ CHAT_MODEL — model responded with a greeting instead of answering the prompt. Code/hallucination benchmarks will likely fail.")
 				}
 				c.SSEvent("status", fmt.Sprintf("  TTFT: %.0fms, TPS: %.1f, Latency: %.0fms", ttft, tps, lat))
 				sumTtft += ttft
@@ -5067,6 +5133,10 @@ func runBenchmarkSSEHandler(c *gin.Context) {
 			avgTtft = sumTtft / float64(runs)
 			avgTps = sumTps / float64(runs)
 			avgLatency = sumLatency / float64(runs)
+			if greetingDetected {
+				flagBytes, _ := json.Marshal(map[string]interface{}{"flags": []string{"chat_model"}})
+				extraJSON = string(flagBytes)
+			}
 		}
 
 		id, saveErr = SaveBenchmark(model, activeSrv.Name, activeSrv.URL, benchType, extraJSON, ollamaVer, avgTtft, avgTps, avgLatency)
@@ -6277,7 +6347,7 @@ func nodeVsNodeBenchmarkHandler(c *gin.Context) {
 				res.TTFT = ttft; res.TPS = tps; res.Latency = lat; res.Extra = extra; runErr = e
 			default: // standard / vision
 				prompt := "Explain the difference between machine learning and traditional programming in 3 sentences."
-				ttft, tps, lat, e := runBenchmarkForPrompt(ctx, client, model, prompt, logFn)
+				ttft, tps, lat, _, e := runBenchmarkForPrompt(ctx, client, model, prompt, logFn)
 				res.TTFT = ttft; res.TPS = tps; res.Latency = lat; runErr = e
 			}
 			if runErr != nil {

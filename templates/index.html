@@ -192,7 +192,7 @@
           <!-- Inventory sub-tab nav -->
           <div class="bg-[#242933]/60 p-1 border border-[#4c566a]/40 flex w-fit shrink-0 gap-1 rounded-xl">
             <button id="inventory-subtab-models" onclick="switchInventorySubtab('models')" class="bench-subtab bench-subtab-active">
-              <i class="fa-solid fa-tags mr-1.5"></i>INVENTORY
+              <i class="fa-solid fa-tags mr-1.5"></i>MODEL LIST
             </button>
             <button id="inventory-subtab-hub" onclick="switchInventorySubtab('hub')" class="bench-subtab">
               <i class="fa-solid fa-compass mr-1.5"></i>MODEL HUB
@@ -205,15 +205,22 @@
               <div class="flex justify-between items-center mb-3 pb-2 border-b border-[#4c566a]/40">
                 <div class="flex items-center gap-2">
                   <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
-                    <i class="fa-solid fa-tags mr-2"></i>Model Inventory
+                    <i class="fa-solid fa-tags mr-2"></i>Model List
                   </h2>
                   <span id="inventory-total-badge" class="hidden text-[9px] font-mono text-[#4c566a]"></span>
                 </div>
                 <div class="flex items-center gap-2">
                   <!-- Batch Actions (shown when models are selected) -->
-                  <div id="batch-actions-container" class="hidden">
-                    <button id="batch-delete-btn" onclick="handleBatchDelete()" class="btn btn-xs btn-error gap-1 font-tech">
-                      <i class="fa-solid fa-trash text-[10px]"></i> DELETE_SELECTED (<span id="selected-count">0</span>)
+                  <div id="batch-actions-container" class="hidden flex items-center gap-2 flex-wrap">
+                    <span class="text-[10px] font-mono text-[#88c0d0]"><span id="selected-count">0</span> selected</span>
+                    <span id="select-all-pages-hint" class="hidden text-[10px] font-mono text-[#4c566a]">—
+                      <button id="select-all-pages-link" onclick="selectAllPagesModels()" class="text-[#88c0d0] hover:underline cursor-pointer bg-transparent border-0 p-0">Select all</button>
+                    </span>
+                    <button onclick="handleBatchDelete()" class="btn btn-xs btn-error gap-1 font-tech">
+                      <i class="fa-solid fa-trash text-[10px]"></i> DELETE
+                    </button>
+                    <button onclick="clearModelSelection()" class="btn btn-xs btn-ghost text-[#4c566a] hover:text-[#d8dee9] gap-1 font-tech text-[10px]">
+                      <i class="fa-solid fa-xmark text-[10px]"></i> CLEAR
                     </button>
                   </div>
                   <!-- Last synced indicator + manual refresh -->
@@ -246,15 +253,16 @@
                       <th class="w-8">
                         <input type="checkbox" id="select-all-checkbox" onchange="toggleSelectAllModels(this)" class="checkbox checkbox-xs checkbox-primary border-[#4c566a]" />
                       </th>
-                      <th>Model Name</th>
-                      <th class="hidden sm:table-cell">Size</th>
-                      <th class="hidden md:table-cell">Parameters</th>
+                      <th id="inv-th-name" class="cursor-pointer select-none hover:text-[#81a1c1] transition-colors" onclick="setInventorySort('name')" data-tip="Sort by model name">Model Name <span class="opacity-25">↕</span></th>
+                      <th id="inv-th-size" class="hidden sm:table-cell cursor-pointer select-none hover:text-[#81a1c1] transition-colors" onclick="setInventorySort('size')" data-tip="Sort by disk size">Size <span class="opacity-25">↕</span></th>
+                      <th id="inv-th-params" class="hidden md:table-cell cursor-pointer select-none hover:text-[#81a1c1] transition-colors" onclick="setInventorySort('params')" data-tip="Sort by parameter count (B)">Parameters <span class="opacity-25">↕</span></th>
+                      <th id="inv-th-modified" class="hidden lg:table-cell cursor-pointer select-none hover:text-[#81a1c1] transition-colors" onclick="setInventorySort('modified')" data-tip="Sort by last modified date">Modified <span class="opacity-25">↕</span></th>
                       <th>Action</th>
                     </tr>
                   </thead>
                   <tbody id="models-list-body">
                     <tr>
-                      <td colspan="5" class="text-center py-8 text-[#4c566a] italic">No active server connection</td>
+                      <td colspan="6" class="text-center py-8 text-[#4c566a] italic">No active server connection</td>
                     </tr>
                   </tbody>
                 </table>
@@ -2365,12 +2373,12 @@
     </div>
     <!-- Loaded model indicator -->
     <div class="flex items-center gap-2">
-      <div id="global-model-indicator" class="flex items-center gap-1.5 text-[#4c566a]" title="Models currently loaded in VRAM">
+      <div id="global-model-indicator" class="flex items-center gap-1.5 text-[#4c566a]" data-tip="Models currently loaded in VRAM on active node">
         <i class="fa-solid fa-microchip text-[10px]"></i>
         <span id="global-model-indicator-name" class="uppercase max-w-[180px] truncate inline-block align-middle">IDLE</span>
         <span id="global-model-indicator-vram" class="uppercase hidden shrink-0"></span>
       </div>
-      <button id="footer-unload-btn" onclick="footerUnloadModel()" title="Evict model from VRAM"
+      <button id="footer-unload-btn" onclick="footerUnloadModel()" data-tip="Evict model from VRAM"
               class="hidden text-[#bf616a] hover:text-[#bf616a]/70 transition-colors leading-none">
         <i class="fa-solid fa-eject text-[10px]"></i>
       </button>
@@ -2640,6 +2648,89 @@
         <button onclick="closeExportModal()" class="btn btn-xs btn-neutral border-[#4c566a] font-tech text-[10px]">CLOSE</button>
       </div>
     </div>
+  </dialog>
+
+  <!-- Modelfile Fix Wizard Modal -->
+  <dialog id="modelfix-modal" class="modal">
+    <div class="modal-box bg-[#2e3440] border border-[#4c566a] shadow-2xl p-6 max-w-2xl rounded-xl">
+      <div class="flex items-center justify-between mb-4 pb-2 border-b border-[#4c566a]/40">
+        <h3 class="font-tech font-bold text-sm text-[#ebcb8b] uppercase tracking-wider">
+          <i class="fa-solid fa-wrench mr-2"></i>Fix Modelfile — <span id="modelfix-title-name" class="text-[#e5e9f0] normal-case font-mono"></span>
+        </h3>
+        <button onclick="closeModelFixWizard()" class="btn btn-sm btn-circle btn-ghost text-[#d8dee9] hover:bg-[#bf616a]/15 hover:text-[#bf616a] h-7 w-7 min-h-0">&times;</button>
+      </div>
+
+      <!-- Loading -->
+      <div id="modelfix-step-loading" class="py-10 text-center text-[#4c566a] font-mono text-xs">
+        <i class="fa-solid fa-circle-notch animate-spin mr-2 text-[#88c0d0]"></i>Loading model details...
+      </div>
+
+      <!-- Configure -->
+      <div id="modelfix-step-configure" class="hidden space-y-4">
+        <div>
+          <label class="label pt-0 pb-1">
+            <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">SYSTEM Prompt
+              <span id="modelfix-system-label" class="normal-case font-mono font-normal text-[#4c566a] ml-1"></span>
+            </span>
+          </label>
+          <textarea id="modelfix-system-input" rows="5"
+                    oninput="modelFixUpdatePreview()"
+                    placeholder="Leave blank to clear the SYSTEM prompt entirely…"
+                    class="textarea w-full bg-[#242933]/60 border-[#4c566a] font-mono text-[11px] focus:border-[#88c0d0] focus:outline-none resize-y leading-relaxed"></textarea>
+          <div class="flex items-center gap-3 mt-1.5">
+            <button onclick="modelFixClearSystem()" class="btn btn-xs btn-ghost text-[#bf616a] font-tech text-[9px] border border-[#bf616a]/30 hover:bg-[#bf616a]/10">
+              <i class="fa-solid fa-xmark mr-1"></i>CLEAR
+            </button>
+            <span class="text-[9px] font-mono text-[#4c566a]">Clear to remove greeting behavior — or edit to a neutral system prompt</span>
+          </div>
+        </div>
+
+        <div>
+          <label class="label pt-0 pb-1"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">New Model Name</span></label>
+          <input type="text" id="modelfix-name-input" oninput="modelFixUpdatePreview()"
+                 class="input input-sm w-full bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none" />
+          <div id="modelfix-overwrite-warn" class="hidden mt-1 text-[9px] font-mono text-[#bf616a]">
+            <i class="fa-solid fa-triangle-exclamation mr-1"></i>Name matches original — this will overwrite the existing model
+          </div>
+        </div>
+
+        <div>
+          <label class="label pt-0 pb-1"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Generated Modelfile</span></label>
+          <pre id="modelfix-preview" class="bg-[#161820] border border-[#4c566a]/60 rounded-lg p-3 text-[11px] font-mono text-[#d8dee9] whitespace-pre-wrap max-h-28 overflow-auto"></pre>
+        </div>
+
+        <div class="modal-action mt-1 gap-2">
+          <button onclick="closeModelFixWizard()" class="btn btn-sm btn-ghost font-tech text-xs">CANCEL</button>
+          <button onclick="confirmModelFix()" class="btn btn-sm btn-warning font-tech text-xs gap-1">
+            <i class="fa-solid fa-wrench text-[10px]"></i>CREATE MODEL
+          </button>
+        </div>
+      </div>
+
+      <!-- Creating -->
+      <div id="modelfix-step-creating" class="hidden space-y-3">
+        <div class="text-[10px] font-mono text-[#88c0d0]">
+          <i class="fa-solid fa-circle-notch animate-spin mr-1.5"></i>Creating model<span id="modelfix-creating-name"></span>...
+        </div>
+        <div id="modelfix-create-log" class="bg-[#161820] border border-[#4c566a]/60 rounded-lg p-3 text-[11px] font-mono text-[#d8dee9] min-h-[80px] max-h-56 overflow-auto"></div>
+        <div class="modal-action mt-1">
+          <button id="modelfix-close-creating-btn" onclick="closeModelFixWizard()" disabled
+                  class="btn btn-sm btn-neutral border-[#4c566a] font-tech text-xs">CLOSE</button>
+        </div>
+      </div>
+
+      <!-- Done -->
+      <div id="modelfix-step-done" class="hidden py-4 space-y-4">
+        <div id="modelfix-done-msg" class="text-sm font-mono"></div>
+        <div class="modal-action mt-1 gap-2">
+          <button onclick="closeModelFixWizard()" class="btn btn-sm btn-neutral border-[#4c566a] font-tech text-xs">CLOSE</button>
+          <button id="modelfix-chat-btn" onclick="modelFixOpenInChat()" class="hidden btn btn-sm btn-outline btn-info font-tech text-xs gap-1">
+            <i class="fa-solid fa-comments text-[10px]"></i>OPEN IN CHAT
+          </button>
+        </div>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
   </dialog>
 
   <!-- Scoring Modal -->

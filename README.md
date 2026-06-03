@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.2.20-bf616a?style=for-the-badge&logo=git&logoColor=white" alt="Version v0.2.20" />
+  <img src="https://img.shields.io/badge/version-v0.2.21-bf616a?style=for-the-badge&logo=git&logoColor=white" alt="Version v0.2.21" />
   <a href="https://golang.org/"><img src="https://img.shields.io/badge/Go-1.26.3-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go Version" /></a>
   <a href="https://tailwindcss.com/"><img src="https://img.shields.io/badge/Tailwind_CSS-4.3%2B-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white" alt="Tailwind CSS" /></a>
   <a href="https://daisyui.com/"><img src="https://img.shields.io/badge/daisyUI-5.5%2B-5A0EF8?style=for-the-badge&logo=daisyui&logoColor=white" alt="DaisyUI" /></a>
@@ -48,15 +48,16 @@ Register, edit, test, and hot-swap between multiple local or remote Ollama serve
 
 The **Node selector** lives in the footer status bar as a bordered pill badge — click it and a popover appears directly above the button showing all registered nodes with their status, Ollama version, latency, and a one-click **SET** button.
 
-### 📦 Model Hub & Inventory
+### 📦 Model Hub & Model List
 - View all installed models with parameters, size, quantization, and serialization details.
+- **Sortable columns**: click any column header (Name, Size, Parameters, Modified) to sort ascending/descending. Sort state persists across page navigations.
+- **Multi-select**: check individual rows or use Select All (current page) with a "Select all N" shortcut for multi-page inventories. Batch delete with one click; deselect via the CLEAR button.
 - **Trained context-length badge** shown in every model dropdown: e.g. `128K ctx`, `40K ctx`. Sourced from Ollama's `/api/show` model info in parallel at startup.
 - **Benchmark grade badges** on every inventory row: compact colour-coded badges show the model's best standard grade (S/A/B/C/F), code benchmark grade, and hallucination recall % — all sourced from your local benchmark history at a glance. Badges refresh automatically after any benchmark run completes.
 - **Capability badges** — **VIS** (vision/multimodal), **EMB** (embedding), **TOOLS** (function calling), **THINK** (chain-of-thought reasoning) — sourced from Ollama's `/api/show` `capabilities` field where available, with heuristic fallback for older Ollama versions.
-- Capability badges (**VIS** / **EMB**) on inventory rows and catalog cards — detected from model-family metadata and name heuristics.
 - Inspect full Modelfiles, templates, parameters, system prompts, and sanitized model cards with raw/source view controls.
+- **Modelfile Fix Wizard**: click the **FIX** button in any model's inspect panel (or the **CHAT** badge in the leaderboard) to open a guided editor — clear or replace the SYSTEM prompt, preview the generated Modelfile, and create the fixed model in one step. Useful for models with hardcoded greeting responses.
 - Unified **Model Hub** panel: pull directly from the **Ollama Library** or **Hugging Face** (GGUFs) with real-time download speed and progress bars. Browse a curated 35-model catalog filterable by category, source, and capabilities.
-- Batch-select and delete multiple models.
 
 ### 💬 TTY0 Chat Playground
 - Custom terminal-style playground to interact with your models.
@@ -127,7 +128,8 @@ Probe a model's resistance to confabulation by testing fact-recall across increa
 
 - Feed the model a knowledge document, then ask factual questions about it at progressively larger context lengths (up to a configurable max).
 - Each answer is classified as **PASS** (correct recall), **HALLUCINATION** (plausible but wrong), or **REFUSAL** (model declined to answer).
-- **Heat-map grid**: rows = questions, columns = context sizes — colour-coded green/red/amber at a glance.
+- **Heat-map grid**: rows = context sizes, columns = document positions (10% / 50% / 90%) — colour-coded green/red/amber. Each cell shows the result symbol and the **total generation time** for that test. Hover for a rich tooltip: status, TTFT, total time, and the model's exact response.
+- **Chat-only model detection**: if a model outputs a greeting ("I'm ready to help!") instead of answering, the run is flagged **CHAT_MODEL** and skipped rather than wasting judge cycles. A **CHAT** badge appears in the leaderboard — click it to open the Modelfile Fix Wizard.
 - **Leaderboard**: ranked by maximum context at which the model maintained accurate recall.
 - **Stopwatch timer** in the console header during active runs.
 
@@ -150,6 +152,7 @@ Validate SQLite, data-directory writability, static assets, active Ollama reacha
 
 - **User preferences badge** in the header: click the avatar to open a dropdown for **Dark / Light / System** theme selection. Preference is persisted to the database. An anti-FOUC inline script in `<head>` applies the saved theme before the first paint.
 - **Searchable select widget** on all model dropdowns: type to filter, keyboard-navigable, shows param-size badge + trained context-length badge inline.
+- **Hover tooltips**: cursor-following styled tooltips (Nord dark, font-mono) on capability badges, benchmark grade badges, TPS sparklines, sort headers, context warnings, and action buttons. Add `data-tip="..."` to any element to opt in.
 - **Fixed layout**: header and footer always visible — workspace content scrolls independently.
 - Instantly toggle Node Registry, Chat History, and Config sidebars; preferences persist in localStorage.
 - Nord colour palette throughout: Polar Night backgrounds, Snow Storm text, Frost blue accents.

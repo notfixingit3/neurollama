@@ -393,16 +393,25 @@ mark.chat-search-mark {
 /* Hallucination test heat-map cells */
 .halluc-cell {
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 28px;
+  width: 44px;
+  min-height: 34px;
   border-radius: 4px;
   font-size: 11px;
   font-weight: 700;
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
   cursor: default;
   transition: opacity 0.2s;
+  line-height: 1.1;
+  gap: 1px;
+}
+.halluc-cell-time {
+  font-size: 7px;
+  font-weight: 400;
+  opacity: 0.75;
+  letter-spacing: 0;
 }
 .halluc-cell-pass    { background-color: rgba(163, 190, 140, 0.25); color: #a3be8c; border: 1px solid rgba(163,190,140,0.4); }
 .halluc-cell-halluc  { background-color: rgba(191, 97,  114, 0.25); color: #bf616a; border: 1px solid rgba(191,97,114,0.4); }

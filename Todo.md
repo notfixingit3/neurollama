@@ -37,6 +37,18 @@
 - [x] **Hardware Thread & Layer Allocation Profile (num_gpu, num_thread)**
   - Expose request-level hardware tuning controls (such as GPU layers offload `num_gpu` and CPU threads `num_thread`) inside the playground sidebar settings.
 
+## v0.2.21 Session Notes
+
+- [x] **Inventory Sort** — Clickable column headers (Name, Size, Parameters, Modified) with ↑/↓ indicators. New Modified column at `lg:` breakpoint. Sort persists across page changes.
+- [x] **Multi-select improvements** — Fixed sort bug in select-all; added CLEAR button and "Select all N" cross-page shortcut. `_sortedModels()` shared helper.
+- [x] **"Inventory" subtab renamed to "Model List"**
+- [x] **Hover tooltip engine** — `initTooltip()` reads `data-tip` attributes. Applied to cap badges, bench grade badges, sparklines, sort headers, ctx warn, action buttons, footer elements.
+- [x] **Chat-only model detection** — `isGreetingResponse()` (18 patterns). Code bench logs CHAT_MODEL + skips judge. Standard bench checks first response, stores `flags:["chat_model"]` in extra_json.
+- [x] **CHAT badge in leaderboard** — Amber, clickable, opens Modelfile Fix Wizard.
+- [x] **Modelfile Fix Wizard** — Modal with loading/configure/creating/done steps. Editable SYSTEM textarea, live Modelfile preview, overwrite warning, streams creation, OPEN IN CHAT on success. Entry points: INSPECT accordion FIX button + leaderboard CHAT badge.
+- [x] **Hallucination heatmap timing** — `total_ms` added to Go cell struct + SSE event + extra_json. Cells show time label below symbol. Rich data-tip with TTFT + total + response.
+- [x] **Code/hallucination model select badges fixed** — `_benchModelOption()` + `_setSelectOptions()` helpers ensure param size in option text for all benchmark selects.
+
 ## v0.2.x Session Notes
 
 - [x] **README Screenshot Refresh**
