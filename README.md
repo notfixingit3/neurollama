@@ -18,6 +18,9 @@
 > [!WARNING]
 > **Pre-release software.** NEUROLLAMA is under active development and has not reached a stable release. Features may be incomplete, broken, or change without notice. Running this software may trigger cascading failures in your local Ollama setup, spontaneous model downloads, existential dread, or other unforeseeable consequences. We are not responsible for lost models, corrupted databases, rogue AI agents, or the heat death of your GPU. Use at your own risk. You have been warned.
 
+> [!CAUTION]
+> **Ollama Cloud models (`:cloud` suffix) incur real costs.** Any model whose name ends in `:cloud` (e.g. `deepseek-v4-pro:cloud`) is routed through Ollama Cloud and billed per token. Running benchmarks, hallucination tests, or code evaluations against these models **will generate API charges**. Exclude `:cloud` models from any automated or batch benchmark run unless you intend to pay for the usage.
+
 ---
 
 ## 🌌 Overview
