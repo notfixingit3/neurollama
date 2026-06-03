@@ -289,3 +289,39 @@
 - [ ] **Bar chart view** — Add a "Chart" toggle above the leaderboard that replaces the table with an SVG or canvas bar chart comparing the primary metric (TPS / accuracy / cps) across all visible model groups. Same filter state as the table. Toggle back with "Table".
 
 - [x] **Batch run mode** — "Run All" button on standard benchmarks queues all compatible models for the current type/size filter and runs them sequentially. Progress indicator shows `N/total · modelname`. Stop aborts the queue; errors skip to the next model.
+
+---
+
+## 🔨 Model Builder Improvements
+
+### Builder UX overhaul
+- [ ] **Progressive disclosure UI** — Restructure the builder so casual users see a simple form (name, base model, system prompt, temperature) by default, with an "Advanced" expander revealing the full Modelfile editor, PARAMETER overrides, TEMPLATE, ADAPTER, and MERGE fields. Expert functionality stays intact — it's just hidden until needed. Goal: a new user should be able to create a custom model in under 60 seconds without reading docs.
+
+- [ ] **Live Modelfile preview sync** — As the user fills in the simple-form fields, the raw Modelfile in the advanced editor updates in real time (already partially done for system prompt). Editing the raw Modelfile directly should also sync changes back to the form fields where possible (round-trip parse).
+
+- [ ] **Base model picker with metadata** — Replace the plain text input for the base model with a searchable select populated from the local model inventory, showing param size, ctx, and capability badges inline. Typing a custom name (e.g. a Hub path) still allowed.
+
+- [ ] **Validation & preflight** — Before streaming the `ollama create`, validate: name is not empty, name does not collide with an existing model (warn, not block), base model exists locally, PARAMETER values are in range. Show inline field-level errors, not just a toast.
+
+---
+
+## 🧙 NeuroWizard — Guided Model Operations
+
+A new subsection (tab or modal launcher) offering step-by-step wizards for common model customisation tasks. Each wizard collects only what it needs, previews the generated Modelfile, then streams the result — no Modelfile knowledge required.
+
+### Planned wizards
+
+- [x] **Remove hardcoded system prompt** *(already shipped as "Modelfile Fix Wizard")* — Detects greeting-injection models via CHAT badge; lets user clear or replace the SYSTEM field and creates a clean copy.
+
+- [ ] **Expand context window** — Pick a model, choose a target `num_ctx` (slider with common presets: 8K / 16K / 32K / 64K / 128K), wizard warns if target exceeds the model's trained context length, generates `FROM <model>\nPARAMETER num_ctx <n>\n`, creates and optionally opens in chat. Useful for models that default to 2K or 4K but support much larger windows.
+
+- [ ] **Set a custom persona** — Guided system-prompt composer: choose a role category (coding assistant, language tutor, creative writer, etc.) from a preset list or write freeform, preview the SYSTEM block, create a named copy. Entry point from INSPECT accordion alongside the FIX button.
+
+- [ ] **Temperature / sampling profile presets** — One-click profiles: "Creative" (temp 0.9, top-p 0.95), "Balanced" (temp 0.7), "Precise" (temp 0.1, top-k 10). Applies as PARAMETER lines in the Modelfile. User can tweak before confirming.
+
+- [ ] **Merge / blend two models** — Pick two local models and a blend weight, generate a MERGE Modelfile, stream creation. Basic safeguard: warn if architectures differ.
+
+- [ ] **Strip thinking tokens** — For Qwen3 / DeepSeek-R1 / QwQ style models: add `/no_think` default prompt suffix and `think false` PARAMETER so the model never outputs reasoning tokens in normal chat. Creates a `-nothink` variant.
+
+### NeuroWizard launcher
+- [ ] **Wizard hub panel** — A card grid accessible from the Builder tab (or a new "Wizard" subtab) showing all available wizards with a one-line description and an icon. Cards are greyed out for wizards that have no applicable models (e.g. Merge requires ≥ 2 local models). Clicking a card opens the relevant modal.
