@@ -284,6 +284,8 @@
 - [x] **Inline notes on leaderboard rows** — Click-to-edit note area on all rows (summary + sub-rows). Enter/blur saves, Escape cancels. Always shows faint `+ note` hint when empty.
 
 ### Higher effort
+- [ ] **Parameter size range filter on benchmark leaderboard** — Min/max dual slider (or two number inputs) above the leaderboard to filter results by model parameter count. E.g. show only models ≥ 30B, or only models between 8B and 120B. Parse param size from the model name/details (e.g. `7.6B`, `32B`, `671B`). Works alongside the existing type/benchmark-type filters. Useful for fair comparisons within a size class.
+
 - [ ] **Bar chart view** — Add a "Chart" toggle above the leaderboard that replaces the table with an SVG or canvas bar chart comparing the primary metric (TPS / accuracy / cps) across all visible model groups. Same filter state as the table. Toggle back with "Table".
 
 - [x] **Batch run mode** — "Run All" button on standard benchmarks queues all compatible models for the current type/size filter and runs them sequentially. Progress indicator shows `N/total · modelname`. Stop aborts the queue; errors skip to the next model.
