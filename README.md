@@ -27,7 +27,9 @@
 
 **NEUROLLAMA** is a lightweight, self-hosted web control panel that provides a beautiful, techy interface to connect, monitor, and query your Ollama instances. Styled using the **Nord Palette** and built with **Go (Gin)** and **Tailwind CSS/daisyUI**, it is designed to look like a futuristic command console.
 
-With NEUROLLAMA you can manage multiple Ollama nodes, inspect VRAM telemetry, benchmark models across five test types plus two dedicated deep-eval suites, run multi-language code generation tests with live syntax checking, probe hallucination resistance, chat with a premium terminal playground, build custom models, and more — all from a single binary with zero runtime dependencies.
+With NEUROLLAMA you can manage multiple Ollama nodes, inspect VRAM telemetry, benchmark models across five test types plus two dedicated deep-eval suites, run multi-language code generation tests with live syntax checking, probe hallucination resistance, build custom models, and more — all from a single binary with zero runtime dependencies.
+
+> **What NEUROLLAMA is not:** the primary goal is model management, evaluation, and diagnostics — not day-to-day chat. A TTY0 Chat Playground is included for quick testing and prompt exploration, but if you are looking for a full-featured conversational interface, dedicated tools like **[Open WebUI](https://github.com/open-webui/open-webui)**, **[Chatbot UI](https://github.com/mckaywrigley/chatbot-ui)**, or **[AnythingLLM](https://github.com/Mintplex-Labs/anything-llm)** will serve you better for that purpose.
 
 ---
 
@@ -63,6 +65,8 @@ The **Node selector** lives in the footer status bar as a bordered pill badge �
 - Unified **Model Hub** panel: pull directly from the **Ollama Library** or **Hugging Face** (GGUFs) with real-time download speed and progress bars. Browse a curated 35-model catalog filterable by category, source, and capabilities.
 
 ### 💬 TTY0 Chat Playground
+> **Note:** Chat is included for quick model testing and prompt exploration — not as a replacement for dedicated chat applications. For day-to-day conversational use, consider [Open WebUI](https://github.com/open-webui/open-webui) or similar tools.
+
 - Custom terminal-style playground to interact with your models.
 - Save, load, and edit custom **System Prompt Presets** persisted to SQLite.
 - Real-time parameter controls: Temperature, Context Limit, Top K, Top P, Seed, Repeat Penalty, hardware allocation, and generation limits.
