@@ -29,7 +29,7 @@
 
 With NEUROLLAMA you can manage multiple Ollama nodes, inspect VRAM telemetry, benchmark models across five test types plus two dedicated deep-eval suites, run multi-language code generation tests with live syntax checking, probe hallucination resistance, build custom models, and more — all from a single binary with zero runtime dependencies.
 
-> **What NEUROLLAMA is not:** the primary goal is model management, evaluation, and diagnostics — not day-to-day chat. A TTY0 Chat Playground is included for quick testing and prompt exploration, but if you are looking for a full-featured conversational interface, dedicated tools like **[Open WebUI](https://github.com/open-webui/open-webui)**, **[Chatbot UI](https://github.com/mckaywrigley/chatbot-ui)**, or **[AnythingLLM](https://github.com/Mintplex-Labs/anything-llm)** will serve you better for that purpose.
+> **What NEUROLLAMA is not:** the primary goal is model management, evaluation, and diagnostics — not day-to-day chat. A TTY0 Chat Playground is included for quick testing and prompt exploration, but if you are looking for a full-featured conversational interface, dedicated tools like **[Open WebUI](https://github.com/open-webui/open-webui)** or **[AnythingLLM](https://github.com/Mintplex-Labs/anything-llm)** will serve you better for that purpose.
 
 ---
 
