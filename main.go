@@ -312,6 +312,25 @@ func main() {
 	startSchedulerTicker()
 
 	r := gin.Default()
+	// TRUSTED_PROXIES: comma-separated list of proxy IPs/CIDRs.
+	// Default covers Traefik (or any reverse proxy) running on the same host.
+	// Override when running behind a proxy on a different host or Docker bridge
+	// e.g. TRUSTED_PROXIES=172.17.0.1 or TRUSTED_PROXIES=none to disable.
+	trustedProxies := os.Getenv("TRUSTED_PROXIES")
+	if trustedProxies == "" {
+		trustedProxies = "127.0.0.1,::1"
+	}
+	if trustedProxies == "none" {
+		r.SetTrustedProxies(nil)
+	} else {
+		var proxies []string
+		for _, p := range strings.Split(trustedProxies, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				proxies = append(proxies, p)
+			}
+		}
+		r.SetTrustedProxies(proxies)
+	}
 
 	// Load HTML templates
 	r.LoadHTMLGlob("templates/*")
