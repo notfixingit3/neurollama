@@ -325,3 +325,30 @@ A new subsection (tab or modal launcher) offering step-by-step wizards for commo
 
 ### NeuroWizard launcher
 - [ ] **Wizard hub panel** — A card grid accessible from the Builder tab (or a new "Wizard" subtab) showing all available wizards with a one-line description and an icon. Cards are greyed out for wizards that have no applicable models (e.g. Merge requires ≥ 2 local models). Clicking a card opens the relevant modal.
+
+---
+
+## 🐝 Swarm / Multi-Node Expansion
+
+The current multi-node registry handles basic server switching, status polling, and NvN benchmarking. This section tracks ideas for evolving it into a true swarm management layer.
+
+### Fleet visibility
+- [ ] **Fleet dashboard panel** — Dedicated full-page view (beyond the footer pill and popover) showing all registered nodes in a card grid: GPU VRAM used/total, CPU %, active model, Ollama version, latency sparkline over last N polls. Auto-refreshes on a configurable interval.
+
+- [ ] **Per-node model inventory diff** — Side-by-side view of which models are present on each node. Highlight models missing from one or more nodes. One-click pull-to-node to sync a model across the fleet.
+
+- [ ] **Cross-node search** — Search for a model name across all registered nodes simultaneously and show which nodes have it, their versions, and param sizes.
+
+### Swarm operations
+- [ ] **Cross-node benchmark runs** — Run a benchmark against the same model on multiple nodes in parallel and compare results side by side (TPS, TTFT, latency). Useful for comparing hardware across nodes or validating that a new node performs as expected.
+
+- [ ] **Load-aware request routing** — When multiple nodes have the same model loaded, route chat/generate requests to the node with the lowest current load (VRAM headroom, active request count). Opt-in per session.
+
+- [ ] **Fleet-wide pull / delete** — Select a model and push a pull or delete operation to all nodes (or a selected subset) simultaneously, with per-node progress streams.
+
+- [ ] **Node health alerts** — Configurable thresholds (e.g. VRAM > 95%, latency > 2s, node offline > 30s) that surface a persistent banner or badge in the footer, and optionally write to a local alert log.
+
+### Node management
+- [ ] **Node groups / tags** — Tag nodes (e.g. "production", "dev", "GPU-heavy") and filter the fleet view or benchmark target by tag. Useful when managing a mix of local and remote nodes.
+
+- [ ] **SSH tunnel helper** — Guided setup for reaching a remote Ollama node over SSH port-forwarding without exposing it publicly. Generates the tunnel command and tests connectivity from the UI.
