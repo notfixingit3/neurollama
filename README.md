@@ -195,7 +195,7 @@ go build -o neurollama .
 ./neurollama
 ```
 
-Open **`http://localhost:8080`** in your browser.
+Open **`http://localhost:8811`** in your browser.
 
 ### Pre-built binaries
 
@@ -269,7 +269,7 @@ WORKDIR /app
 COPY --from=builder /app/neurollama .
 COPY --from=builder /app/templates ./templates
 COPY --from=builder /app/static ./static
-EXPOSE 8080
+EXPOSE 8811
 CMD ["./neurollama"]
 ```
 

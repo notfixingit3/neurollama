@@ -2030,7 +2030,10 @@
 
                 <!-- Max context -->
                 <div class="form-control">
-                  <label class="label py-1"><span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">Max Context Size</span></label>
+                  <label class="label py-1 flex items-center gap-1">
+                    <span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">Max Context Size</span>
+                    <span id="hallu-ctx-warn" class="hidden text-[#ebcb8b] text-[9px] font-mono cursor-default" title="">⚠</span>
+                  </label>
                   <select id="halluc-max-context" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
                     <option value="8">8k tokens</option>
                     <option value="16">16k tokens</option>

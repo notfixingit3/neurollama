@@ -44,7 +44,7 @@ DaisyUI v5 CSS is vendored locally in `tailwind/lib/` (committed to the repo).
 go run .           # dev
 go build -o neurollama . && ./neurollama   # prod-like
 ```
-Runs on `http://localhost:8080`. Data stored in `data/neurollama.db`.
+Runs on `http://localhost:8811`. Data stored in `data/neurollama.db`.
 
 ## DaisyUI v5 notes
 - Uses `data-theme="nord"` on `<html>` — do not add a theme switcher without importing additional theme CSS

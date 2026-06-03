@@ -187,23 +187,26 @@ function makeSearchableSelect(selectEl) {
     const paramHint = paramMatch && paramMatch[2] !== '?' ? paramMatch[2] : '';
     const ctxLabel  = opt ? fmtCtx(modelCtxLengths[opt.value]) : '';
 
-    // Build trigger content: name + param badge + ctx badge
+    // Build trigger content: name (truncates) + param badge + ctx badge
+    // triggerText uses flex so long names truncate with ellipsis and badges stay visible.
+    triggerText.style.display = 'flex';
+    triggerText.style.alignItems = 'center';
+    triggerText.style.gap = '4px';
+    triggerText.style.minWidth = '0';
     triggerText.innerHTML = '';
     const nameNode = document.createElement('span');
-    nameNode.className = 'ss-trigger-text';
+    nameNode.className = 'ss-opt-name'; // flex:1, min-width:0, overflow:hidden, text-overflow:ellipsis
     nameNode.textContent = dispText;
     triggerText.appendChild(nameNode);
     if (paramHint) {
       const pb = document.createElement('span');
       pb.className = 'ss-opt-param';
-      pb.style.marginLeft = '4px';
       pb.textContent = paramHint;
       triggerText.appendChild(pb);
     }
     if (ctxLabel) {
       const cb = document.createElement('span');
       cb.className = 'ss-opt-param';
-      cb.style.marginLeft = '3px';
       cb.style.color = '#8fbcbb';
       cb.style.borderColor = 'rgba(143,188,187,0.3)';
       cb.textContent = ctxLabel;
@@ -689,6 +692,9 @@ async function init() {
   ['code-bench-model', 'code-bench-ctx'].forEach(id => {
     document.getElementById(id)?.addEventListener('change', () =>
       updateCtxWarning('code-bench-model', 'code-bench-ctx', 'code-ctx-warn'));
+  });
+  ['halluc-model', 'halluc-max-context'].forEach(id => {
+    document.getElementById(id)?.addEventListener('change', updateHalluCtxWarning);
   });
 
   // Initialize RAG chat sidebar controls
@@ -2543,6 +2549,7 @@ async function fetchModelCtxLengths() {
     // would never show the warning without this explicit call.
     updateCtxWarning('chat-model-select',  'chat-ctx-limit', 'chat-ctx-warn');
     updateCtxWarning('code-bench-model',   'code-bench-ctx', 'code-ctx-warn');
+    updateHalluCtxWarning();
   } catch { /* silently ignore */ }
 }
 
@@ -2572,14 +2579,20 @@ async function fetchModelBenchSummary() {
   } catch { /* silently ignore */ }
 }
 
+// Hallucination-specific ctx warning: halluc-max-context values are in K (e.g. 32 = 32768 tokens).
+function updateHalluCtxWarning() {
+  updateCtxWarning('halluc-model', 'halluc-max-context', 'hallu-ctx-warn', true);
+}
+
 // Show/hide a context-size warning when the selected ctx exceeds the model's
 // trained context length. warnId element should be a <span> near the ctx select.
-function updateCtxWarning(modelId, ctxId, warnId) {
+// Set ctxInK=true when the ctx select value is in K tokens rather than raw tokens.
+function updateCtxWarning(modelId, ctxId, warnId, ctxInK = false) {
   const warnEl = document.getElementById(warnId);
   if (!warnEl) return;
   const model     = document.getElementById(modelId)?.value;
   const ctxRaw    = document.getElementById(ctxId)?.value;
-  const ctxVal    = ctxRaw ? parseInt(ctxRaw, 10) : 0;
+  const ctxVal    = ctxRaw ? (parseInt(ctxRaw, 10) * (ctxInK ? 1024 : 1)) : 0;
   const trained   = model ? (modelCtxLengths[model] || 0) : 0;
   if (!ctxVal || !trained || ctxVal <= trained) {
     warnEl.classList.add('hidden');

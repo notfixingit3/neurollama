@@ -252,14 +252,14 @@ func newStreamScanner(reader io.Reader) *bufio.Scanner {
 
 func main() {
 	// CLI flags
-	portFlag := flag.Int("port", 0, "Port to listen on (overrides PORT env var, default 8080)")
+	portFlag := flag.Int("port", 0, "Port to listen on (overrides PORT env var, default 8811)")
 	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "NEUROLLAMA %s — Ollama node control panel\n\n", appVersion)
 		fmt.Fprintf(os.Stderr, "Usage:\n  neurollama [flags]\n\nFlags:\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nEnvironment variables:\n")
-		fmt.Fprintf(os.Stderr, "  PORT          Port to listen on (default 8080)\n")
+		fmt.Fprintf(os.Stderr, "  PORT          Port to listen on (default 8811)\n")
 		fmt.Fprintf(os.Stderr, "  GIN_MODE      Set to 'release' to suppress debug output\n\n")
 		fmt.Fprintf(os.Stderr, "Examples:\n")
 		fmt.Fprintf(os.Stderr, "  neurollama --port 9000\n")
@@ -492,7 +492,7 @@ func resolvePort(flagPort int) (int, error) {
 	}
 	rawPort := strings.TrimSpace(os.Getenv("PORT"))
 	if rawPort == "" {
-		return 8080, nil
+		return 8811, nil
 	}
 	port, err := strconv.Atoi(rawPort)
 	if err != nil {
@@ -2736,7 +2736,7 @@ func diagnosticsHandler(c *gin.Context) {
 
 	port := strings.TrimSpace(os.Getenv("PORT"))
 	if port == "" {
-		port = "8080"
+		port = "8811"
 	}
 	addCheck("HTTP Listener", "pass", "Runtime port configuration is resolved.", ":"+port)
 	addCheck("Streaming Routes", "pass", "Streaming endpoints are registered and use request cancellation.", "/api/chat, /api/generate, /api/models/create, /api/benchmarks/run, /api/optimizer/run")

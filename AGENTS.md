@@ -85,7 +85,7 @@ docker-compose up -d
 ```
 
 ## NOTES
-- Runs on `http://localhost:8080` by default; override with `PORT` env var
+- Runs on `http://localhost:8811` by default; override with `PORT` env var
 - Data stored in `data/neurollama.db` (auto-created on first launch)
 - Server credentials (Bearer tokens, Basic Auth passwords) are redacted from API responses
 - Remote node limitation: Ollama API doesn't expose total VRAM capacity — VRAM percentage bars not meaningful for remote servers
