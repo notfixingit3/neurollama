@@ -7296,32 +7296,23 @@ rm -rf /tmp/ollama-update-tmp /tmp/Ollama-darwin.zip`
 			}
 
 		case "Linux":
-			var ollamaArch string
-			switch archRaw {
-			case "x86_64":
-				ollamaArch = "amd64"
-			case "aarch64", "arm64":
-				ollamaArch = "arm64"
-			default:
-				fail(fmt.Sprintf("Unsupported architecture: %s", archRaw))
-				return false
-			}
-			if ollamaPath == "" {
-				ollamaPath = "/usr/local/bin/ollama"
-			}
-			emit("status", fmt.Sprintf("Arch: %s → %s  |  Binary: %s", archRaw, ollamaArch, ollamaPath))
-
-			dlURL := fmt.Sprintf("https://github.com/ollama/ollama/releases/download/%s/ollama-linux-%s", ver, ollamaArch)
-			emit("status", fmt.Sprintf("Downloading ollama-linux-%s…", ollamaArch))
-			if dErr := runSSHCmdStream(sshClient,
-				fmt.Sprintf("curl -fsSL %s -o /tmp/ollama_update && chmod +x /tmp/ollama_update", dlURL), line); dErr != nil {
-				fail(fmt.Sprintf("Download failed: %v", dErr))
-				return false
-			}
-
+			// Ollama's Linux releases are now full .tar.zst archives (~1.4 GB) that
+			// include all GPU runners — no plain binary asset exists. We use the
+			// official install script, but back up and restore the custom service file
+			// around it so custom OLLAMA_* env vars and paths are preserved.
 			esc := shellEscapeSingle(req.SudoPass)
 			sudo := func(cmd string) string {
 				return fmt.Sprintf("echo %s | sudo -S -p '' %s", esc, cmd)
+			}
+
+			const svcPath = "/etc/systemd/system/ollama.service"
+			const svcBackup = "/tmp/ollama.service.neurollama.bak"
+
+			emit("status", "Backing up custom service file…")
+			if bErr := runSSHCmdStream(sshClient,
+				sudo(fmt.Sprintf("cp %s %s", svcPath, svcBackup)), line); bErr != nil {
+				fail(fmt.Sprintf("Could not backup service file: %v", bErr))
+				return false
 			}
 
 			emit("status", "Stopping ollama.service…")
@@ -7329,15 +7320,26 @@ rm -rf /tmp/ollama-update-tmp /tmp/Ollama-darwin.zip`
 				line(fmt.Sprintf("  (stop warning: %v — continuing)", sErr))
 			}
 
-			emit("status", "Installing new binary…")
-			if rErr := runSSHCmdStream(sshClient,
-				sudo(fmt.Sprintf("cp /tmp/ollama_update %s && chmod +x %s", ollamaPath, ollamaPath)), line); rErr != nil {
-				fail(fmt.Sprintf("Binary replacement failed: %v", rErr))
+			emit("status", "Running Ollama installer (downloads ≈1.4 GB — may take a few minutes)…")
+			installCmd := sudo("sh -c 'curl -fsSL https://ollama.com/install.sh | sh'")
+			if iErr := runSSHCmdStream(sshClient, installCmd, line); iErr != nil {
+				fail(fmt.Sprintf("Installer failed: %v", iErr))
 				return false
 			}
-			runSSHCmd(sshClient, "rm -f /tmp/ollama_update")
 
-			emit("status", "Starting ollama.service…")
+			// Installer starts the service with a fresh default service file — stop it
+			// before we restore our custom one.
+			runSSHCmd(sshClient, sudo("systemctl stop ollama"))
+
+			emit("status", "Restoring custom service file…")
+			restoreCmd := sudo(fmt.Sprintf("cp %s %s && systemctl daemon-reload", svcBackup, svcPath))
+			if rErr := runSSHCmdStream(sshClient, restoreCmd, line); rErr != nil {
+				fail(fmt.Sprintf("Failed to restore custom service file: %v", rErr))
+				return false
+			}
+			runSSHCmd(sshClient, fmt.Sprintf("rm -f %s", svcBackup))
+
+			emit("status", "Starting ollama.service with custom configuration…")
 			if sErr := runSSHCmdStream(sshClient, sudo("systemctl start ollama"), line); sErr != nil {
 				fail(fmt.Sprintf("Service start failed: %v", sErr))
 				return false
