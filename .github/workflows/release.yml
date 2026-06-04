@@ -93,7 +93,8 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
-        run: go build -ldflags="-s -w" -o ${{ matrix.binary }} .
+          RELEASE_TYPE: ${{ needs.check-stable.outputs.prerelease == 'true' && 'pre-release' || 'stable' }}
+        run: go build -ldflags="-s -w -X main.releaseType=${RELEASE_TYPE}" -o ${{ matrix.binary }} .
 
       - name: Upload to release
         uses: softprops/action-gh-release@v2

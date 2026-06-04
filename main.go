@@ -36,6 +36,9 @@ import (
 
 const appVersion = "v0.2.23"
 
+// releaseType is "dev" by default; CI overrides via -ldflags "-X main.releaseType=pre-release|stable"
+var releaseType = "dev"
+
 var (
 	appStartTime = time.Now()
 	activeDBPath = "data/neurollama.db"
@@ -6149,6 +6152,7 @@ func aboutHandler(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"version":       appVersion,
+		"releaseType":   releaseType,
 		"goVersion":     runtime.Version(),
 		"uptime":        uptimeStr,
 		"startTime":     appStartTime.Format("2006-01-02 15:04:05"),

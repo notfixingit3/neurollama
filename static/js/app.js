@@ -1081,8 +1081,25 @@ async function fetchAbout() {
          <div class="text-[#4c566a] text-[10px] tracking-wider uppercase">${label}</div>
          <div class="text-[#d8dee9]">${value}</div>
        </div>`;
+    // Build release type badge (used in About and footer)
+    const rtBadge = (() => {
+      if (!d.releaseType || d.releaseType === 'stable') return '';
+      const [cls, label] = d.releaseType === 'pre-release'
+        ? ['bg-[#ebcb8b]/15 text-[#ebcb8b] border-[#ebcb8b]/40', 'PRE-RELEASE']
+        : ['bg-[#4c566a]/30 text-[#4c566a] border-[#4c566a]/40', 'DEV'];
+      return `<span class="ml-1.5 px-1.5 py-0.5 rounded border font-mono text-[9px] uppercase tracking-wider ${cls}">${label}</span>`;
+    })();
+
+    // Update footer version badge
+    const footerVer = document.getElementById('footer-version');
+    if (footerVer) {
+      footerVer.innerHTML = `<span class="font-mono text-[#d8dee9]/50">${escapeHTML(d.version)}</span>${rtBadge}`;
+      footerVer.classList.remove('hidden');
+      footerVer.classList.add('flex');
+    }
+
     grid.innerHTML =
-      row('Version',        d.version) +
+      row('Version',        d.version + rtBadge) +
       row('Go Runtime',     d.goVersion) +
       row('Uptime',         d.uptime) +
       row('Started',        d.startTime) +
