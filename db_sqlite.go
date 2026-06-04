@@ -1828,7 +1828,7 @@ func loadSSHEncKey() ([]byte, error) {
 	var initErr error
 	sshEncKeyOnce.Do(func() {
 		p := filepath.Join(dataDir, "ssh_keystore.key")
-		if raw, err := os.ReadFile(p); err == nil && len(raw) == 32 {
+		if raw, err := os.ReadFile(p); err == nil && len(raw) == 32 { // #nosec G304 -- path is filepath.Join(dataDir, hardcoded filename); dataDir is a package constant
 			sshEncKeyVal = raw
 			return
 		}

@@ -329,7 +329,9 @@ func main() {
 		trustedProxies = "127.0.0.1,::1"
 	}
 	if trustedProxies == "none" {
-		r.SetTrustedProxies(nil)
+		if err := r.SetTrustedProxies(nil); err != nil {
+			log.Printf("Warning: SetTrustedProxies(nil): %v", err)
+		}
 	} else {
 		var proxies []string
 		for _, p := range strings.Split(trustedProxies, ",") {
@@ -337,7 +339,9 @@ func main() {
 				proxies = append(proxies, p)
 			}
 		}
-		r.SetTrustedProxies(proxies)
+		if err := r.SetTrustedProxies(proxies); err != nil {
+			log.Printf("Warning: SetTrustedProxies(%v): %v", proxies, err) // #nosec G706 -- proxies is operator-set env var, not HTTP request data
+		}
 	}
 
 	// Load HTML templates
@@ -3841,7 +3845,7 @@ func checkCodeSyntax(lang, code string) (bool, string) {
 	runCmd := func(timeout time.Duration, name string, args ...string) (bool, string) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
-		out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+		out, err := exec.CommandContext(ctx, name, args...).CombinedOutput() // #nosec G204 -- command name comes from a controlled switch (go/python3/node/etc), never from user input
 		if err != nil {
 			return false, stripANSI(strings.TrimSpace(string(out)))
 		}
@@ -5504,8 +5508,8 @@ func extractPDFTextHandler(c *gin.Context) {
 		return
 	}
 	defer func() {
-		tmp.Close()
-		os.Remove(tmp.Name())
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
 	}()
 
 	src, err := fh.Open()
@@ -5644,7 +5648,7 @@ func uploadAndIndexHandler(c *gin.Context) {
 	emit := func(event ndjsonEvent) {
 		data, _ := json.Marshal(event)
 		data = append(data, '\n')
-		c.Writer.Write(data) //nolint:errcheck
+		_, _ = c.Writer.Write(data) //nolint:errcheck // #nosec G104
 		c.Writer.Flush()
 	}
 
@@ -5702,13 +5706,13 @@ func uploadAndIndexHandler(c *gin.Context) {
 
 		src, err := fh.Open()
 		if err != nil {
-			tmp.Close()
+			_ = tmp.Close()
 			emit(ndjsonEvent{"type": "error", "message": "Could not open upload"})
 			return
 		}
 		_, copyErr := io.Copy(tmp, src)
-		src.Close()
-		tmp.Close()
+		_ = src.Close()
+		_ = tmp.Close()
 		if copyErr != nil {
 			emit(ndjsonEvent{"type": "error", "message": "Failed to buffer PDF upload"})
 			return
@@ -5722,7 +5726,7 @@ func uploadAndIndexHandler(c *gin.Context) {
 
 		numPages := pdfReader.NumPage()
 		if numPages > maxPages {
-			f.Close()
+			_ = f.Close()
 			emit(ndjsonEvent{"type": "error", "message": fmt.Sprintf("PDF has %d pages. Maximum supported is %d.", numPages, maxPages)})
 			return
 		}
@@ -5745,7 +5749,7 @@ func uploadAndIndexHandler(c *gin.Context) {
 			sb.WriteString(pageText)
 			sb.WriteByte('\n')
 		}
-		f.Close()
+		_ = f.Close()
 
 		rawText = sb.String()
 		skipNote := ""
@@ -5762,7 +5766,7 @@ func uploadAndIndexHandler(c *gin.Context) {
 			return
 		}
 		raw, err := io.ReadAll(src)
-		src.Close()
+		_ = src.Close()
 		if err != nil {
 			emit(ndjsonEvent{"type": "error", "message": "Failed to read file"})
 			return
@@ -6257,7 +6261,7 @@ func restoreDBHandler(c *gin.Context) {
 	defer dst.Close()
 
 	if _, err := io.Copy(dst, src); err != nil {
-		os.Remove(pendingPath)
+		_ = os.Remove(pendingPath)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to write restore file"})
 		return
 	}
@@ -7162,7 +7166,7 @@ func ollamaUpdateSSEHandler(c *gin.Context) {
 	if req.UseSSHKey || req.SSHPassword == "" {
 		// Priority 2: SSH agent (handles passphrase-protected keys already unlocked)
 		if agentSock := os.Getenv("SSH_AUTH_SOCK"); agentSock != "" {
-			if conn, dialErr := net.Dial("unix", agentSock); dialErr == nil {
+			if conn, dialErr := net.Dial("unix", agentSock); dialErr == nil { // #nosec G704 -- SSH_AUTH_SOCK is a system-set env var pointing to the user's SSH agent socket, not user input
 				authMethods = append(authMethods, gossh.PublicKeysCallback(sshagent.NewClient(conn).Signers))
 			}
 		}
@@ -7173,7 +7177,7 @@ func ollamaUpdateSSEHandler(c *gin.Context) {
 			filepath.Join(homeDir, ".ssh", "id_ecdsa"),
 			filepath.Join(homeDir, ".ssh", "id_rsa"),
 		} {
-			if raw, readErr := os.ReadFile(kf); readErr == nil {
+			if raw, readErr := os.ReadFile(kf); readErr == nil { // #nosec G304 -- paths are os.UserHomeDir() + hardcoded filenames, no user-controlled traversal possible
 				if signer, parseErr := gossh.ParsePrivateKey(raw); parseErr == nil {
 					authMethods = append(authMethods, gossh.PublicKeys(signer))
 				}
@@ -7208,7 +7212,7 @@ func ollamaUpdateSSEHandler(c *gin.Context) {
 	sshCfg := &gossh.ClientConfig{
 		User:            req.SSHUser,
 		Auth:            authMethods,
-		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
+		HostKeyCallback: gossh.InsecureIgnoreHostKey(), // #nosec G106 -- intentional for LAN/trusted deployment; nodes are operator-registered
 		Timeout:         15 * time.Second,
 	}
 
@@ -7359,7 +7363,7 @@ func ollamaUpdateSSEHandler(c *gin.Context) {
 					return false
 				}
 				emit("status", "Stopping Ollama…")
-				runSSHCmd(sshClient, "killall -q Ollama ollama 2>/dev/null; sleep 1")
+				_, _ = runSSHCmd(sshClient, "killall -q Ollama ollama 2>/dev/null; sleep 1") // fire-and-forget; process may already be stopped
 				emit("status", "Replacing Ollama.app…")
 				replaceCmd := `set -e
 rm -rf /tmp/ollama-update-tmp
@@ -7374,7 +7378,7 @@ rm -rf /tmp/ollama-update-tmp /tmp/Ollama-darwin.zip`
 					return false
 				}
 				emit("status", "Restarting Ollama…")
-				runSSHCmd(sshClient, "open /Applications/Ollama.app")
+				_, _ = runSSHCmd(sshClient, "open /Applications/Ollama.app") // fire-and-forget restart; Ollama GUI app
 			} else {
 				emit("status", "CLI install — running Ollama install script…")
 				if sErr := runSSHCmdStream(sshClient, "curl -fsSL https://ollama.com/install.sh | sh", line); sErr != nil {
@@ -7417,7 +7421,7 @@ rm -rf /tmp/ollama-update-tmp /tmp/Ollama-darwin.zip`
 
 			// Installer starts the service with a fresh default service file — stop it
 			// before we restore our custom one.
-			runSSHCmd(sshClient, sudo("systemctl stop ollama"))
+			_, _ = runSSHCmd(sshClient, sudo("systemctl stop ollama")) // fire-and-forget; installer may have already stopped it
 
 			emit("status", "Restoring custom service file…")
 			restoreCmd := sudo(fmt.Sprintf("cp %s %s && systemctl daemon-reload", svcBackup, svcPath))
@@ -7425,7 +7429,7 @@ rm -rf /tmp/ollama-update-tmp /tmp/Ollama-darwin.zip`
 				fail(fmt.Sprintf("Failed to restore custom service file: %v", rErr))
 				return false
 			}
-			runSSHCmd(sshClient, fmt.Sprintf("rm -f %s", svcBackup))
+			_, _ = runSSHCmd(sshClient, fmt.Sprintf("rm -f %s", svcBackup)) // best-effort cleanup
 
 			emit("status", "Starting ollama.service with custom configuration…")
 			if sErr := runSSHCmdStream(sshClient, sudo("systemctl start ollama"), line); sErr != nil {
