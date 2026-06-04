@@ -37,7 +37,7 @@ import (
 	sshagent "golang.org/x/crypto/ssh/agent"
 )
 
-const appVersion = "v0.2.23"
+const appVersion = "v0.2.24"
 
 // releaseType is "dev" by default; CI overrides via -ldflags "-X main.releaseType=pre-release|stable"
 var releaseType = "dev"

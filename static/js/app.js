@@ -702,6 +702,14 @@ async function init() {
   ['halluc-model', 'halluc-max-context'].forEach(id => {
     document.getElementById(id)?.addEventListener('change', updateHalluCtxWarning);
   });
+  ['completion-model-select', 'completion-ctx-limit'].forEach(id => {
+    document.getElementById(id)?.addEventListener('change', () =>
+      updateCtxWarning('completion-model-select', 'completion-ctx-limit', 'completion-ctx-warn'));
+  });
+  ['builder-base-select', 'builder-ctx-select'].forEach(id => {
+    document.getElementById(id)?.addEventListener('change', () =>
+      updateCtxWarning('builder-base-select', 'builder-ctx-select', 'builder-ctx-warn'));
+  });
 
   // Initialize RAG chat sidebar controls
   const chatRagEnabledEl = document.getElementById('chat-rag-enabled');
@@ -1679,6 +1687,8 @@ function populateModelDropdowns() {
       if (cur && hallucModel.querySelector(`option[value="${CSS.escape(cur)}"]`)) hallucModel.value = cur;
     }
   }
+  // Keep wizard selects in sync whenever the model list changes
+  populateWizardSelects();
 }
 
 // --- TOAST SYSTEM ---
@@ -2572,8 +2582,10 @@ async function fetchModelCtxLengths() {
     // Run an initial ctx warning check now that lengths are known — the change
     // listeners only fire on user interaction, so a previously-saved high ctx
     // would never show the warning without this explicit call.
-    updateCtxWarning('chat-model-select',  'chat-ctx-limit', 'chat-ctx-warn');
-    updateCtxWarning('code-bench-model',   'code-bench-ctx', 'code-ctx-warn');
+    updateCtxWarning('chat-model-select',      'chat-ctx-limit',       'chat-ctx-warn');
+    updateCtxWarning('code-bench-model',       'code-bench-ctx',       'code-ctx-warn');
+    updateCtxWarning('completion-model-select','completion-ctx-limit', 'completion-ctx-warn');
+    updateCtxWarning('builder-base-select',    'builder-ctx-select',   'builder-ctx-warn');
     updateHalluCtxWarning();
   } catch { /* silently ignore */ }
 }
@@ -4551,8 +4563,9 @@ async function onBaseModelChange() {
     console.error('Error fetching model details:', err);
   }
 
-  // Regenerate preview
+  // Regenerate preview and update ctx warning
   generateModelfilePreview();
+  updateCtxWarning('builder-base-select', 'builder-ctx-select', 'builder-ctx-warn');
 }
 
 async function buildCustomModel() {
@@ -11246,4 +11259,377 @@ async function deleteHallucinationRun(id) {
   } catch (e) {
     showToast('Delete failed: ' + e.message, 'error');
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// NEUROWIZARD — Guided Model Operations
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Per-wizard runtime state: { name: newModelName, ctrl: AbortController }
+const _wzState = {};
+
+function openWz(id) {
+  document.getElementById(`wz-${id}`)?.showModal();
+  _wzShowStep(id, 'configure');
+}
+
+function closeWz(id) {
+  const ctrl = _wzState[id]?.ctrl;
+  if (ctrl) { ctrl.abort(); delete _wzState[id].ctrl; }
+  const modal = document.getElementById(`wz-${id}`);
+  if (modal) modal.close();
+  setTimeout(() => _wzShowStep(id, 'configure'), 200);
+}
+
+function _wzShowStep(id, step) {
+  ['configure', 'creating', 'done'].forEach(s => {
+    const el = document.getElementById(`wz-${id}-${s}`);
+    if (el) el.classList.toggle('hidden', s !== step);
+  });
+}
+
+function wzOpenInChat(id) {
+  const name = _wzState[id]?.name;
+  if (!name) return;
+  closeWz(id);
+  switchWorkspace('playground');
+  setTimeout(() => {
+    const sel = document.getElementById('chat-model-select');
+    if (sel) {
+      sel.value = name;
+      if (sel._ssWidget) sel._ssWidget.refresh();
+    }
+  }, 100);
+}
+
+async function _wzLaunch(id, modelfile, newName) {
+  if (!modelfile || !newName) { showToast('Fill in all required fields', 'error'); return; }
+  _wzState[id] = { name: newName };
+  _wzShowStep(id, 'creating');
+
+  const nameSpan = document.getElementById(`wz-${id}-creating-name`);
+  if (nameSpan) nameSpan.textContent = `"${newName}"`;
+
+  const logEl = document.getElementById(`wz-${id}-log`);
+  if (logEl) logEl.innerHTML = '';
+
+  const ctrl = new AbortController();
+  _wzState[id].ctrl = ctrl;
+
+  const appendLog = (text, cls = '') => {
+    if (!logEl) return;
+    const line = document.createElement('div');
+    if (cls) line.className = cls;
+    line.textContent = text;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+  };
+
+  const showDone = (html) => {
+    const doneMsg = document.getElementById(`wz-${id}-done-msg`);
+    if (doneMsg) doneMsg.innerHTML = html;
+    _wzShowStep(id, 'done');
+  };
+
+  try {
+    const res = await fetch('/api/models/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newName, modelfile }),
+      signal: ctrl.signal,
+    });
+
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const obj = JSON.parse(line);
+          if (obj.status) appendLog(obj.status);
+          if (obj.error) {
+            showDone(`<span class="text-[#bf616a]"><i class="fa-solid fa-circle-xmark mr-1.5"></i>Failed: ${escapeHTML(obj.error)}</span>`);
+            return;
+          }
+        } catch { appendLog(line); }
+      }
+    }
+
+    // Success
+    const chatBtn = document.getElementById(`wz-${id}-chat-btn`);
+    if (chatBtn) chatBtn.classList.remove('hidden');
+    showDone(`<span class="text-[#a3be8c]"><i class="fa-solid fa-circle-check mr-1.5"></i>Created <span class="font-bold text-[#d8dee9]">${escapeHTML(newName)}</span> successfully.</span>`);
+    fetchModels();
+
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    showDone(`<span class="text-[#bf616a]"><i class="fa-solid fa-circle-xmark mr-1.5"></i>${escapeHTML(e.message)}</span>`);
+  }
+}
+
+// Populate all wizard model selects from the current models array.
+// Called from populateModelDropdowns() so it stays in sync automatically.
+function populateWizardSelects() {
+  const ids = ['wz-ctx-model', 'wz-persona-model', 'wz-sampling-model', 'wz-nothink-model', 'wz-merge-model-a', 'wz-merge-model-b'];
+  ids.forEach(id => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">— select model —</option>' +
+      models.map(m => `<option value="${escapeHTML(m.name)}">${escapeHTML(m.name)}</option>`).join('');
+    if (prev && sel.querySelector(`option[value="${CSS.escape(prev)}"]`)) sel.value = prev;
+  });
+}
+
+// Builder subtab switcher
+function switchBuilderSubtab(tab) {
+  ['recipe', 'wizards'].forEach(t => {
+    document.getElementById(`builder-sub-${t}`)?.classList.toggle('hidden', t !== tab);
+    const btn = document.getElementById(`builder-subtab-${t}`);
+    if (btn) btn.classList.toggle('bench-subtab-active', t === tab);
+  });
+  if (tab === 'wizards') populateWizardSelects();
+}
+
+// ── Wizard: Expand Context ─────────────────────────────────────────────────
+function openWizCtx() { openWz('ctx'); populateWizardSelects(); wzCtxUpdate(); }
+
+function wzCtxModelChange() {
+  const model = document.getElementById('wz-ctx-model')?.value || '';
+  const size  = parseInt(document.getElementById('wz-ctx-size')?.value || '32768');
+  const nameEl = document.getElementById('wz-ctx-name');
+  if (nameEl && model) {
+    const base = model.replace(/:latest$/, '').replace(/[^a-z0-9._-]/gi, '-');
+    const k = size >= 1000000 ? `${Math.round(size / 1000000)}m` : `${Math.round(size / 1024)}k`;
+    nameEl.value = `${base}-ctx${k}`;
+  }
+  wzCtxUpdate();
+}
+
+function wzCtxUpdate() {
+  const model  = document.getElementById('wz-ctx-model')?.value || '';
+  const size   = parseInt(document.getElementById('wz-ctx-size')?.value || '32768');
+  const warnEl = document.getElementById('wz-ctx-warn');
+  if (warnEl) {
+    const trained = model ? (modelCtxLengths[model] || 0) : 0;
+    if (trained && size > trained) {
+      const msg = `${fmtCtx(size)} exceeds trained context (${fmtCtx(trained)})\nOllama will clamp it`;
+      warnEl.title = msg; warnEl.dataset.tip = msg;
+      warnEl.classList.remove('hidden');
+    } else {
+      warnEl.classList.add('hidden');
+    }
+  }
+  const preview = document.getElementById('wz-ctx-preview');
+  if (preview) preview.textContent = model ? `FROM ${model}\nPARAMETER num_ctx ${size}\n` : '— select a base model —';
+}
+
+// ── Wizard: Custom Persona ─────────────────────────────────────────────────
+const _wzPersonaPresets = {
+  coding:   'You are an expert software engineer. Provide concise, correct, and well-commented code. Prefer modern idioms and explain your reasoning briefly.',
+  tutor:    'You are a patient language tutor. Correct grammatical errors gently, explain rules clearly, and adapt your explanations to the learner\'s level.',
+  creative: 'You are a creative writing partner. Generate vivid, original prose with strong narrative voice. Embrace metaphor, subtext, and authentic character voice.',
+  research: 'You are a meticulous research assistant. Summarize sources accurately, flag uncertainties, cite when possible, and structure your output clearly.',
+  custom:   '',
+};
+
+function openWizPersona() {
+  openWz('persona');
+  populateWizardSelects();
+  wzPersonaPresetChange(); // load default preset text
+  wzPersonaUpdate();
+}
+
+function wzPersonaModelChange() {
+  const model  = document.getElementById('wz-persona-model')?.value || '';
+  const preset = document.getElementById('wz-persona-preset')?.value || 'coding';
+  const nameEl = document.getElementById('wz-persona-name');
+  if (nameEl && model) {
+    const base   = model.replace(/:latest$/, '').replace(/[^a-z0-9._-]/gi, '-');
+    const suffix = preset !== 'custom' ? `-${preset}` : '-persona';
+    nameEl.value = `${base}${suffix}`;
+  }
+  wzPersonaUpdate();
+}
+
+function wzPersonaPresetChange() {
+  const preset = document.getElementById('wz-persona-preset')?.value || 'coding';
+  const sysEl  = document.getElementById('wz-persona-system');
+  if (sysEl && preset in _wzPersonaPresets && preset !== 'custom') {
+    sysEl.value = _wzPersonaPresets[preset];
+  }
+  // also re-generate name suffix if model already selected
+  const model  = document.getElementById('wz-persona-model')?.value || '';
+  const nameEl = document.getElementById('wz-persona-name');
+  if (nameEl && model) {
+    const base   = model.replace(/:latest$/, '').replace(/[^a-z0-9._-]/gi, '-');
+    const suffix = preset !== 'custom' ? `-${preset}` : '-persona';
+    nameEl.value = `${base}${suffix}`;
+  }
+  wzPersonaUpdate();
+}
+
+function wzPersonaUpdate() {
+  const model  = document.getElementById('wz-persona-model')?.value || '';
+  const system = document.getElementById('wz-persona-system')?.value || '';
+  const preview = document.getElementById('wz-persona-preview');
+  if (preview) {
+    const escaped = system.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const short   = escaped.length > 100 ? escaped.slice(0, 100) + '…' : escaped;
+    preview.textContent = model ? `FROM ${model}\nSYSTEM "${short}"\n` : '— select a base model —';
+  }
+}
+
+// ── Wizard: Sampling Profile ──────────────────────────────────────────────
+const _wzSamplingProfiles = {
+  creative: { label: 'High temperature — diverse, imaginative output',     params: 'PARAMETER temperature 0.9\nPARAMETER top_p 0.95\nPARAMETER top_k 40' },
+  balanced: { label: 'Moderate temperature — quality/diversity tradeoff',  params: 'PARAMETER temperature 0.7\nPARAMETER top_p 0.9\nPARAMETER top_k 40' },
+  precise:  { label: 'Low temperature — deterministic, factual output',    params: 'PARAMETER temperature 0.1\nPARAMETER top_k 10\nPARAMETER top_p 0.5' },
+  fast:     { label: 'Capped output — 512 tokens max, balanced temp',      params: 'PARAMETER temperature 0.5\nPARAMETER num_predict 512' },
+};
+
+function openWizSampling() { openWz('sampling'); populateWizardSelects(); wzSamplingUpdate(); }
+
+function wzSamplingModelChange() {
+  const model   = document.getElementById('wz-sampling-model')?.value || '';
+  const profile = document.getElementById('wz-sampling-profile')?.value || 'balanced';
+  const nameEl  = document.getElementById('wz-sampling-name');
+  if (nameEl && model) {
+    const base = model.replace(/:latest$/, '').replace(/[^a-z0-9._-]/gi, '-');
+    nameEl.value = `${base}-${profile}`;
+  }
+  wzSamplingUpdate();
+}
+
+function wzSamplingUpdate() {
+  const model   = document.getElementById('wz-sampling-model')?.value || '';
+  const profile = document.getElementById('wz-sampling-profile')?.value || 'balanced';
+  const nameEl  = document.getElementById('wz-sampling-name');
+  // Re-generate name suffix when profile changes (if model is selected)
+  if (nameEl && model) {
+    const base = model.replace(/:latest$/, '').replace(/[^a-z0-9._-]/gi, '-');
+    nameEl.value = `${base}-${profile}`;
+  }
+  const descEl = document.getElementById('wz-sampling-profile-desc');
+  if (descEl) descEl.textContent = _wzSamplingProfiles[profile]?.label || '';
+  const p = _wzSamplingProfiles[profile];
+  const preview = document.getElementById('wz-sampling-preview');
+  if (preview) preview.textContent = model && p ? `FROM ${model}\n${p.params}\n` : '— select a base model —';
+}
+
+// ── Wizard: Strip Thinking Tokens ─────────────────────────────────────────
+function openWizNoThink() { openWz('nothink'); populateWizardSelects(); wzNoThinkUpdate(); }
+
+function wzNoThinkModelChange() {
+  const model  = document.getElementById('wz-nothink-model')?.value || '';
+  const nameEl = document.getElementById('wz-nothink-name');
+  if (nameEl && model) {
+    const base = model.replace(/:latest$/, '').replace(/[^a-z0-9._-]/gi, '-');
+    nameEl.value = `${base}-nothink`;
+  }
+  wzNoThinkUpdate();
+}
+
+function wzNoThinkUpdate() {
+  const model   = document.getElementById('wz-nothink-model')?.value || '';
+  const preview = document.getElementById('wz-nothink-preview');
+  if (preview) preview.textContent = model ? `FROM ${model}\nSYSTEM "/no_think"\n` : '— select a base model —';
+}
+
+// ── Wizard: Merge Models ──────────────────────────────────────────────────
+function openWizMerge() { openWz('merge'); populateWizardSelects(); wzMergeUpdate(); }
+
+function wzMergeUpdate() {
+  const modelA  = document.getElementById('wz-merge-model-a')?.value || '';
+  const modelB  = document.getElementById('wz-merge-model-b')?.value || '';
+  const weight  = document.getElementById('wz-merge-weight')?.value || '0.5';
+  const method  = document.getElementById('wz-merge-method')?.value || 'SLERP';
+  const valSpan = document.getElementById('wz-merge-weight-val');
+  if (valSpan) valSpan.textContent = weight;
+
+  const nameEl = document.getElementById('wz-merge-name');
+  if (nameEl && modelA && modelB && modelA !== modelB) {
+    const a = modelA.replace(/:latest$/, '').replace(/[^a-z0-9._-]/gi, '-');
+    const b = modelB.replace(/:latest$/, '').replace(/[^a-z0-9._-]/gi, '-').split('-')[0];
+    nameEl.value = `${a}-${b}-blend`;
+  }
+
+  const sameWarn = document.getElementById('wz-merge-same-warn');
+  if (sameWarn) sameWarn.classList.toggle('hidden', !(modelA && modelB && modelA === modelB));
+
+  const preview = document.getElementById('wz-merge-preview');
+  if (preview) {
+    preview.textContent = modelA && modelB
+      ? `FROM ${modelA}\n# MERGE_METHOD: ${method}\n# MERGE_MODEL: ${modelB}\n# MERGE_RATIO: ${weight}\n`
+      : '— select both models —';
+  }
+}
+
+// ── Shared launch dispatcher ──────────────────────────────────────────────
+function launchWz(id) {
+  let modelfile = '', newName = '';
+
+  switch (id) {
+    case 'ctx': {
+      const model = document.getElementById('wz-ctx-model')?.value;
+      const size  = document.getElementById('wz-ctx-size')?.value;
+      newName     = document.getElementById('wz-ctx-name')?.value.trim();
+      if (!model) { showToast('Select a base model', 'error'); return; }
+      if (!newName) { showToast('Enter a model name', 'error'); return; }
+      modelfile   = `FROM ${model}\nPARAMETER num_ctx ${size}\n`;
+      break;
+    }
+    case 'persona': {
+      const model  = document.getElementById('wz-persona-model')?.value;
+      const system = document.getElementById('wz-persona-system')?.value.trim();
+      newName      = document.getElementById('wz-persona-name')?.value.trim();
+      if (!model)  { showToast('Select a base model', 'error'); return; }
+      if (!system) { showToast('Enter a SYSTEM prompt', 'error'); return; }
+      if (!newName){ showToast('Enter a model name', 'error'); return; }
+      modelfile    = `FROM ${model}\nSYSTEM "${system.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"\n`;
+      break;
+    }
+    case 'sampling': {
+      const model   = document.getElementById('wz-sampling-model')?.value;
+      const profile = document.getElementById('wz-sampling-profile')?.value;
+      newName       = document.getElementById('wz-sampling-name')?.value.trim();
+      if (!model)  { showToast('Select a base model', 'error'); return; }
+      if (!newName){ showToast('Enter a model name', 'error'); return; }
+      const p = _wzSamplingProfiles[profile];
+      modelfile = p ? `FROM ${model}\n${p.params}\n` : `FROM ${model}\n`;
+      break;
+    }
+    case 'nothink': {
+      const model = document.getElementById('wz-nothink-model')?.value;
+      newName     = document.getElementById('wz-nothink-name')?.value.trim();
+      if (!model)  { showToast('Select a base model', 'error'); return; }
+      if (!newName){ showToast('Enter a model name', 'error'); return; }
+      modelfile   = `FROM ${model}\nSYSTEM "/no_think"\n`;
+      break;
+    }
+    case 'merge': {
+      const modelA = document.getElementById('wz-merge-model-a')?.value;
+      const modelB = document.getElementById('wz-merge-model-b')?.value;
+      const weight = document.getElementById('wz-merge-weight')?.value || '0.5';
+      const method = document.getElementById('wz-merge-method')?.value || 'SLERP';
+      newName      = document.getElementById('wz-merge-name')?.value.trim();
+      if (!modelA) { showToast('Select Model A', 'error'); return; }
+      if (!modelB) { showToast('Select Model B', 'error'); return; }
+      if (modelA === modelB) { showToast('Select two different models', 'error'); return; }
+      if (!newName){ showToast('Enter a model name', 'error'); return; }
+      modelfile = `FROM ${modelA}\n# MERGE_METHOD: ${method}\n# MERGE_MODEL: ${modelB}\n# MERGE_RATIO: ${weight}\n`;
+      break;
+    }
+    default:
+      return;
+  }
+
+  _wzLaunch(id, modelfile, newName);
 }

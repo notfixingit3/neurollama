@@ -809,7 +809,10 @@
 
                 <!-- Context limit input -->
                 <div class="form-control">
-                  <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Context Limit</span></label>
+                  <label class="label flex items-center gap-1">
+                    <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Context Limit</span>
+                    <span id="completion-ctx-warn" class="hidden text-[#ebcb8b] text-[9px] font-mono cursor-default" title="">⚠</span>
+                  </label>
                   <select id="completion-ctx-limit" class="select select-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
                     <option value="2048" selected>2K — 2,048</option>
                     <option value="4096">4K — 4,096</option>
@@ -942,8 +945,21 @@
         </div>
 
         <!-- PANEL 3: MODEL BUILDER -->
-        <div id="ws-panel-builder" class="ws-panel hidden grid grid-cols-1 lg:grid-cols-12 gap-6">
-          
+        <div id="ws-panel-builder" class="ws-panel hidden flex flex-col gap-4">
+
+          <!-- Builder / Wizard subtab bar -->
+          <div class="bg-[#242933]/60 p-1 border border-[#4c566a]/40 flex w-fit shrink-0 gap-1 rounded-xl">
+            <button id="builder-subtab-recipe" onclick="switchBuilderSubtab('recipe')" class="bench-subtab bench-subtab-active">
+              <i class="fa-solid fa-compass-drafting mr-1.5"></i>RECIPE BUILDER
+            </button>
+            <button id="builder-subtab-wizards" onclick="switchBuilderSubtab('wizards')" class="bench-subtab">
+              <i class="fa-solid fa-wand-magic-sparkles mr-1.5"></i>NEUROWIZARD
+            </button>
+          </div>
+
+          <!-- Sub-panel: Recipe Builder -->
+          <div id="builder-sub-recipe" class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
           <!-- Builder Inputs (5 cols) -->
           <div class="lg:col-span-5 flex flex-col">
             <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col gap-4">
@@ -978,8 +994,11 @@
 
               <!-- Context window limit -->
               <div class="form-control">
-                <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Context Window Size</span></label>
-                <select id="builder-ctx-select" onchange="generateModelfilePreview()" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                <label class="label flex items-center gap-1">
+                  <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Context Window Size</span>
+                  <span id="builder-ctx-warn" class="hidden text-[#ebcb8b] text-[9px] font-mono cursor-default" title="">⚠</span>
+                </label>
+                <select id="builder-ctx-select" onchange="generateModelfilePreview(); updateCtxWarning('builder-base-select','builder-ctx-select','builder-ctx-warn')" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
                   <option value="2048" selected>2K — 2,048</option>
                   <option value="4096">4K — 4,096</option>
                   <option value="8192">8K — 8,192</option>
@@ -1090,7 +1109,95 @@
               </div>
             </div>
           </div>
-        </div>
+          </div><!-- /builder-sub-recipe -->
+
+          <!-- Sub-panel: Wizard Hub -->
+          <div id="builder-sub-wizards" class="hidden">
+            <div class="tech-panel tech-header-accent rounded-xl p-5">
+              <div class="flex items-center gap-3 mb-1 border-b border-[#4c566a]/40 pb-3">
+                <i class="fa-solid fa-wand-magic-sparkles text-[#88c0d0] text-lg"></i>
+                <div>
+                  <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">NeuroWizard</h2>
+                  <p class="text-[10px] text-[#4c566a] font-mono mt-0.5">Guided model operations — no Modelfile knowledge required. Each wizard collects only what it needs, previews the Modelfile, then streams the result.</p>
+                </div>
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 mt-4">
+
+                <!-- Card: Expand Context -->
+                <div class="bg-[#242933]/60 border border-[#4c566a]/50 rounded-xl p-4 flex flex-col gap-3 hover:border-[#88c0d0]/40 transition-colors">
+                  <i class="fa-solid fa-expand text-[#88c0d0] text-xl"></i>
+                  <div>
+                    <div class="font-tech font-bold text-xs text-[#d8dee9] uppercase tracking-wide">Expand Context</div>
+                    <div class="text-[10px] text-[#4c566a] mt-1.5 leading-relaxed">Set a larger <code class="text-[#88c0d0]">num_ctx</code> for any model without editing the Modelfile manually.</div>
+                  </div>
+                  <div class="mt-auto">
+                    <button onclick="openWizCtx()" class="btn btn-xs btn-outline btn-info font-tech w-full gap-1">
+                      LAUNCH <i class="fa-solid fa-arrow-right text-[9px]"></i>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Card: Custom Persona -->
+                <div class="bg-[#242933]/60 border border-[#4c566a]/50 rounded-xl p-4 flex flex-col gap-3 hover:border-[#88c0d0]/40 transition-colors">
+                  <i class="fa-solid fa-masks-theater text-[#88c0d0] text-xl"></i>
+                  <div>
+                    <div class="font-tech font-bold text-xs text-[#d8dee9] uppercase tracking-wide">Custom Persona</div>
+                    <div class="text-[10px] text-[#4c566a] mt-1.5 leading-relaxed">Give a model a custom role or persona via a SYSTEM prompt. Pick a preset or write your own.</div>
+                  </div>
+                  <div class="mt-auto">
+                    <button onclick="openWizPersona()" class="btn btn-xs btn-outline btn-info font-tech w-full gap-1">
+                      LAUNCH <i class="fa-solid fa-arrow-right text-[9px]"></i>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Card: Sampling Profile -->
+                <div class="bg-[#242933]/60 border border-[#4c566a]/50 rounded-xl p-4 flex flex-col gap-3 hover:border-[#88c0d0]/40 transition-colors">
+                  <i class="fa-solid fa-sliders text-[#88c0d0] text-xl"></i>
+                  <div>
+                    <div class="font-tech font-bold text-xs text-[#d8dee9] uppercase tracking-wide">Sampling Profile</div>
+                    <div class="text-[10px] text-[#4c566a] mt-1.5 leading-relaxed">Apply a Creative, Balanced, Precise, or Fast temperature/sampling preset as a baked-in Modelfile.</div>
+                  </div>
+                  <div class="mt-auto">
+                    <button onclick="openWizSampling()" class="btn btn-xs btn-outline btn-info font-tech w-full gap-1">
+                      LAUNCH <i class="fa-solid fa-arrow-right text-[9px]"></i>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Card: Strip Thinking -->
+                <div class="bg-[#242933]/60 border border-[#4c566a]/50 rounded-xl p-4 flex flex-col gap-3 hover:border-[#88c0d0]/40 transition-colors">
+                  <i class="fa-solid fa-brain text-[#88c0d0] text-xl"></i>
+                  <div>
+                    <div class="font-tech font-bold text-xs text-[#d8dee9] uppercase tracking-wide">Strip Thinking</div>
+                    <div class="text-[10px] text-[#4c566a] mt-1.5 leading-relaxed">Create a <code class="text-[#88c0d0]">-nothink</code> variant of a reasoning model that suppresses <code class="text-[#88c0d0]">&lt;think&gt;</code> tokens.</div>
+                  </div>
+                  <div class="mt-auto">
+                    <button onclick="openWizNoThink()" class="btn btn-xs btn-outline btn-info font-tech w-full gap-1">
+                      LAUNCH <i class="fa-solid fa-arrow-right text-[9px]"></i>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Card: Merge Models -->
+                <div id="wz-merge-card" class="bg-[#242933]/60 border border-[#4c566a]/50 rounded-xl p-4 flex flex-col gap-3 hover:border-[#88c0d0]/40 transition-colors">
+                  <i class="fa-solid fa-code-merge text-[#88c0d0] text-xl"></i>
+                  <div>
+                    <div class="font-tech font-bold text-xs text-[#d8dee9] uppercase tracking-wide">Merge Models</div>
+                    <div class="text-[10px] text-[#4c566a] mt-1.5 leading-relaxed">Blend two models with a configurable weight using SLERP or Linear interpolation.</div>
+                  </div>
+                  <div class="mt-auto">
+                    <button onclick="openWizMerge()" class="btn btn-xs btn-outline btn-info font-tech w-full gap-1">
+                      LAUNCH <i class="fa-solid fa-arrow-right text-[9px]"></i>
+                    </button>
+                  </div>
+                </div>
+
+              </div><!-- /wizard card grid -->
+            </div>
+          </div><!-- /builder-sub-wizards -->
+
+        </div><!-- /ws-panel-builder -->
 
         <!-- PANEL 4: MEMORY STATUS -->
         <!-- PANEL: SYSTEM (sub-tab bar; sub-panels are ws-panel-memory/settings/diagnostics) -->
@@ -2905,6 +3012,324 @@
         <div class="modal-action mt-1 gap-2">
           <button onclick="closeModelFixWizard()" class="btn btn-sm btn-neutral border-[#4c566a] font-tech text-xs">CLOSE</button>
           <button id="modelfix-chat-btn" onclick="modelFixOpenInChat()" class="hidden btn btn-sm btn-outline btn-info font-tech text-xs gap-1">
+            <i class="fa-solid fa-comments text-[10px]"></i>OPEN IN CHAT
+          </button>
+        </div>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  </dialog>
+
+  <!-- NeuroWizard: Expand Context Modal -->
+  <dialog id="wz-ctx" class="modal">
+    <div class="modal-box bg-[#2e3440] border border-[#4c566a] shadow-2xl p-6 max-w-2xl rounded-xl">
+      <div class="flex items-center justify-between mb-4 pb-2 border-b border-[#4c566a]/40">
+        <h3 class="font-tech font-bold text-sm text-[#88c0d0] uppercase tracking-wider">
+          <i class="fa-solid fa-expand mr-2"></i>Expand Context Window
+        </h3>
+        <button onclick="closeWz('ctx')" class="btn btn-sm btn-circle btn-ghost text-[#d8dee9] hover:bg-[#bf616a]/15 hover:text-[#bf616a] h-7 w-7 min-h-0">&times;</button>
+      </div>
+      <div id="wz-ctx-configure" class="space-y-4">
+        <p class="text-[10px] text-[#4c566a] font-mono leading-relaxed">Set a larger context window for any model without editing the Modelfile manually. Ollama will clamp values above the model's trained maximum.</p>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="form-control">
+            <label class="label pt-0 pb-1"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Base Model</span></label>
+            <select id="wz-ctx-model" onchange="wzCtxModelChange()" class="select select-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+              <option value="">— select model —</option>
+            </select>
+          </div>
+          <div class="form-control">
+            <label class="label flex items-center gap-1 pt-0 pb-1">
+              <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Target Context</span>
+              <span id="wz-ctx-warn" class="hidden text-[#ebcb8b] text-[9px] font-mono cursor-default" title="">⚠</span>
+            </label>
+            <select id="wz-ctx-size" onchange="wzCtxUpdate()" class="select select-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+              <option value="8192">8K — 8,192</option>
+              <option value="16384">16K — 16,384</option>
+              <option value="32768" selected>32K — 32,768</option>
+              <option value="65536">64K — 65,536</option>
+              <option value="131072">128K — 131,072</option>
+              <option value="262144">256K — 262,144</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-control">
+          <label class="label pt-0 pb-1"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">New Model Name</span></label>
+          <input type="text" id="wz-ctx-name" placeholder="auto-generated" class="input input-sm w-full bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none" />
+        </div>
+        <div>
+          <label class="label pt-0 pb-1"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Generated Modelfile</span></label>
+          <pre id="wz-ctx-preview" class="bg-[#161820] border border-[#4c566a]/60 rounded-lg p-3 text-[11px] font-mono text-[#d8dee9] whitespace-pre-wrap max-h-24 overflow-auto">— select a base model —</pre>
+        </div>
+        <div class="modal-action mt-1 gap-2">
+          <button onclick="closeWz('ctx')" class="btn btn-sm btn-ghost font-tech text-xs">CANCEL</button>
+          <button onclick="launchWz('ctx')" class="btn btn-sm btn-info font-tech text-xs gap-1">
+            <i class="fa-solid fa-wand-magic-sparkles text-[10px]"></i>LAUNCH WIZARD
+          </button>
+        </div>
+      </div>
+      <div id="wz-ctx-creating" class="hidden space-y-3">
+        <div class="text-[10px] font-mono text-[#88c0d0]"><i class="fa-solid fa-circle-notch animate-spin mr-1.5"></i>Creating <span id="wz-ctx-creating-name" class="font-bold text-[#d8dee9]"></span>…</div>
+        <div id="wz-ctx-log" class="bg-[#161820] border border-[#4c566a]/60 rounded-lg p-3 text-[11px] font-mono text-[#d8dee9] min-h-[80px] max-h-56 overflow-auto"></div>
+        <div class="modal-action mt-1"><button onclick="closeWz('ctx')" class="btn btn-sm btn-neutral border-[#4c566a] font-tech text-xs">CLOSE</button></div>
+      </div>
+      <div id="wz-ctx-done" class="hidden py-4 space-y-4">
+        <div id="wz-ctx-done-msg" class="text-sm font-mono"></div>
+        <div class="modal-action mt-1 gap-2">
+          <button onclick="closeWz('ctx')" class="btn btn-sm btn-neutral border-[#4c566a] font-tech text-xs">CLOSE</button>
+          <button id="wz-ctx-chat-btn" onclick="wzOpenInChat('ctx')" class="hidden btn btn-sm btn-outline btn-info font-tech text-xs gap-1">
+            <i class="fa-solid fa-comments text-[10px]"></i>OPEN IN CHAT
+          </button>
+        </div>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  </dialog>
+
+  <!-- NeuroWizard: Custom Persona Modal -->
+  <dialog id="wz-persona" class="modal">
+    <div class="modal-box bg-[#2e3440] border border-[#4c566a] shadow-2xl p-6 max-w-2xl rounded-xl">
+      <div class="flex items-center justify-between mb-4 pb-2 border-b border-[#4c566a]/40">
+        <h3 class="font-tech font-bold text-sm text-[#88c0d0] uppercase tracking-wider">
+          <i class="fa-solid fa-masks-theater mr-2"></i>Custom Persona
+        </h3>
+        <button onclick="closeWz('persona')" class="btn btn-sm btn-circle btn-ghost text-[#d8dee9] hover:bg-[#bf616a]/15 hover:text-[#bf616a] h-7 w-7 min-h-0">&times;</button>
+      </div>
+      <div id="wz-persona-configure" class="space-y-4">
+        <p class="text-[10px] text-[#4c566a] font-mono leading-relaxed">Give a model a custom role or persona via a SYSTEM prompt. Choose a preset or write your own — the result is baked into the Modelfile.</p>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="form-control">
+            <label class="label pt-0 pb-1"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Base Model</span></label>
+            <select id="wz-persona-model" onchange="wzPersonaModelChange()" class="select select-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+              <option value="">— select model —</option>
+            </select>
+          </div>
+          <div class="form-control">
+            <label class="label pt-0 pb-1"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Role Preset</span></label>
+            <select id="wz-persona-preset" onchange="wzPersonaPresetChange()" class="select select-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+              <option value="coding">Coding Assistant</option>
+              <option value="tutor">Language Tutor</option>
+              <option value="creative">Creative Writer</option>
+              <option value="research">Research Assistant</option>
+              <option value="custom">Custom…</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-control">
+          <label class="label pt-0 pb-1"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">SYSTEM Prompt</span></label>
+          <textarea id="wz-persona-system" rows="4" oninput="wzPersonaUpdate()" placeholder="Describe the model's role and behavior…"
+                    class="textarea w-full bg-[#242933]/60 border-[#4c566a] font-mono text-[11px] focus:border-[#88c0d0] focus:outline-none resize-y leading-relaxed"></textarea>
+        </div>
+        <div class="form-control">
+          <label class="label pt-0 pb-1"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">New Model Name</span></label>
+          <input type="text" id="wz-persona-name" placeholder="auto-generated" class="input input-sm w-full bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none" />
+        </div>
+        <div>
+          <label class="label pt-0 pb-1"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Generated Modelfile</span></label>
+          <pre id="wz-persona-preview" class="bg-[#161820] border border-[#4c566a]/60 rounded-lg p-3 text-[11px] font-mono text-[#d8dee9] whitespace-pre-wrap max-h-24 overflow-auto">— select a base model —</pre>
+        </div>
+        <div class="modal-action mt-1 gap-2">
+          <button onclick="closeWz('persona')" class="btn btn-sm btn-ghost font-tech text-xs">CANCEL</button>
+          <button onclick="launchWz('persona')" class="btn btn-sm btn-info font-tech text-xs gap-1">
+            <i class="fa-solid fa-wand-magic-sparkles text-[10px]"></i>LAUNCH WIZARD
+          </button>
+        </div>
+      </div>
+      <div id="wz-persona-creating" class="hidden space-y-3">
+        <div class="text-[10px] font-mono text-[#88c0d0]"><i class="fa-solid fa-circle-notch animate-spin mr-1.5"></i>Creating <span id="wz-persona-creating-name" class="font-bold text-[#d8dee9]"></span>…</div>
+        <div id="wz-persona-log" class="bg-[#161820] border border-[#4c566a]/60 rounded-lg p-3 text-[11px] font-mono text-[#d8dee9] min-h-[80px] max-h-56 overflow-auto"></div>
+        <div class="modal-action mt-1"><button onclick="closeWz('persona')" class="btn btn-sm btn-neutral border-[#4c566a] font-tech text-xs">CLOSE</button></div>
+      </div>
+      <div id="wz-persona-done" class="hidden py-4 space-y-4">
+        <div id="wz-persona-done-msg" class="text-sm font-mono"></div>
+        <div class="modal-action mt-1 gap-2">
+          <button onclick="closeWz('persona')" class="btn btn-sm btn-neutral border-[#4c566a] font-tech text-xs">CLOSE</button>
+          <button id="wz-persona-chat-btn" onclick="wzOpenInChat('persona')" class="hidden btn btn-sm btn-outline btn-info font-tech text-xs gap-1">
+            <i class="fa-solid fa-comments text-[10px]"></i>OPEN IN CHAT
+          </button>
+        </div>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  </dialog>
+
+  <!-- NeuroWizard: Sampling Profile Modal -->
+  <dialog id="wz-sampling" class="modal">
+    <div class="modal-box bg-[#2e3440] border border-[#4c566a] shadow-2xl p-6 max-w-2xl rounded-xl">
+      <div class="flex items-center justify-between mb-4 pb-2 border-b border-[#4c566a]/40">
+        <h3 class="font-tech font-bold text-sm text-[#88c0d0] uppercase tracking-wider">
+          <i class="fa-solid fa-sliders mr-2"></i>Sampling Profile
+        </h3>
+        <button onclick="closeWz('sampling')" class="btn btn-sm btn-circle btn-ghost text-[#d8dee9] hover:bg-[#bf616a]/15 hover:text-[#bf616a] h-7 w-7 min-h-0">&times;</button>
+      </div>
+      <div id="wz-sampling-configure" class="space-y-4">
+        <p class="text-[10px] text-[#4c566a] font-mono leading-relaxed">Bake a temperature and sampling preset into the Modelfile so it applies every time the model is loaded.</p>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="form-control">
+            <label class="label pt-0 pb-1"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Base Model</span></label>
+            <select id="wz-sampling-model" onchange="wzSamplingModelChange()" class="select select-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+              <option value="">— select model —</option>
+            </select>
+          </div>
+          <div class="form-control">
+            <label class="label pt-0 pb-1"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Profile</span></label>
+            <select id="wz-sampling-profile" onchange="wzSamplingUpdate()" class="select select-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+              <option value="creative">🎨 Creative</option>
+              <option value="balanced" selected>⚖️ Balanced</option>
+              <option value="precise">🎯 Precise</option>
+              <option value="fast">⚡ Fast</option>
+            </select>
+          </div>
+        </div>
+        <div id="wz-sampling-profile-desc" class="text-[10px] text-[#88c0d0] font-mono bg-[#1e2430] border border-[#4c566a]/40 rounded px-3 py-1.5"></div>
+        <div class="form-control">
+          <label class="label pt-0 pb-1"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">New Model Name</span></label>
+          <input type="text" id="wz-sampling-name" placeholder="auto-generated" class="input input-sm w-full bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none" />
+        </div>
+        <div>
+          <label class="label pt-0 pb-1"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Generated Modelfile</span></label>
+          <pre id="wz-sampling-preview" class="bg-[#161820] border border-[#4c566a]/60 rounded-lg p-3 text-[11px] font-mono text-[#d8dee9] whitespace-pre-wrap max-h-28 overflow-auto">— select a base model —</pre>
+        </div>
+        <div class="modal-action mt-1 gap-2">
+          <button onclick="closeWz('sampling')" class="btn btn-sm btn-ghost font-tech text-xs">CANCEL</button>
+          <button onclick="launchWz('sampling')" class="btn btn-sm btn-info font-tech text-xs gap-1">
+            <i class="fa-solid fa-wand-magic-sparkles text-[10px]"></i>LAUNCH WIZARD
+          </button>
+        </div>
+      </div>
+      <div id="wz-sampling-creating" class="hidden space-y-3">
+        <div class="text-[10px] font-mono text-[#88c0d0]"><i class="fa-solid fa-circle-notch animate-spin mr-1.5"></i>Creating <span id="wz-sampling-creating-name" class="font-bold text-[#d8dee9]"></span>…</div>
+        <div id="wz-sampling-log" class="bg-[#161820] border border-[#4c566a]/60 rounded-lg p-3 text-[11px] font-mono text-[#d8dee9] min-h-[80px] max-h-56 overflow-auto"></div>
+        <div class="modal-action mt-1"><button onclick="closeWz('sampling')" class="btn btn-sm btn-neutral border-[#4c566a] font-tech text-xs">CLOSE</button></div>
+      </div>
+      <div id="wz-sampling-done" class="hidden py-4 space-y-4">
+        <div id="wz-sampling-done-msg" class="text-sm font-mono"></div>
+        <div class="modal-action mt-1 gap-2">
+          <button onclick="closeWz('sampling')" class="btn btn-sm btn-neutral border-[#4c566a] font-tech text-xs">CLOSE</button>
+          <button id="wz-sampling-chat-btn" onclick="wzOpenInChat('sampling')" class="hidden btn btn-sm btn-outline btn-info font-tech text-xs gap-1">
+            <i class="fa-solid fa-comments text-[10px]"></i>OPEN IN CHAT
+          </button>
+        </div>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  </dialog>
+
+  <!-- NeuroWizard: Strip Thinking Modal -->
+  <dialog id="wz-nothink" class="modal">
+    <div class="modal-box bg-[#2e3440] border border-[#4c566a] shadow-2xl p-6 max-w-2xl rounded-xl">
+      <div class="flex items-center justify-between mb-4 pb-2 border-b border-[#4c566a]/40">
+        <h3 class="font-tech font-bold text-sm text-[#88c0d0] uppercase tracking-wider">
+          <i class="fa-solid fa-brain mr-2"></i>Strip Thinking Tokens
+        </h3>
+        <button onclick="closeWz('nothink')" class="btn btn-sm btn-circle btn-ghost text-[#d8dee9] hover:bg-[#bf616a]/15 hover:text-[#bf616a] h-7 w-7 min-h-0">&times;</button>
+      </div>
+      <div id="wz-nothink-configure" class="space-y-4">
+        <p class="text-[10px] text-[#4c566a] font-mono leading-relaxed">Creates a <code class="text-[#88c0d0]">-nothink</code> variant that suppresses internal reasoning output via the <code class="text-[#88c0d0]">/no_think</code> directive. Works with Qwen3, DeepSeek-R1, QwQ, and similar reasoning models.</p>
+        <div class="form-control">
+          <label class="label pt-0 pb-1"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Base Model</span></label>
+          <select id="wz-nothink-model" onchange="wzNoThinkModelChange()" class="select select-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+            <option value="">— select model —</option>
+          </select>
+        </div>
+        <div class="form-control">
+          <label class="label pt-0 pb-1"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">New Model Name</span></label>
+          <input type="text" id="wz-nothink-name" placeholder="auto-generated" class="input input-sm w-full bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none" />
+        </div>
+        <div>
+          <label class="label pt-0 pb-1"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Generated Modelfile</span></label>
+          <pre id="wz-nothink-preview" class="bg-[#161820] border border-[#4c566a]/60 rounded-lg p-3 text-[11px] font-mono text-[#d8dee9] whitespace-pre-wrap max-h-24 overflow-auto">— select a base model —</pre>
+        </div>
+        <div class="modal-action mt-1 gap-2">
+          <button onclick="closeWz('nothink')" class="btn btn-sm btn-ghost font-tech text-xs">CANCEL</button>
+          <button onclick="launchWz('nothink')" class="btn btn-sm btn-info font-tech text-xs gap-1">
+            <i class="fa-solid fa-wand-magic-sparkles text-[10px]"></i>LAUNCH WIZARD
+          </button>
+        </div>
+      </div>
+      <div id="wz-nothink-creating" class="hidden space-y-3">
+        <div class="text-[10px] font-mono text-[#88c0d0]"><i class="fa-solid fa-circle-notch animate-spin mr-1.5"></i>Creating <span id="wz-nothink-creating-name" class="font-bold text-[#d8dee9]"></span>…</div>
+        <div id="wz-nothink-log" class="bg-[#161820] border border-[#4c566a]/60 rounded-lg p-3 text-[11px] font-mono text-[#d8dee9] min-h-[80px] max-h-56 overflow-auto"></div>
+        <div class="modal-action mt-1"><button onclick="closeWz('nothink')" class="btn btn-sm btn-neutral border-[#4c566a] font-tech text-xs">CLOSE</button></div>
+      </div>
+      <div id="wz-nothink-done" class="hidden py-4 space-y-4">
+        <div id="wz-nothink-done-msg" class="text-sm font-mono"></div>
+        <div class="modal-action mt-1 gap-2">
+          <button onclick="closeWz('nothink')" class="btn btn-sm btn-neutral border-[#4c566a] font-tech text-xs">CLOSE</button>
+          <button id="wz-nothink-chat-btn" onclick="wzOpenInChat('nothink')" class="hidden btn btn-sm btn-outline btn-info font-tech text-xs gap-1">
+            <i class="fa-solid fa-comments text-[10px]"></i>OPEN IN CHAT
+          </button>
+        </div>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  </dialog>
+
+  <!-- NeuroWizard: Merge Models Modal -->
+  <dialog id="wz-merge" class="modal">
+    <div class="modal-box bg-[#2e3440] border border-[#4c566a] shadow-2xl p-6 max-w-2xl rounded-xl">
+      <div class="flex items-center justify-between mb-4 pb-2 border-b border-[#4c566a]/40">
+        <h3 class="font-tech font-bold text-sm text-[#88c0d0] uppercase tracking-wider">
+          <i class="fa-solid fa-code-merge mr-2"></i>Merge Models
+        </h3>
+        <button onclick="closeWz('merge')" class="btn btn-sm btn-circle btn-ghost text-[#d8dee9] hover:bg-[#bf616a]/15 hover:text-[#bf616a] h-7 w-7 min-h-0">&times;</button>
+      </div>
+      <div id="wz-merge-configure" class="space-y-4">
+        <p class="text-[10px] text-[#4c566a] font-mono leading-relaxed">Blend two local models into a new one using SLERP or Linear interpolation. Best results come from models with the same architecture and parameter count.</p>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="form-control">
+            <label class="label pt-0 pb-1"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Model A (base)</span></label>
+            <select id="wz-merge-model-a" onchange="wzMergeUpdate()" class="select select-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+              <option value="">— select model —</option>
+            </select>
+          </div>
+          <div class="form-control">
+            <label class="label pt-0 pb-1"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Model B (blend in)</span></label>
+            <select id="wz-merge-model-b" onchange="wzMergeUpdate()" class="select select-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+              <option value="">— select model —</option>
+            </select>
+          </div>
+        </div>
+        <div id="wz-merge-same-warn" class="hidden text-[9px] font-mono text-[#bf616a]"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Select two different models</div>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="form-control">
+            <label class="label pt-0 pb-1"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Blend Weight (toward A) — <span id="wz-merge-weight-val" class="text-[#d8dee9]">0.5</span></span></label>
+            <input type="range" id="wz-merge-weight" min="0.1" max="0.9" step="0.1" value="0.5" oninput="wzMergeUpdate()" class="range range-xs range-info bg-[#4c566a]" />
+            <div class="flex justify-between text-[8px] font-mono text-[#4c566a] mt-0.5"><span>← B</span><span>A →</span></div>
+          </div>
+          <div class="form-control">
+            <label class="label pt-0 pb-1"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Merge Method</span></label>
+            <select id="wz-merge-method" onchange="wzMergeUpdate()" class="select select-sm bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+              <option value="SLERP">SLERP (Spherical Linear)</option>
+              <option value="Linear">Linear (Average)</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-control">
+          <label class="label pt-0 pb-1"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">New Model Name</span></label>
+          <input type="text" id="wz-merge-name" placeholder="auto-generated" class="input input-sm w-full bg-[#242933]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none" />
+        </div>
+        <div>
+          <label class="label pt-0 pb-1"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Generated Modelfile</span></label>
+          <pre id="wz-merge-preview" class="bg-[#161820] border border-[#4c566a]/60 rounded-lg p-3 text-[11px] font-mono text-[#d8dee9] whitespace-pre-wrap max-h-28 overflow-auto">— select both models —</pre>
+        </div>
+        <div class="modal-action mt-1 gap-2">
+          <button onclick="closeWz('merge')" class="btn btn-sm btn-ghost font-tech text-xs">CANCEL</button>
+          <button onclick="launchWz('merge')" class="btn btn-sm btn-info font-tech text-xs gap-1">
+            <i class="fa-solid fa-wand-magic-sparkles text-[10px]"></i>LAUNCH WIZARD
+          </button>
+        </div>
+      </div>
+      <div id="wz-merge-creating" class="hidden space-y-3">
+        <div class="text-[10px] font-mono text-[#88c0d0]"><i class="fa-solid fa-circle-notch animate-spin mr-1.5"></i>Creating <span id="wz-merge-creating-name" class="font-bold text-[#d8dee9]"></span>…</div>
+        <div id="wz-merge-log" class="bg-[#161820] border border-[#4c566a]/60 rounded-lg p-3 text-[11px] font-mono text-[#d8dee9] min-h-[80px] max-h-56 overflow-auto"></div>
+        <div class="modal-action mt-1"><button onclick="closeWz('merge')" class="btn btn-sm btn-neutral border-[#4c566a] font-tech text-xs">CLOSE</button></div>
+      </div>
+      <div id="wz-merge-done" class="hidden py-4 space-y-4">
+        <div id="wz-merge-done-msg" class="text-sm font-mono"></div>
+        <div class="modal-action mt-1 gap-2">
+          <button onclick="closeWz('merge')" class="btn btn-sm btn-neutral border-[#4c566a] font-tech text-xs">CLOSE</button>
+          <button id="wz-merge-chat-btn" onclick="wzOpenInChat('merge')" class="hidden btn btn-sm btn-outline btn-info font-tech text-xs gap-1">
             <i class="fa-solid fa-comments text-[10px]"></i>OPEN IN CHAT
           </button>
         </div>

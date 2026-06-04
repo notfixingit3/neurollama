@@ -46,6 +46,20 @@
 - [x] **Hardware Thread & Layer Allocation Profile (num_gpu, num_thread)**
   - Expose request-level hardware tuning controls (such as GPU layers offload `num_gpu` and CPU threads `num_thread`) inside the playground sidebar settings.
 
+<!-- v0.2.24 — 2026-06-04 -->
+<!-- NeuroWizard: Builder subtabs (Recipe Builder / NEUROWIZARD), 5 wizard modals (ctx, persona, sampling, nothink, merge) -->
+<!-- Context window validation extended to completion + builder panels -->
+
+## v0.2.24 Session Notes
+
+- [x] **NeuroWizard hub** — NEUROWIZARD subtab inside Builder workspace. Card grid of 5 wizards; each opens a modal with live Modelfile preview, SSE creation stream, OPEN IN CHAT on success.
+- [x] **Expand Context wizard** — model + ctx size selector (8K–256K), ⚠ if exceeds trained max, auto-name `{model}-ctx{n}k`
+- [x] **Custom Persona wizard** — 4 role presets (coding/tutor/creative/research) + Custom; SYSTEM prompt auto-filled + editable
+- [x] **Sampling Profile wizard** — Creative / Balanced / Precise / Fast presets with baked PARAMETER lines
+- [x] **Strip Thinking wizard** — `-nothink` variant via `SYSTEM "/no_think"`; for Qwen3, DeepSeek-R1, QwQ
+- [x] **Merge Models wizard** — two model selects, blend weight slider (0.1–0.9), SLERP/Linear method
+- [x] **Ctx warning: completion + builder** — `⚠` span added to completion context limit and builder context window; wired to `updateCtxWarning()` via change listeners + `fetchModelCtxLengths()` initial call + `onBaseModelChange()`
+
 ## v0.2.21 Session Notes
 
 - [x] **Inventory Sort** — Clickable column headers (Name, Size, Parameters, Modified) with ↑/↓ indicators. New Modified column at `lg:` breakpoint. Sort persists across page changes.
@@ -79,8 +93,8 @@
   - Ollama's `/api/ps` exposes loaded model sizes but not total GPU VRAM capacity or utilization. The VRAM progress bars currently scale against the NEUROLLAMA host machine's RAM which is meaningless for remote servers.
   - Options to explore: (a) let users manually enter total VRAM per registered server so bars are meaningful, (b) add an optional companion lightweight agent on the remote host that exposes `nvidia-smi` stats via a tiny HTTP endpoint, (c) poll Ollama's `/api/version` for any future GPU stats endpoint they add.
 
-- [ ] **Context Window: Model-Aware Validation**
-  - The context selects now go up to 100M but have no awareness of what the selected model actually supports. Add a soft warning when the chosen context exceeds the model's `context_length` from its details (already available in model metadata). Prevents confusing silent failures when Ollama silently clamps the value.
+- [x] **Context Window: Model-Aware Validation**
+  - `⚠` warning now shown on all context selects (chat, completion, builder, code bench, hallucination bench) when selected ctx exceeds the model's trained context length. Tooltip explains Ollama will clamp the value.
 
 - [x] **PDF.js: Self-Host Worker Instead of CDN**
   - Worker script is loaded from `cdnjs.cloudflare.com` at runtime. If the CDN is unreachable (airgapped installs, strict firewalls) PDF upload silently breaks. Vendor `pdf.worker.min.js` into `static/js/` and update the `workerSrc` path. The main `pdf.min.js` would also need to be vendored or loaded locally.
@@ -344,18 +358,18 @@ A new subsection (tab or modal launcher) offering step-by-step wizards for commo
 
 - [x] **Remove hardcoded system prompt** *(already shipped as "Modelfile Fix Wizard")* — Detects greeting-injection models via CHAT badge; lets user clear or replace the SYSTEM field and creates a clean copy.
 
-- [ ] **Expand context window** — Pick a model, choose a target `num_ctx` (slider with common presets: 8K / 16K / 32K / 64K / 128K), wizard warns if target exceeds the model's trained context length, generates `FROM <model>\nPARAMETER num_ctx <n>\n`, creates and optionally opens in chat. Useful for models that default to 2K or 4K but support much larger windows.
+- [x] **Expand context window** — Wizard launched from Builder → NEUROWIZARD. Picks model + target ctx (8K–256K), shows ⚠ if over trained limit, auto-names `{model}-ctx{n}k`, streams creation.
 
-- [ ] **Set a custom persona** — Guided system-prompt composer: choose a role category (coding assistant, language tutor, creative writer, etc.) from a preset list or write freeform, preview the SYSTEM block, create a named copy. Entry point from INSPECT accordion alongside the FIX button.
+- [x] **Set a custom persona** — Presets: Coding Assistant, Language Tutor, Creative Writer, Research Assistant, Custom. SYSTEM prompt auto-filled + editable. Auto-named `{model}-{preset}`.
 
-- [ ] **Temperature / sampling profile presets** — One-click profiles: "Creative" (temp 0.9, top-p 0.95), "Balanced" (temp 0.7), "Precise" (temp 0.1, top-k 10). Applies as PARAMETER lines in the Modelfile. User can tweak before confirming.
+- [x] **Temperature / sampling profile presets** — Creative / Balanced / Precise / Fast profiles. Parameters shown in live Modelfile preview.
 
-- [ ] **Merge / blend two models** — Pick two local models and a blend weight, generate a MERGE Modelfile, stream creation. Basic safeguard: warn if architectures differ.
+- [x] **Merge / blend two models** — Model A + B selects, blend weight slider (0.1–0.9), SLERP/Linear method, MERGE_METHOD/MERGE_MODEL/MERGE_RATIO comments in Modelfile. Warns on same-model selection.
 
-- [ ] **Strip thinking tokens** — For Qwen3 / DeepSeek-R1 / QwQ style models: add `/no_think` default prompt suffix and `think false` PARAMETER so the model never outputs reasoning tokens in normal chat. Creates a `-nothink` variant.
+- [x] **Strip thinking tokens** — Creates `-nothink` variant via `SYSTEM "/no_think"`. Works for Qwen3/DeepSeek-R1/QwQ.
 
 ### NeuroWizard launcher
-- [ ] **Wizard hub panel** — A card grid accessible from the Builder tab (or a new "Wizard" subtab) showing all available wizards with a one-line description and an icon. Cards are greyed out for wizards that have no applicable models (e.g. Merge requires ≥ 2 local models). Clicking a card opens the relevant modal.
+- [x] **Wizard hub panel** — NEUROWIZARD subtab in Builder workspace. Card grid of all 5 wizards; each card opens a modal with live Modelfile preview + SSE streaming creation + OPEN IN CHAT on success.
 
 ---
 

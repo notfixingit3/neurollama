@@ -4,6 +4,20 @@ All notable changes to NEUROLLAMA are documented here.
 
 ---
 
+## [v0.2.24] — 2026-06-04
+
+### Added
+- **NeuroWizard** (Builder → NEUROWIZARD subtab) — guided model operations, no Modelfile knowledge required:
+  - **Expand Context** — set a larger `num_ctx` for any model with a context-window warning if it exceeds the trained max
+  - **Custom Persona** — apply a SYSTEM prompt from presets (Coding Assistant, Language Tutor, Creative Writer, Research Assistant) or freeform custom text
+  - **Sampling Profile** — bake Creative / Balanced / Precise / Fast temperature presets into a new Modelfile variant
+  - **Strip Thinking** — create a `-nothink` variant via `/no_think` SYSTEM directive (Qwen3, DeepSeek-R1, QwQ, etc.)
+  - **Merge Models** — blend two models with configurable weight and SLERP/Linear method
+  - Each wizard: live Modelfile preview, SSE streaming creation log, OPEN IN CHAT shortcut on success
+- **Context window validation** now covers all panels: completion workspace and builder recipe now also show the `⚠` warning when selected context exceeds the model's trained maximum (chat, code bench, and hallucination bench already had it)
+
+---
+
 ## [v0.2.23] — 2026-06-04 (stable)
 
 ### Added
