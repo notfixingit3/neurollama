@@ -292,6 +292,39 @@
 
 ---
 
+## 🧪 Capability Badges & Functional Tests
+
+Beyond raw speed benchmarks, NEUROLLAMA should be able to verify *what a model can actually do* and surface that as inventory badges and leaderboard results.
+
+### Inventory badge expansion
+The existing badges (VIS, EMB, TOOLS, THINK) are sourced from Ollama's `/api/show` `capabilities` field. Some capabilities require active probing rather than metadata inspection:
+
+- [ ] **JSON badge** — Test whether the model reliably outputs valid JSON when instructed. Send a structured output prompt with `format: "json"` in the API request, attempt to parse the response. Badge shown on inventory row if pass rate ≥ threshold. Distinct from TOOLS — many models claim JSON mode without it working reliably.
+
+- [ ] **CHAT badge rework** — The current CHAT badge is negative (flags greeting-injection models). Consider splitting into: a red **CHAT⚠** for greeting-injected models (existing) and a neutral **CONV** badge for models that pass a basic multi-turn coherence probe.
+
+### Tool calling benchmark (new bench type)
+- [ ] **Tool call accuracy test** — New benchmark tab: "Tool Use". Sends the model a set of prompts that require selecting and calling a predefined tool (e.g. `get_weather(location)`, `calculate(expression)`, `search(query)`). Scores on:
+  - **Tool selected correctly** — did the model call the right function?
+  - **Parameters extracted correctly** — are argument names and types right?
+  - **No hallucinated tools** — did the model avoid calling tools that don't exist?
+  - Score expressed as `pass/total` (e.g. `7/10`). Only runs on models with the TOOLS capability badge. Results stored in leaderboard alongside other bench types.
+  - Graded: `≥90% = S`, `75–89% = A`, `55–74% = B`, `35–54% = C`, `<35% = F`.
+
+### Structured output / JSON benchmark (new bench type)
+- [ ] **JSON reliability test** — New benchmark: "Structured Output". Sends 5–10 prompts requiring JSON responses of varying complexity (flat object, nested, array of objects, schema with required fields). Parses each response; scores on valid JSON rate and schema conformance. Useful for picking a model for agentic pipelines where malformed output breaks the chain.
+
+### Conversational / instruction-following benchmark (new bench type)
+- [ ] **Instruction following test** — New benchmark: "Instruction Follow". A suite of prompts with explicit constraints ("respond in exactly 3 bullet points", "reply only in French", "output only a number"). Scores on constraint compliance. Complements the reasoning bench — measures whether a model follows *how* to respond, not just *what* to respond.
+  - Judge model evaluates compliance (pass/fail per constraint).
+  - Overall score as %, graded same scale as reasoning.
+
+### Implementation notes
+- All new bench types follow the same SSE streaming pattern as existing types.
+- Results stored in the existing `benchmarks` table with a new `bench_type` value (`tool_use`, `json_output`, `instruction_follow`).
+- Inventory badges derived from best historical result per model (same pattern as existing grade badges).
+- Only offer these bench types for models with the relevant capability badge (TOOLS for tool use; all models for JSON/instruction).
+
 ## 🔨 Model Builder Improvements
 
 ### Builder UX overhaul
