@@ -18,6 +18,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"regexp"
@@ -30,6 +31,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	goPDF "github.com/ledongthuc/pdf"
+	gossh "golang.org/x/crypto/ssh"
 )
 
 const appVersion = "v0.2.22"
@@ -464,6 +466,9 @@ func main() {
 
 		// Diagnostics
 		api.GET("/diagnostics", diagnosticsHandler)
+
+		// System — Ollama remote update
+		api.POST("/system/ollama-update", ollamaUpdateSSEHandler)
 
 		// System — About, bulk-delete, backup/restore, activity, presets
 		api.GET("/about", aboutHandler)
@@ -6958,6 +6963,248 @@ func runInstructionFollowBenchmarkSSEHandler(c *gin.Context) {
 		}
 		cullOldBenchmarks(model, "instruction_follow")
 		c.SSEvent("done", fmt.Sprintf(`{"id":%d,"model":%q,"bench_type":"instruction_follow","accuracy_pct":%.1f}`, id, model, acc))
+		return false
+	})
+}
+
+// ── Ollama Remote Update via SSH ──────────────────────────────────────────────
+
+type OllamaUpdateRequest struct {
+	ServerID    string `json:"server_id"`
+	SSHUser     string `json:"ssh_user"`
+	SSHPassword string `json:"ssh_password"`
+	SudoPass    string `json:"sudo_password"`
+	UseSSHKey   bool   `json:"use_ssh_key"`
+	SSHPort     int    `json:"ssh_port"`
+}
+
+// shellEscapeSingle wraps s in single quotes, escaping any embedded single quotes.
+func shellEscapeSingle(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// runSSHCmd runs a single command over SSH and returns trimmed combined output.
+func runSSHCmd(client *gossh.Client, cmd string) (string, error) {
+	sess, err := client.NewSession()
+	if err != nil {
+		return "", err
+	}
+	defer sess.Close()
+	out, err := sess.CombinedOutput(cmd)
+	return strings.TrimSpace(string(out)), err
+}
+
+// runSSHCmdStream runs a command over SSH, streaming each output line to emit.
+func runSSHCmdStream(client *gossh.Client, cmd string, emit func(string)) error {
+	sess, err := client.NewSession()
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+
+	stdoutPipe, _ := sess.StdoutPipe()
+	stderrPipe, _ := sess.StderrPipe()
+
+	if err := sess.Start(cmd); err != nil {
+		return err
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	scan := func(r io.Reader) {
+		defer wg.Done()
+		sc := bufio.NewScanner(r)
+		for sc.Scan() {
+			emit(sc.Text())
+		}
+	}
+	go scan(stdoutPipe)
+	go scan(stderrPipe)
+	wg.Wait()
+
+	return sess.Wait()
+}
+
+func ollamaUpdateSSEHandler(c *gin.Context) {
+	var req OllamaUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+	if req.ServerID == "" || req.SSHUser == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "server_id and ssh_user are required"})
+		return
+	}
+
+	// Resolve target server
+	var targetSrv *Server
+	for _, s := range GetServers() {
+		s := s
+		if s.ID == req.ServerID {
+			targetSrv = &s
+			break
+		}
+	}
+	if targetSrv == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Server not found"})
+		return
+	}
+
+	// Extract hostname from server URL
+	parsedURL, err := url.Parse(targetSrv.URL)
+	if err != nil || parsedURL.Hostname() == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot parse hostname from server URL"})
+		return
+	}
+	host := parsedURL.Hostname()
+	sshPort := 22
+	if req.SSHPort > 0 {
+		sshPort = req.SSHPort
+	}
+
+	// Build SSH auth methods
+	var authMethods []gossh.AuthMethod
+	if req.UseSSHKey || req.SSHPassword == "" {
+		for _, kf := range []string{
+			os.ExpandEnv("$HOME/.ssh/id_ed25519"),
+			os.ExpandEnv("$HOME/.ssh/id_ecdsa"),
+			os.ExpandEnv("$HOME/.ssh/id_rsa"),
+		} {
+			raw, readErr := os.ReadFile(kf)
+			if readErr != nil {
+				continue
+			}
+			signer, parseErr := gossh.ParsePrivateKey(raw)
+			if parseErr != nil {
+				continue
+			}
+			authMethods = append(authMethods, gossh.PublicKeys(signer))
+			break
+		}
+	}
+	if req.SSHPassword != "" {
+		authMethods = append(authMethods, gossh.Password(req.SSHPassword))
+		// Keyboard-interactive fallback (some servers require it)
+		authMethods = append(authMethods, gossh.KeyboardInteractive(func(_, _ string, questions []string, _ []bool) ([]string, error) {
+			answers := make([]string, len(questions))
+			for i := range answers {
+				answers[i] = req.SSHPassword
+			}
+			return answers, nil
+		}))
+	}
+	if len(authMethods) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No SSH auth method available — provide a password or ensure an SSH key exists in ~/.ssh/"})
+		return
+	}
+
+	sshCfg := &gossh.ClientConfig{
+		User:            req.SSHUser,
+		Auth:            authMethods,
+		HostKeyCallback: gossh.InsecureIgnoreHostKey(), // LAN/trusted deployment
+		Timeout:         15 * time.Second,
+	}
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Transfer-Encoding", "chunked")
+
+	c.Stream(func(w io.Writer) bool {
+		emit := func(event, msg string) { c.SSEvent(event, msg); c.Writer.Flush() }
+		line := func(msg string) { emit("output", msg) }
+		fail := func(msg string) { emit("error", msg); emit("done", "failed") }
+
+		emit("status", fmt.Sprintf("Connecting to %s@%s:%d…", req.SSHUser, host, sshPort))
+		sshClient, connErr := gossh.Dial("tcp", fmt.Sprintf("%s:%d", host, sshPort), sshCfg)
+		if connErr != nil {
+			fail(fmt.Sprintf("SSH connection failed: %v", connErr))
+			return false
+		}
+		defer sshClient.Close()
+		emit("status", "SSH connected.")
+
+		osStr, _ := runSSHCmd(sshClient, "uname -s")
+		emit("status", fmt.Sprintf("Remote OS: %s", osStr))
+
+		switch osStr {
+		case "Darwin":
+			emit("status", "macOS detected — running Ollama install script…")
+			if sErr := runSSHCmdStream(sshClient, "curl -fsSL https://ollama.com/install.sh | sh", line); sErr != nil {
+				fail(fmt.Sprintf("macOS update failed: %v", sErr))
+				return false
+			}
+
+		case "Linux":
+			archRaw, _ := runSSHCmd(sshClient, "uname -m")
+			var ollamaArch string
+			switch archRaw {
+			case "x86_64":
+				ollamaArch = "amd64"
+			case "aarch64", "arm64":
+				ollamaArch = "arm64"
+			default:
+				fail(fmt.Sprintf("Unsupported architecture: %s", archRaw))
+				return false
+			}
+			emit("status", fmt.Sprintf("Arch: %s → ollama-%s", archRaw, ollamaArch))
+
+			emit("status", "Fetching latest Ollama version from GitHub…")
+			ver, _ := runSSHCmd(sshClient,
+				`curl -fsSL https://api.github.com/repos/ollama/ollama/releases/latest 2>/dev/null | grep -o '"tag_name":"[^"]*"' | cut -d'"' -f4`)
+			if ver == "" {
+				fail("Could not determine latest Ollama version — GitHub API unreachable from remote host?")
+				return false
+			}
+			emit("status", fmt.Sprintf("Latest release: %s", ver))
+
+			dlURL := fmt.Sprintf("https://github.com/ollama/ollama/releases/download/%s/ollama-linux-%s", ver, ollamaArch)
+			emit("status", fmt.Sprintf("Downloading %s…", dlURL))
+			dlCmd := fmt.Sprintf("curl -fsSL %s -o /tmp/ollama_update && chmod +x /tmp/ollama_update", dlURL)
+			if dErr := runSSHCmdStream(sshClient, dlCmd, line); dErr != nil {
+				fail(fmt.Sprintf("Download failed: %v", dErr))
+				return false
+			}
+
+			ollamaPath, _ := runSSHCmd(sshClient, "command -v ollama 2>/dev/null || echo /usr/local/bin/ollama")
+			if ollamaPath == "" {
+				ollamaPath = "/usr/local/bin/ollama"
+			}
+			emit("status", fmt.Sprintf("Binary location: %s", ollamaPath))
+
+			esc := shellEscapeSingle(req.SudoPass)
+			sudo := func(cmd string) string {
+				return fmt.Sprintf("echo %s | sudo -S -p '' %s", esc, cmd)
+			}
+
+			emit("status", "Stopping ollama.service…")
+			if sErr := runSSHCmdStream(sshClient, sudo("systemctl stop ollama"), line); sErr != nil {
+				line(fmt.Sprintf("  (stop warning: %v — continuing)", sErr))
+			}
+
+			emit("status", "Installing new binary…")
+			replCmd := sudo(fmt.Sprintf("cp /tmp/ollama_update %s && chmod +x %s", ollamaPath, ollamaPath))
+			if rErr := runSSHCmdStream(sshClient, replCmd, line); rErr != nil {
+				fail(fmt.Sprintf("Binary replacement failed: %v", rErr))
+				return false
+			}
+			runSSHCmd(sshClient, "rm -f /tmp/ollama_update")
+
+			emit("status", "Starting ollama.service…")
+			if sErr := runSSHCmdStream(sshClient, sudo("systemctl start ollama"), line); sErr != nil {
+				fail(fmt.Sprintf("Service start failed: %v", sErr))
+				return false
+			}
+
+		default:
+			fail(fmt.Sprintf("Unsupported OS: %q", osStr))
+			return false
+		}
+
+		newVer, _ := runSSHCmd(sshClient, "ollama --version 2>/dev/null || echo unknown")
+		emit("status", fmt.Sprintf("Ollama version after update: %s", newVer))
+		emit("done", "success")
+		LogActivity("system", fmt.Sprintf("Ollama updated on %s (%s)", targetSrv.Name, host))
 		return false
 	})
 }

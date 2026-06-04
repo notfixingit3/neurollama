@@ -2320,19 +2320,84 @@
             </div>
           </div>
 
-          <!-- Right col: placeholder for future settings -->
+          <!-- Right col: Update Ollama -->
           <div class="lg:col-span-7 flex flex-col gap-6">
             <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col">
               <div class="mb-3 pb-2 border-b border-[#4c566a]/40">
                 <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
-                  <i class="fa-solid fa-sliders mr-2"></i>Application Preferences
+                  <i class="fa-solid fa-cloud-arrow-up mr-2"></i>Update Ollama
                 </h2>
-                <p class="text-[10px] text-[#4c566a] mt-1">Additional settings will appear here in future releases.</p>
+                <p class="text-[10px] text-[#4c566a] mt-1">
+                  Update Ollama on a registered node via SSH.
+                  Linux: downloads the binary directly and restarts the systemd service — the installer is <em>not</em> used, preserving any custom service file.
+                  macOS: runs the official install script.
+                </p>
               </div>
-              <div class="flex items-center justify-center py-12 text-[#4c566a]">
-                <div class="text-center">
-                  <i class="fa-solid fa-gear text-2xl mb-2 opacity-30"></i>
-                  <p class="text-[10px] font-mono uppercase tracking-wider opacity-50">More settings coming soon</p>
+
+              <div class="space-y-3">
+                <!-- Node selector -->
+                <div class="form-control">
+                  <label class="label py-1"><span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">Node</span></label>
+                  <select id="ollama-update-node" class="select select-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                    <option value="">— select node —</option>
+                  </select>
+                </div>
+
+                <!-- SSH User + Port row -->
+                <div class="flex gap-2">
+                  <div class="form-control flex-1">
+                    <label class="label py-1"><span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">SSH User</span></label>
+                    <input id="ollama-update-ssh-user" type="text" placeholder="e.g. ubuntu" autocomplete="off"
+                           class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                  </div>
+                  <div class="form-control w-24">
+                    <label class="label py-1"><span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">SSH Port</span></label>
+                    <input id="ollama-update-ssh-port" type="number" placeholder="22" value="22" min="1" max="65535"
+                           class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                  </div>
+                </div>
+
+                <!-- Auth method toggle -->
+                <div class="flex items-center gap-3">
+                  <span class="text-[10px] font-mono text-[#4c566a] uppercase">Auth</span>
+                  <label class="flex items-center gap-1.5 cursor-pointer">
+                    <input type="radio" name="ollama-update-auth" value="password" checked
+                           onchange="toggleOllamaUpdateAuth('password')" class="radio radio-xs radio-info" />
+                    <span class="text-[10px] font-mono text-[#d8dee9]">Password</span>
+                  </label>
+                  <label class="flex items-center gap-1.5 cursor-pointer">
+                    <input type="radio" name="ollama-update-auth" value="key"
+                           onchange="toggleOllamaUpdateAuth('key')" class="radio radio-xs radio-info" />
+                    <span class="text-[10px] font-mono text-[#d8dee9]">SSH Key <span class="text-[#4c566a]">(~/.ssh/)</span></span>
+                  </label>
+                </div>
+
+                <!-- SSH Password (hidden when using key) -->
+                <div id="ollama-update-pass-row" class="form-control">
+                  <label class="label py-1"><span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">SSH Password</span></label>
+                  <input id="ollama-update-ssh-pass" type="password" placeholder="SSH password" autocomplete="new-password"
+                         class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                </div>
+
+                <!-- Sudo Password -->
+                <div class="form-control">
+                  <label class="label py-1"><span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">Sudo Password <span class="text-[#4c566a] normal-case">(Linux only)</span></span></label>
+                  <input id="ollama-update-sudo-pass" type="password" placeholder="sudo password" autocomplete="new-password"
+                         class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                </div>
+
+                <!-- Action -->
+                <div class="flex items-center gap-2 pt-1">
+                  <button id="ollama-update-btn" onclick="startOllamaUpdate()"
+                          class="btn btn-xs btn-info font-tech uppercase tracking-wide px-4">
+                    <i class="fa-solid fa-cloud-arrow-up mr-1.5"></i>Update Ollama
+                  </button>
+                  <span id="ollama-update-status" class="text-[10px] font-mono text-[#4c566a]"></span>
+                </div>
+
+                <!-- Output terminal -->
+                <div id="ollama-update-output"
+                     class="hidden max-h-48 bg-[#161820] border border-[#4c566a]/40 rounded-lg p-2 text-[10px] font-mono text-[#e5e9f0] space-y-0.5 overflow-y-auto scrollbar-thin">
                 </div>
               </div>
             </div>

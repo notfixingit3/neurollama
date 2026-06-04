@@ -1941,6 +1941,7 @@ async function fetchServers() {
     const now = Date.now();
     servers.forEach(s => { serverLastSeen[s.id] = now; });
     renderServers();
+    populateOllamaUpdateNodeSelect();
 
     const active = servers.find(s => s.isActive);
     updateActiveServerUI(active);
@@ -7454,6 +7455,120 @@ async function triggerSchedulerCheckNow() {
     setTimeout(fetchSchedulerLogs, 5000);
   } catch (error) {
     showToast(error.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// --- OLLAMA REMOTE UPDATE ---
+
+function populateOllamaUpdateNodeSelect() {
+  const sel = document.getElementById('ollama-update-node');
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">— select node —</option>';
+  servers.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = `${s.name} (${s.url})`;
+    sel.appendChild(opt);
+  });
+  if (prev) sel.value = prev;
+}
+
+function toggleOllamaUpdateAuth(mode) {
+  const passRow = document.getElementById('ollama-update-pass-row');
+  if (!passRow) return;
+  passRow.classList.toggle('hidden', mode === 'key');
+}
+
+async function startOllamaUpdate() {
+  const nodeId   = document.getElementById('ollama-update-node')?.value;
+  const sshUser  = document.getElementById('ollama-update-ssh-user')?.value?.trim();
+  const sshPort  = parseInt(document.getElementById('ollama-update-ssh-port')?.value || '22', 10);
+  const sshPass  = document.getElementById('ollama-update-ssh-pass')?.value || '';
+  const sudoPass = document.getElementById('ollama-update-sudo-pass')?.value || '';
+  const useKey   = document.querySelector('input[name="ollama-update-auth"]:checked')?.value === 'key';
+
+  if (!nodeId)   { showToast('Select a node first', 'warning'); return; }
+  if (!sshUser)  { showToast('SSH user is required', 'warning'); return; }
+
+  const btn    = document.getElementById('ollama-update-btn');
+  const status = document.getElementById('ollama-update-status');
+  const output = document.getElementById('ollama-update-output');
+
+  if (btn) btn.disabled = true;
+  if (status) status.textContent = 'Connecting…';
+  output.classList.remove('hidden');
+  output.innerHTML = '';
+
+  const appendLine = (text, cls = '') => {
+    const div = document.createElement('div');
+    div.className = cls;
+    div.textContent = text;
+    output.appendChild(div);
+    output.scrollTop = output.scrollHeight;
+  };
+
+  try {
+    const resp = await fetch('/api/system/ollama-update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ server_id: nodeId, ssh_user: sshUser, ssh_password: sshPass,
+                             sudo_password: sudoPass, use_ssh_key: useKey, ssh_port: sshPort })
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: resp.statusText }));
+      appendLine(`Error: ${err.error || resp.statusText}`, 'text-[#bf616a]');
+      if (status) status.textContent = 'Failed';
+      return;
+    }
+
+    const reader  = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+
+      let event = '';
+      for (const ln of lines) {
+        if (ln.startsWith('event:')) { event = ln.slice(6).trim(); continue; }
+        if (!ln.startsWith('data:')) continue;
+        const data = ln.slice(5).trim();
+        switch (event) {
+          case 'status':
+            appendLine('▶ ' + data, 'text-[#88c0d0]');
+            if (status) status.textContent = data.length > 40 ? data.slice(0, 40) + '…' : data;
+            break;
+          case 'output':
+            if (data) appendLine('  ' + data, 'text-[#d8dee9]/70');
+            break;
+          case 'error':
+            appendLine('✖ ' + data, 'text-[#bf616a] font-bold');
+            if (status) status.textContent = 'Failed';
+            break;
+          case 'done':
+            if (data === 'success') {
+              appendLine('✔ Update complete!', 'text-[#a3be8c] font-bold');
+              if (status) status.textContent = 'Done ✔';
+              showToast('Ollama updated successfully', 'success');
+            } else {
+              if (status) status.textContent = 'Failed ✖';
+            }
+            break;
+        }
+        event = '';
+      }
+    }
+  } catch (e) {
+    appendLine(`Error: ${e.message}`, 'text-[#bf616a]');
+    if (status) status.textContent = 'Error';
   } finally {
     if (btn) btn.disabled = false;
   }
