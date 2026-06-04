@@ -9,13 +9,13 @@ services:
     container_name: neurollama
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "8811:8811"
     volumes:
       - ./data:/app/data
     environment:
       - GIN_MODE=release
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:8811/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -33,7 +33,7 @@ services:
     #   - "traefik.http.routers.neurollama.entrypoints=websecure"
     #   - "traefik.http.routers.neurollama.tls=true"
     #   - "traefik.http.routers.neurollama.tls.certresolver=letsencrypt"
-    #   - "traefik.http.services.neurollama.loadbalancer.server.port=8080"
+    #   - "traefik.http.services.neurollama.loadbalancer.server.port=8811"
 
   # --- CROWDSEC SECURED MIDDLEWARE CONFIGURATION (OPTIONAL) ---
   # CrowdSec detects and blocks malicious IP addresses scanning or attacking services.
@@ -60,7 +60,7 @@ services:
 # Create a Caddyfile in your deployment folder:
 #
 # neurollama.example.com {
-#     reverse_proxy neurollama:8080
+#     reverse_proxy neurollama:8811
 # }
 #
 # Caddy will automatically manage Let's Encrypt / ZeroSSL TLS certificates.
@@ -85,7 +85,7 @@ services:
 #     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 #
 #     location / {
-#         proxy_pass http://localhost:8080;
+#         proxy_pass http://localhost:8811;
 #         proxy_set_header Host $host;
 #         proxy_set_header X-Real-IP $remote_addr;
 #         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
