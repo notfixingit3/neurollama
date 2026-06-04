@@ -14,6 +14,15 @@ All notable changes to NEUROLLAMA are documented here.
   - **Strip Thinking** — create a `-nothink` variant via `/no_think` SYSTEM directive (Qwen3, DeepSeek-R1, QwQ, etc.)
   - **Merge Models** — blend two models with configurable weight and SLERP/Linear method
   - Each wizard: live Modelfile preview, SSE streaming creation log, OPEN IN CHAT shortcut on success
+- **8 additional NeuroWizards**:
+  - **Remove Restrictions** — strips or replaces baked-in SYSTEM prompt; modes: Clear / Neutral baseline / Custom
+  - **Terse Mode** — three "no fluff" variants: Minimal / Ultra-terse / Technical
+  - **Code Specialist** — locks to code-only output for a chosen language + temperature 0.1; includes custom language entry
+  - **Reproducible Output** — bakes in fixed seed + optional temperature lock for deterministic responses
+  - **Language Lock** — forces responses in a chosen language (14 presets + custom)
+  - **Format Specialist** — 7 output/style presets: Markdown, Plain Text, JSON Only, Bullet Points, Academic, Socratic, Devil's Advocate
+  - **Character Creator** — named character with personality, speech style (7 options), and backstory
+  - **RAG-Optimized** — 3 strictness levels (Strict / Balanced / Permissive) for context-grounded Q&A
 - **Context window validation** now covers all panels: completion workspace and builder recipe now also show the `⚠` warning when selected context exceeds the model's trained maximum (chat, code bench, and hallucination bench already had it)
 
 ---

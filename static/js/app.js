@@ -11377,13 +11377,19 @@ async function _wzLaunch(id, modelfile, newName) {
 // Populate all wizard model selects from the current models array.
 // Called from populateModelDropdowns() so it stays in sync automatically.
 function populateWizardSelects() {
-  const ids = ['wz-ctx-model', 'wz-persona-model', 'wz-sampling-model', 'wz-nothink-model', 'wz-merge-model-a', 'wz-merge-model-b'];
+  const ids = [
+    'wz-ctx-model', 'wz-persona-model', 'wz-sampling-model', 'wz-nothink-model',
+    'wz-merge-model-a', 'wz-merge-model-b',
+    'wz-nosys-model', 'wz-terse-model', 'wz-code-model', 'wz-deterministic-model',
+    'wz-language-model', 'wz-format-model', 'wz-character-model', 'wz-rag-model',
+  ];
+  const opts = '<option value="">— select model —</option>' +
+    models.map(m => `<option value="${escapeHTML(m.name)}">${escapeHTML(m.name)}</option>`).join('');
   ids.forEach(id => {
     const sel = document.getElementById(id);
     if (!sel) return;
     const prev = sel.value;
-    sel.innerHTML = '<option value="">— select model —</option>' +
-      models.map(m => `<option value="${escapeHTML(m.name)}">${escapeHTML(m.name)}</option>`).join('');
+    sel.innerHTML = opts;
     if (prev && sel.querySelector(`option[value="${CSS.escape(prev)}"]`)) sel.value = prev;
   });
 }
@@ -11572,6 +11578,297 @@ function wzMergeUpdate() {
   }
 }
 
+// ── Wizard: Remove System Prompt ──────────────────────────────────────────
+function openWizNoSys() { openWz('nosys'); populateWizardSelects(); wzNoSysUpdate(); }
+
+function wzNoSysModelChange() {
+  const model  = document.getElementById('wz-nosys-model')?.value || '';
+  const mode   = document.getElementById('wz-nosys-mode')?.value || 'clear';
+  const nameEl = document.getElementById('wz-nosys-name');
+  if (nameEl && model) {
+    const base = model.replace(/:latest$/, '').replace(/[^a-z0-9._-]/gi, '-');
+    nameEl.value = `${base}-nosys`;
+  }
+  wzNoSysUpdate();
+}
+
+function wzNoSysUpdate() {
+  const model  = document.getElementById('wz-nosys-model')?.value || '';
+  const mode   = document.getElementById('wz-nosys-mode')?.value || 'clear';
+  const customWrap = document.getElementById('wz-nosys-custom-wrap');
+  if (customWrap) customWrap.classList.toggle('hidden', mode !== 'custom');
+
+  let sysLine = '';
+  if (mode === 'neutral') {
+    sysLine = '\nSYSTEM "Respond helpfully and accurately to user requests."';
+  } else if (mode === 'custom') {
+    const txt = document.getElementById('wz-nosys-custom')?.value.trim() || '';
+    if (txt) sysLine = `\nSYSTEM "${txt.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  }
+  const preview = document.getElementById('wz-nosys-preview');
+  if (preview) preview.textContent = model ? `FROM ${model}${sysLine}\n` : '— select a base model —';
+}
+
+// ── Wizard: Terse Mode ─────────────────────────────────────────────────────
+const _wzTerseVariants = {
+  minimal:    { label: 'No greetings, no preamble, direct answers only',
+                system: 'Be concise. Skip greetings, preamble, and filler text. Give direct answers only.' },
+  ultraterse: { label: 'One sentence per answer unless code is requested',
+                system: 'One sentence answers only, unless the user asks for code or a list. No filler words.' },
+  technical:  { label: 'Precise technical language, no analogies unless asked',
+                system: 'Respond in precise technical language. Avoid analogies and simplifications unless explicitly requested.' },
+};
+
+function openWizTerse() { openWz('terse'); populateWizardSelects(); wzTerseUpdate(); }
+
+function wzTerseModelChange() {
+  const model   = document.getElementById('wz-terse-model')?.value || '';
+  const variant = document.getElementById('wz-terse-variant')?.value || 'minimal';
+  const nameEl  = document.getElementById('wz-terse-name');
+  if (nameEl && model) {
+    const base = model.replace(/:latest$/, '').replace(/[^a-z0-9._-]/gi, '-');
+    nameEl.value = `${base}-terse`;
+  }
+  wzTerseUpdate();
+}
+
+function wzTerseUpdate() {
+  const model   = document.getElementById('wz-terse-model')?.value || '';
+  const variant = document.getElementById('wz-terse-variant')?.value || 'minimal';
+  const v = _wzTerseVariants[variant];
+  const descEl = document.getElementById('wz-terse-desc');
+  if (descEl) descEl.textContent = v?.label || '';
+  const preview = document.getElementById('wz-terse-preview');
+  if (preview) preview.textContent = model && v ? `FROM ${model}\nSYSTEM "${v.system}"\n` : '— select a base model —';
+}
+
+// ── Wizard: Code Specialist ───────────────────────────────────────────────
+function openWizCode() { openWz('code'); populateWizardSelects(); wzCodeUpdate(); }
+
+function wzCodeModelChange() {
+  const model  = document.getElementById('wz-code-model')?.value || '';
+  const lang   = document.getElementById('wz-code-lang')?.value || 'any';
+  const nameEl = document.getElementById('wz-code-name');
+  if (nameEl && model) {
+    const base   = model.replace(/:latest$/, '').replace(/[^a-z0-9._-]/gi, '-');
+    const suffix = lang === 'any' ? '-coder' : lang === 'custom' ? '-coder' : `-${lang.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+    nameEl.value = `${base}${suffix}`;
+  }
+  wzCodeUpdate();
+}
+
+function wzCodeUpdate() {
+  const model      = document.getElementById('wz-code-model')?.value || '';
+  const langSel    = document.getElementById('wz-code-lang')?.value || 'any';
+  const customWrap = document.getElementById('wz-code-custom-wrap');
+  if (customWrap) customWrap.classList.toggle('hidden', langSel !== 'custom');
+
+  const lang = langSel === 'custom'
+    ? (document.getElementById('wz-code-custom-lang')?.value.trim() || 'the requested language')
+    : langSel === 'any' ? 'the requested language' : langSel;
+
+  const system = langSel === 'any'
+    ? 'Write only the code requested. No explanations unless asked. No markdown code fences unless asked.'
+    : `Write only ${lang} code. No explanations unless asked. No markdown code fences unless asked.`;
+
+  const preview = document.getElementById('wz-code-preview');
+  if (preview) {
+    preview.textContent = model
+      ? `FROM ${model}\nPARAMETER temperature 0.1\nSYSTEM "${system}"\n`
+      : '— select a base model —';
+  }
+}
+
+// ── Wizard: Reproducible Output ───────────────────────────────────────────
+function openWizDeterministic() { openWz('deterministic'); populateWizardSelects(); wzDeterministicUpdate(); }
+
+function wzDeterministicModelChange() {
+  const model  = document.getElementById('wz-deterministic-model')?.value || '';
+  const nameEl = document.getElementById('wz-deterministic-name');
+  if (nameEl && model) {
+    const base = model.replace(/:latest$/, '').replace(/[^a-z0-9._-]/gi, '-');
+    nameEl.value = `${base}-deterministic`;
+  }
+  wzDeterministicUpdate();
+}
+
+function wzDeterministicUpdate() {
+  const model    = document.getElementById('wz-deterministic-model')?.value || '';
+  const seed     = document.getElementById('wz-deterministic-seed')?.value || '42';
+  const lockTemp = document.getElementById('wz-deterministic-locktemp')?.checked ?? true;
+  const preview  = document.getElementById('wz-deterministic-preview');
+  if (preview) {
+    let mf = model ? `FROM ${model}\nPARAMETER seed ${seed}\n` : '— select a base model —';
+    if (model && lockTemp) mf += 'PARAMETER temperature 0\n';
+    preview.textContent = mf;
+  }
+}
+
+// ── Wizard: Language Lock ─────────────────────────────────────────────────
+function openWizLanguage() { openWz('language'); populateWizardSelects(); wzLanguageUpdate(); }
+
+function wzLanguageModelChange() {
+  const model  = document.getElementById('wz-language-model')?.value || '';
+  const lang   = document.getElementById('wz-language-lang')?.value || 'Spanish';
+  const nameEl = document.getElementById('wz-language-name');
+  if (nameEl && model) {
+    const base   = model.replace(/:latest$/, '').replace(/[^a-z0-9._-]/gi, '-');
+    const suffix = lang === 'custom' ? '-lang' : `-${lang.toLowerCase().replace(/[^a-z]/g, '')}`;
+    nameEl.value = `${base}${suffix}`;
+  }
+  wzLanguageUpdate();
+}
+
+function wzLanguageUpdate() {
+  const model      = document.getElementById('wz-language-model')?.value || '';
+  const langSel    = document.getElementById('wz-language-lang')?.value || 'Spanish';
+  const customWrap = document.getElementById('wz-language-custom-wrap');
+  if (customWrap) customWrap.classList.toggle('hidden', langSel !== 'custom');
+
+  const lang = langSel === 'custom'
+    ? (document.getElementById('wz-language-custom')?.value.trim() || 'the target language')
+    : langSel;
+
+  const system = `Always respond in ${lang}, regardless of the language used by the user. Never switch to another language.`;
+  const preview = document.getElementById('wz-language-preview');
+  if (preview) preview.textContent = model ? `FROM ${model}\nSYSTEM "${system}"\n` : '— select a base model —';
+}
+
+// ── Wizard: Format Specialist ─────────────────────────────────────────────
+const _wzFormatPresets = {
+  markdown:  { label: 'Use clean Markdown for all responses — headers, bold, code blocks, lists',
+               system: 'Format all responses using clean Markdown. Use headers, bold, code blocks, and lists where appropriate.' },
+  plaintext: { label: 'Plain text only — no Markdown, no headers, no formatting',
+               system: 'Respond in plain text only. Do not use Markdown, headers, bold, italics, or any other formatting.' },
+  json:      { label: 'JSON objects only — no prose, no explanation',
+               system: 'Respond only with valid JSON objects. No prose, no explanation, no markdown. The entire response must be parseable JSON.' },
+  bullets:   { label: 'All responses structured as bullet point lists',
+               system: 'Structure all responses as concise bullet point lists. Use sub-bullets for hierarchy. Avoid prose paragraphs.' },
+  academic:  { label: 'Formal academic writing style with citations and structure',
+               system: 'Use formal academic writing style. Structure responses with clear arguments, cite claims where possible, and avoid colloquial language.' },
+  socratic:  { label: 'Socratic method — answer questions with guiding questions',
+               system: 'Use the Socratic method. When answering questions, guide the user toward the answer with probing questions rather than stating answers directly.' },
+  devils:    { label: "Devil's Advocate — always argue the opposing position",
+               system: "Play devil's advocate. Always argue the opposite or least obvious position to provoke critical thinking. Clearly note you are doing so." },
+};
+
+function openWizFormat() { openWz('format'); populateWizardSelects(); wzFormatUpdate(); }
+
+function wzFormatModelChange() {
+  const model   = document.getElementById('wz-format-model')?.value || '';
+  const preset  = document.getElementById('wz-format-preset')?.value || 'markdown';
+  const nameEl  = document.getElementById('wz-format-name');
+  if (nameEl && model) {
+    const base = model.replace(/:latest$/, '').replace(/[^a-z0-9._-]/gi, '-');
+    nameEl.value = `${base}-${preset}`;
+  }
+  wzFormatUpdate();
+}
+
+function wzFormatUpdate() {
+  const model   = document.getElementById('wz-format-model')?.value || '';
+  const preset  = document.getElementById('wz-format-preset')?.value || 'markdown';
+  const nameEl  = document.getElementById('wz-format-name');
+  if (nameEl && model) {
+    const base = model.replace(/:latest$/, '').replace(/[^a-z0-9._-]/gi, '-');
+    nameEl.value = `${base}-${preset}`;
+  }
+  const p = _wzFormatPresets[preset];
+  const descEl = document.getElementById('wz-format-desc');
+  if (descEl) descEl.textContent = p?.label || '';
+  const preview = document.getElementById('wz-format-preview');
+  if (preview) preview.textContent = model && p ? `FROM ${model}\nSYSTEM "${p.system}"\n` : '— select a base model —';
+}
+
+// ── Wizard: Character Creator ─────────────────────────────────────────────
+const _wzCharStyles = {
+  casual:     'a casual, friendly manner',
+  formal:     'a formal, professional manner',
+  archaic:    'an archaic, medieval manner using thee/thou and period-appropriate speech',
+  futuristic: 'a futuristic, sci-fi manner with technical jargon and forward-looking perspective',
+  childlike:  'a simple, childlike manner using easy words and short sentences',
+  sarcastic:  'a sarcastic, dry manner with understated wit',
+  poetic:     'a poetic, lyrical manner rich in metaphor and imagery',
+};
+
+function openWizCharacter() { openWz('character'); populateWizardSelects(); wzCharacterUpdate(); }
+
+function wzCharacterModelChange() {
+  const model    = document.getElementById('wz-character-model')?.value || '';
+  const charName = document.getElementById('wz-character-charname')?.value.trim() || '';
+  const nameEl   = document.getElementById('wz-character-name');
+  if (nameEl && model) {
+    const base    = model.replace(/:latest$/, '').replace(/[^a-z0-9._-]/gi, '-');
+    const chrSlug = charName ? charName.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').slice(0, 20) : 'character';
+    nameEl.value  = `${base}-${chrSlug}`;
+  }
+  wzCharacterUpdate();
+}
+
+function wzCharacterUpdate() {
+  const model       = document.getElementById('wz-character-model')?.value || '';
+  const charName    = document.getElementById('wz-character-charname')?.value.trim() || '';
+  const personality = document.getElementById('wz-character-personality')?.value.trim() || '';
+  const style       = document.getElementById('wz-character-style')?.value || 'casual';
+  const styleDesc   = _wzCharStyles[style] || style;
+
+  // Auto-update model name slug when char name changes
+  const nameEl = document.getElementById('wz-character-name');
+  if (nameEl && model && charName) {
+    const base    = model.replace(/:latest$/, '').replace(/[^a-z0-9._-]/gi, '-');
+    const chrSlug = charName.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').slice(0, 20);
+    nameEl.value  = `${base}-${chrSlug}`;
+  }
+
+  let system = '';
+  if (charName) system += `You are ${charName}. `;
+  if (personality) system += `${personality} `;
+  system += `Speak in ${styleDesc}. Never break character.`;
+
+  const preview = document.getElementById('wz-character-preview');
+  if (preview) {
+    const esc   = system.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const short = esc.length > 120 ? esc.slice(0, 120) + '…' : esc;
+    preview.textContent = model ? `FROM ${model}\nSYSTEM "${short}"\n` : '— select a base model —';
+  }
+}
+
+// ── Wizard: RAG-Optimized ─────────────────────────────────────────────────
+const _wzRagPresets = {
+  strict:     { label: 'Context only — refuses to answer if not in provided documents',
+                system: "Answer only from the provided context. If the answer is not present in the context, say exactly: \"I don't have that information in the provided context.\" Do not use prior knowledge or make assumptions." },
+  balanced:   { label: 'Prefer context — supplements with general knowledge when needed',
+                system: 'Prefer information from provided context. When context is insufficient, you may supplement with general knowledge, but clearly indicate when you are doing so.' },
+  permissive: { label: 'Context + knowledge — combines both for comprehensive answers',
+                system: 'Use provided context as your primary source. Combine it with your knowledge to give comprehensive, well-rounded answers.' },
+};
+
+function openWizRag() { openWz('rag'); populateWizardSelects(); wzRagUpdate(); }
+
+function wzRagModelChange() {
+  const model      = document.getElementById('wz-rag-model')?.value || '';
+  const strictness = document.getElementById('wz-rag-strictness')?.value || 'balanced';
+  const nameEl     = document.getElementById('wz-rag-name');
+  if (nameEl && model) {
+    const base = model.replace(/:latest$/, '').replace(/[^a-z0-9._-]/gi, '-');
+    nameEl.value = `${base}-rag`;
+  }
+  wzRagUpdate();
+}
+
+function wzRagUpdate() {
+  const model      = document.getElementById('wz-rag-model')?.value || '';
+  const strictness = document.getElementById('wz-rag-strictness')?.value || 'balanced';
+  const p = _wzRagPresets[strictness];
+  const descEl = document.getElementById('wz-rag-desc');
+  if (descEl) descEl.textContent = p?.label || '';
+  const preview = document.getElementById('wz-rag-preview');
+  if (preview) {
+    const sys = p?.system.replace(/\\/g, '\\\\').replace(/"/g, '\\"') || '';
+    preview.textContent = model ? `FROM ${model}\nSYSTEM "${sys}"\n` : '— select a base model —';
+  }
+}
+
 // ── Shared launch dispatcher ──────────────────────────────────────────────
 function launchWz(id) {
   let modelfile = '', newName = '';
@@ -11625,6 +11922,108 @@ function launchWz(id) {
       if (modelA === modelB) { showToast('Select two different models', 'error'); return; }
       if (!newName){ showToast('Enter a model name', 'error'); return; }
       modelfile = `FROM ${modelA}\n# MERGE_METHOD: ${method}\n# MERGE_MODEL: ${modelB}\n# MERGE_RATIO: ${weight}\n`;
+      break;
+    }
+    case 'nosys': {
+      const model  = document.getElementById('wz-nosys-model')?.value;
+      const mode   = document.getElementById('wz-nosys-mode')?.value || 'clear';
+      newName      = document.getElementById('wz-nosys-name')?.value.trim();
+      if (!model)  { showToast('Select a base model', 'error'); return; }
+      if (!newName){ showToast('Enter a model name', 'error'); return; }
+      let sys = '';
+      if (mode === 'neutral') {
+        sys = '\nSYSTEM "Respond helpfully and accurately to user requests."';
+      } else if (mode === 'custom') {
+        const txt = document.getElementById('wz-nosys-custom')?.value.trim() || '';
+        if (!txt) { showToast('Enter a custom SYSTEM prompt', 'error'); return; }
+        sys = `\nSYSTEM "${txt.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+      }
+      modelfile = `FROM ${model}${sys}\n`;
+      break;
+    }
+    case 'terse': {
+      const model   = document.getElementById('wz-terse-model')?.value;
+      const variant = document.getElementById('wz-terse-variant')?.value || 'minimal';
+      newName       = document.getElementById('wz-terse-name')?.value.trim();
+      if (!model)  { showToast('Select a base model', 'error'); return; }
+      if (!newName){ showToast('Enter a model name', 'error'); return; }
+      const v = _wzTerseVariants[variant];
+      modelfile = `FROM ${model}\nSYSTEM "${v?.system || ''}"\n`;
+      break;
+    }
+    case 'code': {
+      const model   = document.getElementById('wz-code-model')?.value;
+      const langSel = document.getElementById('wz-code-lang')?.value || 'any';
+      newName       = document.getElementById('wz-code-name')?.value.trim();
+      if (!model)  { showToast('Select a base model', 'error'); return; }
+      if (!newName){ showToast('Enter a model name', 'error'); return; }
+      const lang = langSel === 'custom'
+        ? (document.getElementById('wz-code-custom-lang')?.value.trim() || '')
+        : langSel === 'any' ? '' : langSel;
+      if (langSel === 'custom' && !lang) { showToast('Enter a custom language', 'error'); return; }
+      const system = lang
+        ? `Write only ${lang} code. No explanations unless asked. No markdown code fences unless asked.`
+        : 'Write only the code requested. No explanations unless asked. No markdown code fences unless asked.';
+      modelfile = `FROM ${model}\nPARAMETER temperature 0.1\nSYSTEM "${system}"\n`;
+      break;
+    }
+    case 'deterministic': {
+      const model    = document.getElementById('wz-deterministic-model')?.value;
+      const seed     = document.getElementById('wz-deterministic-seed')?.value || '42';
+      const lockTemp = document.getElementById('wz-deterministic-locktemp')?.checked ?? true;
+      newName        = document.getElementById('wz-deterministic-name')?.value.trim();
+      if (!model)  { showToast('Select a base model', 'error'); return; }
+      if (!newName){ showToast('Enter a model name', 'error'); return; }
+      modelfile = `FROM ${model}\nPARAMETER seed ${seed}\n${lockTemp ? 'PARAMETER temperature 0\n' : ''}`;
+      break;
+    }
+    case 'language': {
+      const model   = document.getElementById('wz-language-model')?.value;
+      const langSel = document.getElementById('wz-language-lang')?.value || 'Spanish';
+      newName       = document.getElementById('wz-language-name')?.value.trim();
+      if (!model)  { showToast('Select a base model', 'error'); return; }
+      if (!newName){ showToast('Enter a model name', 'error'); return; }
+      const lang = langSel === 'custom'
+        ? (document.getElementById('wz-language-custom')?.value.trim() || '')
+        : langSel;
+      if (langSel === 'custom' && !lang) { showToast('Enter a custom language', 'error'); return; }
+      modelfile = `FROM ${model}\nSYSTEM "Always respond in ${lang}, regardless of the language used by the user. Never switch to another language."\n`;
+      break;
+    }
+    case 'format': {
+      const model  = document.getElementById('wz-format-model')?.value;
+      const preset = document.getElementById('wz-format-preset')?.value || 'markdown';
+      newName      = document.getElementById('wz-format-name')?.value.trim();
+      if (!model)  { showToast('Select a base model', 'error'); return; }
+      if (!newName){ showToast('Enter a model name', 'error'); return; }
+      const p = _wzFormatPresets[preset];
+      modelfile = `FROM ${model}\nSYSTEM "${(p?.system || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"\n`;
+      break;
+    }
+    case 'character': {
+      const model       = document.getElementById('wz-character-model')?.value;
+      const charName    = document.getElementById('wz-character-charname')?.value.trim();
+      const personality = document.getElementById('wz-character-personality')?.value.trim();
+      const style       = document.getElementById('wz-character-style')?.value || 'casual';
+      newName           = document.getElementById('wz-character-name')?.value.trim();
+      if (!model)    { showToast('Select a base model', 'error'); return; }
+      if (!charName) { showToast('Enter a character name', 'error'); return; }
+      if (!newName)  { showToast('Enter a model name', 'error'); return; }
+      const styleDesc = _wzCharStyles[style] || style;
+      let system = `You are ${charName}. `;
+      if (personality) system += `${personality} `;
+      system += `Speak in ${styleDesc}. Never break character.`;
+      modelfile = `FROM ${model}\nSYSTEM "${system.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"\n`;
+      break;
+    }
+    case 'rag': {
+      const model      = document.getElementById('wz-rag-model')?.value;
+      const strictness = document.getElementById('wz-rag-strictness')?.value || 'balanced';
+      newName          = document.getElementById('wz-rag-name')?.value.trim();
+      if (!model)  { showToast('Select a base model', 'error'); return; }
+      if (!newName){ showToast('Enter a model name', 'error'); return; }
+      const p = _wzRagPresets[strictness];
+      modelfile = `FROM ${model}\nSYSTEM "${(p?.system || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"\n`;
       break;
     }
     default:

@@ -59,6 +59,7 @@
 - [x] **Strip Thinking wizard** — `-nothink` variant via `SYSTEM "/no_think"`; for Qwen3, DeepSeek-R1, QwQ
 - [x] **Merge Models wizard** — two model selects, blend weight slider (0.1–0.9), SLERP/Linear method
 - [x] **Ctx warning: completion + builder** — `⚠` span added to completion context limit and builder context window; wired to `updateCtxWarning()` via change listeners + `fetchModelCtxLengths()` initial call + `onBaseModelChange()`
+- [x] **8 additional NeuroWizards** — Remove Restrictions (clear/neutral/custom), Terse Mode (minimal/ultra-terse/technical), Code Specialist (14 language presets + custom + temp 0.1), Reproducible Output (seed + optional temp lock), Language Lock (14 languages + custom), Format Specialist (7 presets), Character Creator (name + personality + 7 speech styles), RAG-Optimized (strict/balanced/permissive)
 
 ## v0.2.21 Session Notes
 
