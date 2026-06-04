@@ -34,7 +34,7 @@ import (
 	gossh "golang.org/x/crypto/ssh"
 )
 
-const appVersion = "v0.2.22"
+const appVersion = "v0.2.23"
 
 var (
 	appStartTime = time.Now()

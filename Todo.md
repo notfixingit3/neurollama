@@ -1,5 +1,10 @@
 # NEUROLLAMA Roadmap & Feature Todo List
 
+<!-- v0.2.23 — 2026-06-04 -->
+<!-- Ollama Remote Update via SSH (System > Settings): password/key auth, macOS .app bundle path, Linux binary swap preserving custom systemd service, pre-flight checks (curl, GitHub API, binary path, service file, sudo creds, disk space) -->
+<!-- Three new bench types: tool_use, json_output, instruction_follow; leaderboard bar chart; param size filter; JSON badge; CHAT⚠ rework; halluc ctx warning -->
+<!-- Port 8811 default; TRUSTED_PROXIES env var; Dockerfile/compose updated -->
+
 <!-- v0.2.22 — 2026-06-03 -->
 <!-- CI: dev compile-check, auto pre-release detection via merge-base -->
 <!-- chore: scrubbed all Co-Authored-By trailers from git history (git filter-repo) -->

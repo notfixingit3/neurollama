@@ -4,6 +4,37 @@ All notable changes to NEUROLLAMA are documented here.
 
 ---
 
+## [v0.2.23] — 2026-06-04
+
+### Added
+- **Ollama Remote Update** (System → Settings) — update Ollama on any registered node via SSH without leaving the UI.
+  - Auth: SSH password (with keyboard-interactive fallback) or existing key (`~/.ssh/id_ed25519/ecdsa/rsa`)
+  - **Linux**: downloads the binary directly from GitHub releases and swaps it + restarts the systemd service. The installer is intentionally *not* used so custom `ollama.service` files (custom model paths, env vars, Vulkan flags, etc.) are preserved.
+  - **macOS**: detects `.app` bundle vs plain CLI install. Bundle path downloads `Ollama-darwin.zip`, extracts with `ditto`, replaces `/Applications/Ollama.app`, clears quarantine, and restarts via `open`. CLI path falls back to the official install script.
+  - **Pre-flight checks** run before downloading anything — any fatal failure aborts immediately:
+    - Common: `curl` available, GitHub API reachable from remote host
+    - Linux: `systemctl` present, Ollama binary in PATH, `/etc/systemd/system/ollama.service` exists, service enabled (warning), sudo credentials valid (dry-run), `/tmp` ≥ 100 MB free
+    - macOS: `ditto`/`open` available, `Ollama.app` exists, `/Applications/` writable, `/tmp` ≥ 400 MB free
+  - Terminal-style output log with colour-coded `✔`/`⚠`/`✖` check results and `old → new` version diff on completion
+- **Three new benchmark types**: tool use, JSON output, instruction follow — each with SSE run endpoint, accuracy-based scoring (S/A/B/C/F), and leaderboard integration
+- **Leaderboard bar chart** — toggle between table and SVG bar chart view; colour-coded by benchmark type
+- **Param size range filter** — min/max B filter on the leaderboard; `parseParamB()` handles K/M/B/T suffixes
+- **JSON capability badge** — probe any model for JSON output support; results cached in localStorage; `Probe All` button in inventory toolbar
+- **CHAT⚠ badge** — redesigned in red to more clearly flag chat-only models that skip task instructions
+- **Hallucination ctx warning** — `⚠` shown in Max Context Size label when the selected context exceeds the model's trained context window; correctly handles K-unit values in the hallucination selector
+
+### Changed
+- **Default port** changed from `8080` to `8811` — too many things already default to 8080
+- **TRUSTED_PROXIES** env var — defaults to `127.0.0.1,::1`; supports `"none"` to disable trust; configurable for Traefik/reverse-proxy setups
+- Dockerfile `EXPOSE` and healthcheck updated to port 8811
+- `docker-compose.yml` port mapping and healthcheck updated to 8811
+
+### Fixed
+- Model selector in hallucination benchmark showed only the parameter value — trigger element made `display:flex` so name and badges are always visible
+- `ollama-darwin.tgz` is x86_64-only; macOS arm64 nodes (Apple Silicon) now correctly receive `Ollama-darwin.zip` (universal .app bundle)
+
+---
+
 ## [v0.2.22] — 2026-06-03
 
 ### Added
