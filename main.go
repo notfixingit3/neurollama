@@ -7129,10 +7129,59 @@ func ollamaUpdateSSEHandler(c *gin.Context) {
 
 		switch osStr {
 		case "Darwin":
-			emit("status", "macOS detected — running Ollama install script…")
-			if sErr := runSSHCmdStream(sshClient, "curl -fsSL https://ollama.com/install.sh | sh", line); sErr != nil {
-				fail(fmt.Sprintf("macOS update failed: %v", sErr))
+			emit("status", "macOS detected — checking install type…")
+
+			// Get latest version (needed for both install paths)
+			emit("status", "Fetching latest Ollama version from GitHub…")
+			ver, _ := runSSHCmd(sshClient,
+				`curl -fsSL https://api.github.com/repos/ollama/ollama/releases/latest 2>/dev/null | grep -o '"tag_name":"[^"]*"' | cut -d'"' -f4`)
+			if ver == "" {
+				fail("Could not determine latest Ollama version — GitHub API unreachable from remote host?")
 				return false
+			}
+			emit("status", fmt.Sprintf("Latest release: %s", ver))
+
+			// Detect install type: .app bundle vs plain CLI binary
+			appExists, _ := runSSHCmd(sshClient, "test -d /Applications/Ollama.app && echo yes || echo no")
+			if strings.TrimSpace(appExists) == "yes" {
+				// ── .app bundle path ──────────────────────────────────────────
+				emit("status", ".app bundle install detected.")
+				dlURL := fmt.Sprintf("https://github.com/ollama/ollama/releases/download/%s/Ollama-darwin.zip", ver)
+				emit("status", fmt.Sprintf("Downloading %s (≈177 MB)…", dlURL))
+				if dErr := runSSHCmdStream(sshClient,
+					fmt.Sprintf("curl -fsSL %s -o /tmp/Ollama-darwin.zip", dlURL), line); dErr != nil {
+					fail(fmt.Sprintf("Download failed: %v", dErr))
+					return false
+				}
+
+				emit("status", "Stopping Ollama…")
+				runSSHCmd(sshClient, "killall -q Ollama ollama 2>/dev/null; sleep 1")
+
+				emit("status", "Replacing Ollama.app…")
+				replaceCmd := `set -e
+rm -rf /tmp/ollama-update-tmp
+mkdir /tmp/ollama-update-tmp
+ditto -xk /tmp/Ollama-darwin.zip /tmp/ollama-update-tmp/
+rm -rf /Applications/Ollama.app
+cp -r /tmp/ollama-update-tmp/Ollama.app /Applications/Ollama.app
+xattr -dr com.apple.quarantine /Applications/Ollama.app 2>/dev/null || true
+rm -rf /tmp/ollama-update-tmp /tmp/Ollama-darwin.zip`
+				if rErr := runSSHCmdStream(sshClient, replaceCmd, line); rErr != nil {
+					fail(fmt.Sprintf("App replacement failed: %v", rErr))
+					return false
+				}
+
+				emit("status", "Restarting Ollama…")
+				// 'open' delivers to the user's GUI session (works if user has autologin/active session)
+				runSSHCmd(sshClient, "open /Applications/Ollama.app")
+
+			} else {
+				// ── Plain CLI binary path (no .app bundle) ────────────────────
+				emit("status", "CLI install detected — running Ollama install script…")
+				if sErr := runSSHCmdStream(sshClient, "curl -fsSL https://ollama.com/install.sh | sh", line); sErr != nil {
+					fail(fmt.Sprintf("macOS CLI update failed: %v", sErr))
+					return false
+				}
 			}
 
 		case "Linux":
