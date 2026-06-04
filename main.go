@@ -7025,6 +7025,22 @@ func runSSHCmdStream(client *gossh.Client, cmd string, emit func(string)) error 
 	return sess.Wait()
 }
 
+// sshCheckStr returns (detail string, passed bool) after running a command; if
+// the command exits without error the first line of output is used as detail.
+func sshCheckStr(client *gossh.Client, cmd, passDetail, failDetail string) (string, bool) {
+	out, err := runSSHCmd(client, cmd)
+	if err != nil {
+		if failDetail != "" {
+			return failDetail, false
+		}
+		return out, false
+	}
+	if passDetail != "" {
+		return passDetail, true
+	}
+	return out, true
+}
+
 func ollamaUpdateSSEHandler(c *gin.Context) {
 	var req OllamaUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -7084,7 +7100,6 @@ func ollamaUpdateSSEHandler(c *gin.Context) {
 	}
 	if req.SSHPassword != "" {
 		authMethods = append(authMethods, gossh.Password(req.SSHPassword))
-		// Keyboard-interactive fallback (some servers require it)
 		authMethods = append(authMethods, gossh.KeyboardInteractive(func(_, _ string, questions []string, _ []bool) ([]string, error) {
 			answers := make([]string, len(questions))
 			for i := range answers {
@@ -7101,7 +7116,7 @@ func ollamaUpdateSSEHandler(c *gin.Context) {
 	sshCfg := &gossh.ClientConfig{
 		User:            req.SSHUser,
 		Auth:            authMethods,
-		HostKeyCallback: gossh.InsecureIgnoreHostKey(), // LAN/trusted deployment
+		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
 		Timeout:         15 * time.Second,
 	}
 
@@ -7115,6 +7130,19 @@ func ollamaUpdateSSEHandler(c *gin.Context) {
 		line := func(msg string) { emit("output", msg) }
 		fail := func(msg string) { emit("error", msg); emit("done", "failed") }
 
+		// check emits a structured pre-flight result and tracks fatal failures.
+		preflightFailed := false
+		check := func(name string, passed, fatal bool, detail string) {
+			b, _ := json.Marshal(map[string]interface{}{
+				"name": name, "passed": passed, "fatal": fatal, "detail": detail,
+			})
+			emit("check", string(b))
+			if !passed && fatal {
+				preflightFailed = true
+			}
+		}
+
+		// ── Connect ───────────────────────────────────────────────────────────
 		emit("status", fmt.Sprintf("Connecting to %s@%s:%d…", req.SSHUser, host, sshPort))
 		sshClient, connErr := gossh.Dial("tcp", fmt.Sprintf("%s:%d", host, sshPort), sshCfg)
 		if connErr != nil {
@@ -7125,38 +7153,121 @@ func ollamaUpdateSSEHandler(c *gin.Context) {
 		emit("status", "SSH connected.")
 
 		osStr, _ := runSSHCmd(sshClient, "uname -s")
-		emit("status", fmt.Sprintf("Remote OS: %s", osStr))
+		archRaw, _ := runSSHCmd(sshClient, "uname -m")
+		emit("status", fmt.Sprintf("Remote: OS=%s arch=%s — running pre-flight checks…", osStr, archRaw))
+
+		// ── Pre-flight: common ────────────────────────────────────────────────
+		curlVer, curlOK := sshCheckStr(sshClient, "curl --version 2>/dev/null | head -1", "", "curl not found — required for download")
+		check("curl available", curlOK, true, curlVer)
+
+		_, apiOK := sshCheckStr(sshClient, "curl -fsSL --connect-timeout 8 -o /dev/null https://api.github.com/repos/ollama/ollama/releases/latest",
+			"api.github.com reachable", "cannot reach GitHub API from this host")
+		check("GitHub API reachable", apiOK, true, "")
+
+		// ── Pre-flight: OS-specific ───────────────────────────────────────────
+		var currentVer, ollamaPath string
 
 		switch osStr {
 		case "Darwin":
-			emit("status", "macOS detected — checking install type…")
+			_, dittoOK := sshCheckStr(sshClient, "command -v ditto", "ditto found", "ditto not found")
+			check("ditto available", dittoOK, true, "")
 
-			// Get latest version (needed for both install paths)
-			emit("status", "Fetching latest Ollama version from GitHub…")
-			ver, _ := runSSHCmd(sshClient,
-				`curl -fsSL https://api.github.com/repos/ollama/ollama/releases/latest 2>/dev/null | grep -o '"tag_name":"[^"]*"' | cut -d'"' -f4`)
-			if ver == "" {
-				fail("Could not determine latest Ollama version — GitHub API unreachable from remote host?")
-				return false
-			}
-			emit("status", fmt.Sprintf("Latest release: %s", ver))
+			_, openOK := sshCheckStr(sshClient, "command -v open", "open found", "open not found")
+			check("open command", openOK, true, "")
 
-			// Detect install type: .app bundle vs plain CLI binary
+			_, appOK := sshCheckStr(sshClient, "test -d /Applications/Ollama.app", "/Applications/Ollama.app exists", "Ollama.app not found at expected location")
+			check("Ollama.app exists", appOK, true, "")
+
+			_, writeOK := sshCheckStr(sshClient,
+				"touch /Applications/.ollama-write-test && rm /Applications/.ollama-write-test",
+				"write access confirmed", "cannot write to /Applications/ — permission denied")
+			check("/Applications/ writable", writeOK, true, "")
+
+			dfOut, _ := runSSHCmd(sshClient, "df -k /tmp 2>/dev/null | awk 'NR==2{print $4}' || echo 0")
+			dfKB, _ := strconv.ParseInt(strings.TrimSpace(dfOut), 10, 64)
+			check("disk space (/tmp)", dfKB >= 409600, true,
+				fmt.Sprintf("%.0f MB free (need ≥400 MB for Ollama-darwin.zip)", float64(dfKB)/1024))
+
+			currentVer, _ = runSSHCmd(sshClient,
+				"defaults read /Applications/Ollama.app/Contents/Info.plist CFBundleShortVersionString 2>/dev/null || echo unknown")
+			check("current version", true, false, currentVer)
+
+		case "Linux":
+			_, sysOK := sshCheckStr(sshClient, "command -v systemctl", "systemctl found", "systemctl not found — cannot manage service")
+			check("systemd available", sysOK, true, "")
+
+			ollamaPath, _ = runSSHCmd(sshClient, "command -v ollama 2>/dev/null || echo ''")
+			check("Ollama binary", ollamaPath != "", true,
+				func() string {
+					if ollamaPath != "" {
+						return "found at " + ollamaPath
+					}
+					return "ollama binary not found in PATH"
+				}())
+
+			_, svcOK := sshCheckStr(sshClient, "test -f /etc/systemd/system/ollama.service",
+				"/etc/systemd/system/ollama.service exists",
+				"service file missing — may have been removed by an OS update")
+			check("systemd service file", svcOK, true, "")
+
+			enabledOut, _ := runSSHCmd(sshClient, "systemctl is-enabled ollama 2>/dev/null || echo disabled")
+			check("service enabled", strings.TrimSpace(enabledOut) == "enabled", false,
+				func() string {
+					if strings.TrimSpace(enabledOut) == "enabled" {
+						return "enabled"
+					}
+					return "not enabled — will not auto-start on reboot (warning only)"
+				}())
+
+			esc := shellEscapeSingle(req.SudoPass)
+			_, sudoOK := sshCheckStr(sshClient,
+				fmt.Sprintf("echo %s | sudo -S -p '' true", esc),
+				"sudo credentials valid", "sudo authentication failed — wrong password?")
+			check("sudo credentials", sudoOK, true, "")
+
+			dfOut, _ := runSSHCmd(sshClient, "df -k /tmp 2>/dev/null | awk 'NR==2{print $4}' || echo 0")
+			dfKB, _ := strconv.ParseInt(strings.TrimSpace(dfOut), 10, 64)
+			check("disk space (/tmp)", dfKB >= 102400, true,
+				fmt.Sprintf("%.0f MB free (need ≥100 MB)", float64(dfKB)/1024))
+
+			currentVer, _ = runSSHCmd(sshClient, "ollama --version 2>/dev/null || echo unknown")
+			check("current version", true, false, currentVer)
+
+		default:
+			fail(fmt.Sprintf("Unsupported OS: %q", osStr))
+			return false
+		}
+
+		// ── Abort if any fatal check failed ───────────────────────────────────
+		if preflightFailed {
+			fail("Pre-flight checks failed — update aborted. Fix the issues above and retry.")
+			return false
+		}
+		emit("status", "All pre-flight checks passed. Starting update…")
+
+		// ── Update ────────────────────────────────────────────────────────────
+		emit("status", "Fetching latest Ollama version from GitHub…")
+		ver, _ := runSSHCmd(sshClient,
+			`curl -fsSL https://api.github.com/repos/ollama/ollama/releases/latest 2>/dev/null | grep -o '"tag_name":"[^"]*"' | cut -d'"' -f4`)
+		if ver == "" {
+			fail("Could not fetch latest version tag — GitHub API returned empty response")
+			return false
+		}
+		emit("status", fmt.Sprintf("Latest release: %s", ver))
+
+		switch osStr {
+		case "Darwin":
 			appExists, _ := runSSHCmd(sshClient, "test -d /Applications/Ollama.app && echo yes || echo no")
 			if strings.TrimSpace(appExists) == "yes" {
-				// ── .app bundle path ──────────────────────────────────────────
-				emit("status", ".app bundle install detected.")
 				dlURL := fmt.Sprintf("https://github.com/ollama/ollama/releases/download/%s/Ollama-darwin.zip", ver)
-				emit("status", fmt.Sprintf("Downloading %s (≈177 MB)…", dlURL))
+				emit("status", fmt.Sprintf("Downloading Ollama-darwin.zip (≈177 MB)…"))
 				if dErr := runSSHCmdStream(sshClient,
 					fmt.Sprintf("curl -fsSL %s -o /tmp/Ollama-darwin.zip", dlURL), line); dErr != nil {
 					fail(fmt.Sprintf("Download failed: %v", dErr))
 					return false
 				}
-
 				emit("status", "Stopping Ollama…")
 				runSSHCmd(sshClient, "killall -q Ollama ollama 2>/dev/null; sleep 1")
-
 				emit("status", "Replacing Ollama.app…")
 				replaceCmd := `set -e
 rm -rf /tmp/ollama-update-tmp
@@ -7170,14 +7281,10 @@ rm -rf /tmp/ollama-update-tmp /tmp/Ollama-darwin.zip`
 					fail(fmt.Sprintf("App replacement failed: %v", rErr))
 					return false
 				}
-
 				emit("status", "Restarting Ollama…")
-				// 'open' delivers to the user's GUI session (works if user has autologin/active session)
 				runSSHCmd(sshClient, "open /Applications/Ollama.app")
-
 			} else {
-				// ── Plain CLI binary path (no .app bundle) ────────────────────
-				emit("status", "CLI install detected — running Ollama install script…")
+				emit("status", "CLI install — running Ollama install script…")
 				if sErr := runSSHCmdStream(sshClient, "curl -fsSL https://ollama.com/install.sh | sh", line); sErr != nil {
 					fail(fmt.Sprintf("macOS CLI update failed: %v", sErr))
 					return false
@@ -7185,7 +7292,6 @@ rm -rf /tmp/ollama-update-tmp /tmp/Ollama-darwin.zip`
 			}
 
 		case "Linux":
-			archRaw, _ := runSSHCmd(sshClient, "uname -m")
 			var ollamaArch string
 			switch archRaw {
 			case "x86_64":
@@ -7196,30 +7302,18 @@ rm -rf /tmp/ollama-update-tmp /tmp/Ollama-darwin.zip`
 				fail(fmt.Sprintf("Unsupported architecture: %s", archRaw))
 				return false
 			}
-			emit("status", fmt.Sprintf("Arch: %s → ollama-%s", archRaw, ollamaArch))
-
-			emit("status", "Fetching latest Ollama version from GitHub…")
-			ver, _ := runSSHCmd(sshClient,
-				`curl -fsSL https://api.github.com/repos/ollama/ollama/releases/latest 2>/dev/null | grep -o '"tag_name":"[^"]*"' | cut -d'"' -f4`)
-			if ver == "" {
-				fail("Could not determine latest Ollama version — GitHub API unreachable from remote host?")
-				return false
-			}
-			emit("status", fmt.Sprintf("Latest release: %s", ver))
-
-			dlURL := fmt.Sprintf("https://github.com/ollama/ollama/releases/download/%s/ollama-linux-%s", ver, ollamaArch)
-			emit("status", fmt.Sprintf("Downloading %s…", dlURL))
-			dlCmd := fmt.Sprintf("curl -fsSL %s -o /tmp/ollama_update && chmod +x /tmp/ollama_update", dlURL)
-			if dErr := runSSHCmdStream(sshClient, dlCmd, line); dErr != nil {
-				fail(fmt.Sprintf("Download failed: %v", dErr))
-				return false
-			}
-
-			ollamaPath, _ := runSSHCmd(sshClient, "command -v ollama 2>/dev/null || echo /usr/local/bin/ollama")
 			if ollamaPath == "" {
 				ollamaPath = "/usr/local/bin/ollama"
 			}
-			emit("status", fmt.Sprintf("Binary location: %s", ollamaPath))
+			emit("status", fmt.Sprintf("Arch: %s → %s  |  Binary: %s", archRaw, ollamaArch, ollamaPath))
+
+			dlURL := fmt.Sprintf("https://github.com/ollama/ollama/releases/download/%s/ollama-linux-%s", ver, ollamaArch)
+			emit("status", fmt.Sprintf("Downloading ollama-linux-%s…", ollamaArch))
+			if dErr := runSSHCmdStream(sshClient,
+				fmt.Sprintf("curl -fsSL %s -o /tmp/ollama_update && chmod +x /tmp/ollama_update", dlURL), line); dErr != nil {
+				fail(fmt.Sprintf("Download failed: %v", dErr))
+				return false
+			}
 
 			esc := shellEscapeSingle(req.SudoPass)
 			sudo := func(cmd string) string {
@@ -7232,8 +7326,8 @@ rm -rf /tmp/ollama-update-tmp /tmp/Ollama-darwin.zip`
 			}
 
 			emit("status", "Installing new binary…")
-			replCmd := sudo(fmt.Sprintf("cp /tmp/ollama_update %s && chmod +x %s", ollamaPath, ollamaPath))
-			if rErr := runSSHCmdStream(sshClient, replCmd, line); rErr != nil {
+			if rErr := runSSHCmdStream(sshClient,
+				sudo(fmt.Sprintf("cp /tmp/ollama_update %s && chmod +x %s", ollamaPath, ollamaPath)), line); rErr != nil {
 				fail(fmt.Sprintf("Binary replacement failed: %v", rErr))
 				return false
 			}
@@ -7244,16 +7338,23 @@ rm -rf /tmp/ollama-update-tmp /tmp/Ollama-darwin.zip`
 				fail(fmt.Sprintf("Service start failed: %v", sErr))
 				return false
 			}
-
-		default:
-			fail(fmt.Sprintf("Unsupported OS: %q", osStr))
-			return false
 		}
 
-		newVer, _ := runSSHCmd(sshClient, "ollama --version 2>/dev/null || echo unknown")
-		emit("status", fmt.Sprintf("Ollama version after update: %s", newVer))
+		// ── Verify ────────────────────────────────────────────────────────────
+		var newVer string
+		if osStr == "Darwin" {
+			newVer, _ = runSSHCmd(sshClient,
+				"defaults read /Applications/Ollama.app/Contents/Info.plist CFBundleShortVersionString 2>/dev/null || echo unknown")
+		} else {
+			newVer, _ = runSSHCmd(sshClient, "ollama --version 2>/dev/null || echo unknown")
+		}
+		if newVer != "" && newVer != currentVer {
+			emit("status", fmt.Sprintf("Version: %s → %s ✔", currentVer, newVer))
+		} else {
+			emit("status", fmt.Sprintf("Version after update: %s", newVer))
+		}
 		emit("done", "success")
-		LogActivity("system", fmt.Sprintf("Ollama updated on %s (%s)", targetSrv.Name, host))
+		LogActivity("system", fmt.Sprintf("Ollama updated on %s (%s): %s → %s", targetSrv.Name, host, currentVer, newVer))
 		return false
 	})
 }

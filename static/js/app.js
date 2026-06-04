@@ -7546,6 +7546,14 @@ async function startOllamaUpdate() {
             appendLine('▶ ' + data, 'text-[#88c0d0]');
             if (status) status.textContent = data.length > 40 ? data.slice(0, 40) + '…' : data;
             break;
+          case 'check': {
+            let c; try { c = JSON.parse(data); } catch { break; }
+            const icon   = c.passed ? '✔' : (c.fatal ? '✖' : '⚠');
+            const cls    = c.passed ? 'text-[#a3be8c]' : c.fatal ? 'text-[#bf616a] font-bold' : 'text-[#ebcb8b]';
+            const suffix = c.detail ? ` — ${c.detail}` : '';
+            appendLine(`  ${icon} ${c.name}${suffix}`, cls);
+            break;
+          }
           case 'output':
             if (data) appendLine('  ' + data, 'text-[#d8dee9]/70');
             break;
