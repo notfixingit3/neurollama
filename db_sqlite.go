@@ -1,14 +1,19 @@
 package main
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	_ "github.com/glebarez/go-sqlite"
 )
@@ -383,6 +388,14 @@ func migrate() error {
 			recall_pct REAL NOT NULL DEFAULT 0,
 			hallucination_pct REAL NOT NULL DEFAULT 0,
 			extra_json TEXT NOT NULL DEFAULT '{}',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);`,
+		`CREATE TABLE IF NOT EXISTS ssh_keys (
+			id TEXT PRIMARY KEY,
+			label TEXT NOT NULL,
+			username TEXT NOT NULL,
+			fingerprint TEXT NOT NULL,
+			private_key BLOB NOT NULL,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);`,
 		// FTS5 virtual table for full-text chat search (external content backed by messages)
@@ -1792,4 +1805,165 @@ func GetHallucinationRuns() ([]HallucinationRun, error) {
 func DeleteHallucinationRun(id int64) error {
 	_, err := DB.Exec(`DELETE FROM hallucination_runs WHERE id = ?`, id)
 	return err
+}
+
+// ── SSH Key Store ─────────────────────────────────────────────────────────────
+
+type SSHKeyMeta struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Username    string `json:"username"`
+	Fingerprint string `json:"fingerprint"`
+	CreatedAt   string `json:"created_at"`
+}
+
+var (
+	sshEncKeyOnce sync.Once
+	sshEncKeyVal  []byte
+)
+
+// loadSSHEncKey loads (or auto-generates) the 32-byte AES-256 encryption key
+// stored at data/ssh_keystore.key. The key never leaves the server.
+func loadSSHEncKey() ([]byte, error) {
+	var initErr error
+	sshEncKeyOnce.Do(func() {
+		p := filepath.Join(dataDir, "ssh_keystore.key")
+		if raw, err := os.ReadFile(p); err == nil && len(raw) == 32 {
+			sshEncKeyVal = raw
+			return
+		}
+		key := make([]byte, 32)
+		if _, err := rand.Read(key); err != nil {
+			initErr = fmt.Errorf("generate SSH keystore key: %w", err)
+			return
+		}
+		if err := os.WriteFile(p, key, 0600); err != nil {
+			initErr = fmt.Errorf("write SSH keystore key: %w", err)
+			return
+		}
+		sshEncKeyVal = key
+	})
+	if initErr != nil {
+		return nil, initErr
+	}
+	if sshEncKeyVal == nil {
+		return nil, fmt.Errorf("SSH keystore key not initialised")
+	}
+	return sshEncKeyVal, nil
+}
+
+func sshEncrypt(plaintext, key []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return nil, err
+	}
+	return gcm.Seal(nonce, nonce, plaintext, nil), nil
+}
+
+func sshDecrypt(ciphertext, key []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	if len(ciphertext) < gcm.NonceSize() {
+		return nil, fmt.Errorf("ciphertext too short")
+	}
+	nonce, ct := ciphertext[:gcm.NonceSize()], ciphertext[gcm.NonceSize():]
+	return gcm.Open(nil, nonce, ct, nil)
+}
+
+// AddSSHKey encrypts and stores a PEM private key. fingerprint is computed
+// by the caller (needs the crypto/ssh package — kept out of this layer).
+func AddSSHKey(label, username, fingerprint string, pemBytes []byte) (SSHKeyMeta, error) {
+	encKey, err := loadSSHEncKey()
+	if err != nil {
+		return SSHKeyMeta{}, err
+	}
+	encrypted, err := sshEncrypt(pemBytes, encKey)
+	if err != nil {
+		return SSHKeyMeta{}, fmt.Errorf("encrypt SSH key: %w", err)
+	}
+	id := generateID()
+	if _, err := DB.Exec(
+		`INSERT INTO ssh_keys (id, label, username, fingerprint, private_key) VALUES (?,?,?,?,?)`,
+		id, label, username, fingerprint, encrypted,
+	); err != nil {
+		return SSHKeyMeta{}, err
+	}
+	return SSHKeyMeta{ID: id, Label: label, Username: username, Fingerprint: fingerprint}, nil
+}
+
+func ListSSHKeys() ([]SSHKeyMeta, error) {
+	rows, err := DB.Query(
+		`SELECT id, label, username, fingerprint, created_at FROM ssh_keys ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var keys []SSHKeyMeta
+	for rows.Next() {
+		var k SSHKeyMeta
+		if err := rows.Scan(&k.ID, &k.Label, &k.Username, &k.Fingerprint, &k.CreatedAt); err != nil {
+			return nil, err
+		}
+		keys = append(keys, k)
+	}
+	return keys, nil
+}
+
+func DeleteSSHKey(id string) error {
+	_, err := DB.Exec(`DELETE FROM ssh_keys WHERE id = ?`, id)
+	return err
+}
+
+// GetSSHKeyPEMs returns all decrypted PEM bytes (all keys, for fallback auth).
+func GetSSHKeyPEMs() ([][]byte, error) {
+	encKey, err := loadSSHEncKey()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := DB.Query(`SELECT private_key FROM ssh_keys ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var pems [][]byte
+	for rows.Next() {
+		var blob []byte
+		if err := rows.Scan(&blob); err != nil {
+			continue
+		}
+		plain, err := sshDecrypt(blob, encKey)
+		if err != nil {
+			continue
+		}
+		pems = append(pems, plain)
+	}
+	return pems, nil
+}
+
+// GetSSHKeyPEMByID returns the decrypted PEM for a single stored key.
+func GetSSHKeyPEMByID(id string) ([]byte, error) {
+	encKey, err := loadSSHEncKey()
+	if err != nil {
+		return nil, err
+	}
+	var blob []byte
+	err = DB.QueryRow(`SELECT private_key FROM ssh_keys WHERE id = ?`, id).Scan(&blob)
+	if err != nil {
+		return nil, err
+	}
+	return sshDecrypt(blob, encKey)
 }

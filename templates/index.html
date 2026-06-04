@@ -2343,6 +2343,15 @@
                   </select>
                 </div>
 
+                <!-- Stored key selector -->
+                <div class="form-control">
+                  <label class="label py-1"><span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">SSH Key <span class="normal-case text-[#4c566a]">(optional — overrides agent/files)</span></span></label>
+                  <select id="ollama-update-key-id" onchange="onOllamaUpdateKeyChange()"
+                          class="select select-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                    <option value="">— use agent / ~/.ssh/ keys —</option>
+                  </select>
+                </div>
+
                 <!-- SSH User + Port row -->
                 <div class="flex gap-2">
                   <div class="form-control flex-1">
@@ -2400,6 +2409,28 @@
                      class="hidden max-h-48 bg-[#161820] border border-[#4c566a]/40 rounded-lg p-2 text-[10px] font-mono text-[#e5e9f0] space-y-0.5 overflow-y-auto scrollbar-thin">
                 </div>
               </div>
+            </div>
+          </div>
+
+          <!-- SSH Key Store — full-width row -->
+          <div class="lg:col-span-12 flex flex-col gap-6">
+            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col">
+              <div class="mb-3 pb-2 border-b border-[#4c566a]/40 flex items-center justify-between">
+                <div>
+                  <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
+                    <i class="fa-solid fa-key mr-2"></i>SSH Key Store
+                  </h2>
+                  <p class="text-[10px] text-[#4c566a] mt-1">
+                    Stored keys are AES-256-GCM encrypted at rest. Key material never leaves the server — only the label, username, and fingerprint are returned to the UI.
+                    Use this as a fallback when no SSH agent or <code class="text-[#a3be8c]">~/.ssh/</code> keys are available (e.g. Docker deployments).
+                  </p>
+                </div>
+                <button onclick="openAddSSHKeyModal()"
+                        class="btn btn-xs btn-info font-tech uppercase tracking-wide shrink-0 ml-4">
+                  <i class="fa-solid fa-plus mr-1"></i>Add Key
+                </button>
+              </div>
+              <div id="ssh-keys-list" class="font-mono text-xs text-[#4c566a] italic">Loading…</div>
             </div>
           </div>
 
@@ -2522,6 +2553,49 @@
   </div>
 
   <!-- Modals -->
+
+  <!-- Add SSH Key Modal -->
+  <dialog id="add-ssh-key-modal" class="modal">
+    <div class="modal-box bg-[#2e3440] border border-[#4c566a] shadow-2xl p-6 max-w-md rounded-xl">
+      <h3 class="font-tech font-bold text-sm text-[#88c0d0] uppercase tracking-wider mb-4 border-b border-[#4c566a]/40 pb-2">
+        <i class="fa-solid fa-key mr-2"></i>Add SSH Key
+      </h3>
+      <form id="add-ssh-key-form" onsubmit="submitAddSSHKey(event)" class="space-y-3">
+        <div class="form-control">
+          <label class="label py-1"><span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">Label</span></label>
+          <input id="ssh-key-label" type="text" placeholder="e.g. BlackDragon" required
+                 class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+        </div>
+        <div class="form-control">
+          <label class="label py-1"><span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">Default SSH Username</span></label>
+          <input id="ssh-key-username" type="text" placeholder="e.g. house" required
+                 class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+        </div>
+        <div class="form-control">
+          <label class="label py-1">
+            <span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">Private Key</span>
+            <label class="btn btn-xs btn-ghost font-mono text-[#81a1c1] text-[10px] cursor-pointer">
+              <i class="fa-solid fa-upload mr-1"></i>Upload file
+              <input id="ssh-key-file" type="file" accept=".pem,.key,id_*" class="hidden" onchange="onSSHKeyFileSelect(this)" />
+            </label>
+          </label>
+          <textarea id="ssh-key-pem" rows="6" required
+                    placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;...&#10;-----END OPENSSH PRIVATE KEY-----"
+                    class="textarea textarea-xs bg-[#161820] border-[#4c566a] font-mono text-[10px] focus:border-[#88c0d0] focus:outline-none w-full resize-none leading-relaxed"></textarea>
+          <p class="text-[9px] text-[#4c566a] mt-1">Only unencrypted (no passphrase) keys are supported. The key is AES-256 encrypted before storage and never sent back to the browser.</p>
+        </div>
+        <div id="ssh-key-error" class="hidden text-[#bf616a] text-[10px] font-mono"></div>
+        <div class="flex justify-end gap-2 pt-1">
+          <button type="button" onclick="document.getElementById('add-ssh-key-modal').close()"
+                  class="btn btn-xs font-mono border-[#4c566a] text-[#4c566a] hover:text-[#d8dee9]">Cancel</button>
+          <button type="submit" id="ssh-key-submit-btn" class="btn btn-xs btn-info font-tech uppercase tracking-wide">
+            <i class="fa-solid fa-key mr-1"></i>Store Key
+          </button>
+        </div>
+      </form>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  </dialog>
 
   <!-- Add Server Modal -->
   <dialog id="add-server-modal" class="modal">

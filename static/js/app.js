@@ -1050,6 +1050,7 @@ function switchSystemSubtab(subtab) {
   } else if (subtab === 'settings') {
     fetchSchedulerSettings();
     fetchSchedulerLogs();
+    fetchSSHKeys();
   } else if (subtab === 'diagnostics') {
     runDiagnostics();
     renderStreamFailureLog();
@@ -7532,7 +7533,8 @@ async function startOllamaUpdate() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ server_id: nodeId, ssh_user: sshUser, ssh_password: sshPass,
-                             sudo_password: sudoPass, use_ssh_key: useKey, ssh_port: sshPort })
+                             sudo_password: sudoPass, use_ssh_key: useKey, ssh_port: sshPort,
+                             ssh_key_id: document.getElementById('ollama-update-key-id')?.value || '' })
     });
 
     if (!resp.ok) {
@@ -7596,6 +7598,144 @@ async function startOllamaUpdate() {
     if (status) status.textContent = 'Error';
   } finally {
     if (btn) btn.disabled = false;
+  }
+}
+
+// --- SSH KEY STORE ---
+
+let sshKeys = []; // cached list (metadata only)
+
+async function fetchSSHKeys() {
+  const list = document.getElementById('ssh-keys-list');
+  try {
+    const res = await fetch('/api/ssh-keys');
+    sshKeys = await res.json();
+    renderSSHKeys();
+    populateOllamaUpdateKeySelect();
+  } catch (e) {
+    if (list) list.innerHTML = `<span class="text-[#bf616a]">Failed to load SSH keys: ${escapeHTML(e.message)}</span>`;
+  }
+}
+
+function renderSSHKeys() {
+  const list = document.getElementById('ssh-keys-list');
+  if (!list) return;
+  if (!sshKeys || sshKeys.length === 0) {
+    list.innerHTML = '<span class="text-[#4c566a] italic">No stored keys. Add one to use as a fallback in Docker or agent-less environments.</span>';
+    return;
+  }
+  list.innerHTML = `
+    <table class="table table-xs w-full">
+      <thead>
+        <tr class="text-[#4c566a] text-[9px] uppercase tracking-wider border-b border-[#4c566a]/30">
+          <th class="font-mono font-normal pb-1">Label</th>
+          <th class="font-mono font-normal pb-1">Username</th>
+          <th class="font-mono font-normal pb-1 hidden sm:table-cell">Fingerprint</th>
+          <th class="font-mono font-normal pb-1 hidden md:table-cell">Added</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-[#4c566a]/20">
+        ${sshKeys.map(k => `
+          <tr>
+            <td class="text-[#d8dee9] py-1.5">${escapeHTML(k.label)}</td>
+            <td class="text-[#81a1c1] py-1.5">${escapeHTML(k.username)}</td>
+            <td class="text-[#4c566a] py-1.5 hidden sm:table-cell text-[9px]">${escapeHTML(k.fingerprint)}</td>
+            <td class="text-[#4c566a] py-1.5 hidden md:table-cell text-[9px]">${escapeHTML((k.created_at||'').slice(0,10))}</td>
+            <td class="py-1.5 text-right">
+              <button onclick="deleteSSHKey('${escapeHTML(k.id)}')"
+                      class="btn btn-xs btn-ghost text-[#bf616a] hover:text-[#bf616a]/70 font-mono text-[9px]">
+                <i class="fa-solid fa-trash-can"></i>
+              </button>
+            </td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+function populateOllamaUpdateKeySelect() {
+  const sel = document.getElementById('ollama-update-key-id');
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">— use agent / ~/.ssh/ keys —</option>';
+  (sshKeys || []).forEach(k => {
+    const opt = document.createElement('option');
+    opt.value = k.id;
+    opt.textContent = `${k.label} (${k.username})`;
+    sel.appendChild(opt);
+  });
+  if (prev) sel.value = prev;
+}
+
+function onOllamaUpdateKeyChange() {
+  const sel = document.getElementById('ollama-update-key-id');
+  const userInput = document.getElementById('ollama-update-ssh-user');
+  if (!sel || !userInput) return;
+  const key = (sshKeys || []).find(k => k.id === sel.value);
+  if (key && !userInput.value) userInput.value = key.username;
+}
+
+function openAddSSHKeyModal() {
+  document.getElementById('ssh-key-label').value = '';
+  document.getElementById('ssh-key-username').value = '';
+  document.getElementById('ssh-key-pem').value = '';
+  document.getElementById('ssh-key-error').classList.add('hidden');
+  document.getElementById('ssh-key-submit-btn').disabled = false;
+  document.getElementById('add-ssh-key-modal').showModal();
+}
+
+function onSSHKeyFileSelect(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => { document.getElementById('ssh-key-pem').value = e.target.result; };
+  reader.readAsText(file);
+}
+
+async function submitAddSSHKey(e) {
+  e.preventDefault();
+  const label   = document.getElementById('ssh-key-label').value.trim();
+  const username = document.getElementById('ssh-key-username').value.trim();
+  const pem     = document.getElementById('ssh-key-pem').value.trim();
+  const errEl   = document.getElementById('ssh-key-error');
+  const btn     = document.getElementById('ssh-key-submit-btn');
+
+  errEl.classList.add('hidden');
+  btn.disabled = true;
+
+  try {
+    const res = await fetch('/api/ssh-keys', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label, username, pem_content: pem })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      errEl.textContent = data.error || 'Failed to store key';
+      errEl.classList.remove('hidden');
+      return;
+    }
+    document.getElementById('add-ssh-key-modal').close();
+    showToast(`SSH key "${label}" stored`, 'success');
+    await fetchSSHKeys();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function deleteSSHKey(id) {
+  const key = (sshKeys || []).find(k => k.id === id);
+  if (!confirm(`Delete SSH key "${key?.label || id}"? This cannot be undone.`)) return;
+  try {
+    const res = await fetch(`/api/ssh-keys/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error((await res.json()).error);
+    showToast('SSH key deleted', 'success');
+    await fetchSSHKeys();
+  } catch (e) {
+    showToast(`Delete failed: ${e.message}`, 'error');
   }
 }
 

@@ -476,6 +476,11 @@ func main() {
 		// System — Ollama remote update
 		api.POST("/system/ollama-update", ollamaUpdateSSEHandler)
 
+		// System — SSH key store
+		api.GET("/ssh-keys", listSSHKeysHandler)
+		api.POST("/ssh-keys", addSSHKeyHandler)
+		api.DELETE("/ssh-keys/:id", deleteSSHKeyHandler)
+
 		// System — About, bulk-delete, backup/restore, activity, presets
 		api.GET("/about", aboutHandler)
 		api.GET("/ollama-latest", ollamaLatestHandler)
@@ -6974,6 +6979,62 @@ func runInstructionFollowBenchmarkSSEHandler(c *gin.Context) {
 	})
 }
 
+// ── SSH Key Store handlers ────────────────────────────────────────────────────
+
+func listSSHKeysHandler(c *gin.Context) {
+	keys, err := ListSSHKeys()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if keys == nil {
+		keys = []SSHKeyMeta{}
+	}
+	c.JSON(http.StatusOK, keys)
+}
+
+func addSSHKeyHandler(c *gin.Context) {
+	var body struct {
+		Label      string `json:"label"`
+		Username   string `json:"username"`
+		PEMContent string `json:"pem_content"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+	if body.Label == "" || body.Username == "" || body.PEMContent == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "label, username, and pem_content are required"})
+		return
+	}
+	pemBytes := []byte(body.PEMContent)
+	// Parse to validate and compute fingerprint — requires gossh
+	signer, err := gossh.ParsePrivateKey(pemBytes)
+	if err != nil {
+		// Try empty-passphrase variant (some keys have one)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid or passphrase-protected private key (only unencrypted PEM keys are supported for storage)"})
+		return
+	}
+	fingerprint := gossh.FingerprintSHA256(signer.PublicKey())
+	meta, err := AddSSHKey(body.Label, body.Username, fingerprint, pemBytes)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	LogActivity("system", fmt.Sprintf("SSH key added: %s (%s)", body.Label, body.Username))
+	c.JSON(http.StatusOK, meta)
+}
+
+func deleteSSHKeyHandler(c *gin.Context) {
+	id := c.Param("id")
+	if err := DeleteSSHKey(id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	LogActivity("system", fmt.Sprintf("SSH key deleted: %s", id))
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
 // ── Ollama Remote Update via SSH ──────────────────────────────────────────────
 
 type OllamaUpdateRequest struct {
@@ -6983,6 +7044,7 @@ type OllamaUpdateRequest struct {
 	SudoPass    string `json:"sudo_password"`
 	UseSSHKey   bool   `json:"use_ssh_key"`
 	SSHPort     int    `json:"ssh_port"`
+	SSHKeyID    string `json:"ssh_key_id"` // stored DB key; takes priority over agent/files
 }
 
 // shellEscapeSingle wraps s in single quotes, escaping any embedded single quotes.
@@ -7087,30 +7149,45 @@ func ollamaUpdateSSEHandler(c *gin.Context) {
 
 	// Build SSH auth methods
 	var authMethods []gossh.AuthMethod
+
+	// Priority 1: specific stored DB key selected in the UI
+	if req.SSHKeyID != "" {
+		if pem, keyErr := GetSSHKeyPEMByID(req.SSHKeyID); keyErr == nil {
+			if signer, parseErr := gossh.ParsePrivateKey(pem); parseErr == nil {
+				authMethods = append(authMethods, gossh.PublicKeys(signer))
+			}
+		}
+	}
+
 	if req.UseSSHKey || req.SSHPassword == "" {
-		// 1. SSH agent — works even when keys are passphrase-protected, since the
-		//    agent already has them unlocked (same reason terminal SSH works).
+		// Priority 2: SSH agent (handles passphrase-protected keys already unlocked)
 		if agentSock := os.Getenv("SSH_AUTH_SOCK"); agentSock != "" {
 			if conn, dialErr := net.Dial("unix", agentSock); dialErr == nil {
 				authMethods = append(authMethods, gossh.PublicKeysCallback(sshagent.NewClient(conn).Signers))
 			}
 		}
-		// 2. Key files — works for unencrypted keys; silently skips passphrase-protected ones.
+		// Priority 3: unencrypted key files in ~/.ssh/
 		homeDir, _ := os.UserHomeDir()
 		for _, kf := range []string{
 			filepath.Join(homeDir, ".ssh", "id_ed25519"),
 			filepath.Join(homeDir, ".ssh", "id_ecdsa"),
 			filepath.Join(homeDir, ".ssh", "id_rsa"),
 		} {
-			raw, readErr := os.ReadFile(kf)
-			if readErr != nil {
-				continue
+			if raw, readErr := os.ReadFile(kf); readErr == nil {
+				if signer, parseErr := gossh.ParsePrivateKey(raw); parseErr == nil {
+					authMethods = append(authMethods, gossh.PublicKeys(signer))
+				}
 			}
-			signer, parseErr := gossh.ParsePrivateKey(raw)
-			if parseErr != nil {
-				continue // passphrase-protected — agent handles it above
+		}
+		// Priority 4: all stored DB keys (Docker / no-agent fallback)
+		if req.SSHKeyID == "" {
+			if pems, dbErr := GetSSHKeyPEMs(); dbErr == nil {
+				for _, pem := range pems {
+					if signer, parseErr := gossh.ParsePrivateKey(pem); parseErr == nil {
+						authMethods = append(authMethods, gossh.PublicKeys(signer))
+					}
+				}
 			}
-			authMethods = append(authMethods, gossh.PublicKeys(signer))
 		}
 	}
 	if req.SSHPassword != "" {
