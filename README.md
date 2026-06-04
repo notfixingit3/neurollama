@@ -306,6 +306,44 @@ If you find NEUROLLAMA helpful, feel free to open issues, submit pull requests, 
 
 ---
 
+## 🙏 Credits
+
+NEUROLLAMA is built on the shoulders of the following open-source projects. Thank you to every maintainer and contributor.
+
+### Go libraries
+
+| Library | Purpose | License |
+|---|---|---|
+| [gin-gonic/gin](https://github.com/gin-gonic/gin) | HTTP web framework | MIT |
+| [glebarez/go-sqlite](https://github.com/glebarez/go-sqlite) | CGO-free SQLite driver | MIT |
+| [modernc.org/sqlite](https://gitlab.com/cznic/sqlite) | Pure-Go SQLite engine | BSD-3-Clause |
+| [ledongthuc/pdf](https://github.com/ledongthuc/pdf) | Server-side PDF text extraction | MIT |
+| [dustin/go-humanize](https://github.com/dustin/go-humanize) | Human-readable sizes & numbers | MIT |
+| [google/uuid](https://github.com/google/uuid) | UUID generation | BSD-3-Clause |
+| [bytedance/sonic](https://github.com/bytedance/sonic) | High-performance JSON codec (Gin dep) | Apache 2.0 |
+| [goccy/go-json](https://github.com/goccy/go-json) | Fast JSON encoder/decoder (Gin dep) | MIT |
+| [go-playground/validator](https://github.com/go-playground/validator) | Request validation (Gin dep) | MIT |
+| [ugorji/go/codec](https://github.com/ugorji/go) | Codec library (Gin dep) | MIT |
+
+### Frontend & CSS
+
+| Library | Purpose | License |
+|---|---|---|
+| [Tailwind CSS v4](https://tailwindcss.com) | Utility-first CSS framework | MIT |
+| [DaisyUI v5](https://daisyui.com) | Tailwind component library (Nord theme) | MIT |
+| [Font Awesome 6](https://fontawesome.com) | Icons (Free tier) | Icons: CC BY 4.0 · Fonts: SIL OFL 1.1 · Code: MIT |
+| [marked.js](https://github.com/markedjs/marked) | Client-side Markdown rendering | MIT |
+| [PDF.js](https://github.com/mozilla/pdf.js) | Client-side PDF parsing (vendored) | Apache 2.0 |
+
+### Fonts
+
+| Font | Usage | License |
+|---|---|---|
+| [JetBrains Mono](https://www.jetbrains.com/lp/mono/) | Monospace UI font | SIL Open Font License 1.1 |
+| [Outfit](https://fonts.google.com/specimen/Outfit) | Display / heading font | SIL Open Font License 1.1 |
+
+---
+
 ## 📄 License
 
 This project is licensed under the [MIT License](LICENSE).
