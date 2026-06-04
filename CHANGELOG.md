@@ -4,7 +4,7 @@ All notable changes to NEUROLLAMA are documented here.
 
 ---
 
-## [v0.2.23] — 2026-06-04
+## [v0.2.23] — 2026-06-04 (stable)
 
 ### Added
 - **Ollama Remote Update** (System → Settings) — update Ollama on any registered node via SSH without leaving the UI.
@@ -32,6 +32,10 @@ All notable changes to NEUROLLAMA are documented here.
 ### Fixed
 - Model selector in hallucination benchmark showed only the parameter value — trigger element made `display:flex` so name and badges are always visible
 - `ollama-darwin.tgz` is x86_64-only; macOS arm64 nodes (Apple Silicon) now correctly receive `Ollama-darwin.zip` (universal .app bundle)
+- Linux remote update 404 — Ollama dropped plain binary assets; now uses official install script with service file backup/restore
+- GitHub API tag parse failed on pretty-printed JSON (`"tag_name": "v..."` with space) — switched to `sed` pattern
+- SSH key auth failed when keys are passphrase-protected — now uses SSH agent (`SSH_AUTH_SOCK`) first, with DB-stored keys as Docker/agent-less fallback
+- `gosec` audit: 0 issues (real fixes + 6 justified `#nosec` annotations)
 
 ---
 
