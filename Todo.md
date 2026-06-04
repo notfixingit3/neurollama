@@ -289,9 +289,9 @@
 - [x] **Inline notes on leaderboard rows** — Click-to-edit note area on all rows (summary + sub-rows). Enter/blur saves, Escape cancels. Always shows faint `+ note` hint when empty.
 
 ### Higher effort
-- [ ] **Parameter size range filter on benchmark leaderboard** — Min/max dual slider (or two number inputs) above the leaderboard to filter results by model parameter count. E.g. show only models ≥ 30B, or only models between 8B and 120B. Parse param size from the model name/details (e.g. `7.6B`, `32B`, `671B`). Works alongside the existing type/benchmark-type filters. Useful for fair comparisons within a size class.
+- [x] **Parameter size range filter on benchmark leaderboard** — Min/max dual slider (or two number inputs) above the leaderboard to filter results by model parameter count. E.g. show only models ≥ 30B, or only models between 8B and 120B. Parse param size from the model name/details (e.g. `7.6B`, `32B`, `671B`). Works alongside the existing type/benchmark-type filters. Useful for fair comparisons within a size class.
 
-- [ ] **Bar chart view** — Add a "Chart" toggle above the leaderboard that replaces the table with an SVG or canvas bar chart comparing the primary metric (TPS / accuracy / cps) across all visible model groups. Same filter state as the table. Toggle back with "Table".
+- [x] **Bar chart view** — Add a "Chart" toggle above the leaderboard that replaces the table with an SVG or canvas bar chart comparing the primary metric (TPS / accuracy / cps) across all visible model groups. Same filter state as the table. Toggle back with "Table".
 
 - [x] **Batch run mode** — "Run All" button on standard benchmarks queues all compatible models for the current type/size filter and runs them sequentially. Progress indicator shows `N/total · modelname`. Stop aborts the queue; errors skip to the next model.
 
@@ -304,25 +304,18 @@ Beyond raw speed benchmarks, NEUROLLAMA should be able to verify *what a model c
 ### Inventory badge expansion
 The existing badges (VIS, EMB, TOOLS, THINK) are sourced from Ollama's `/api/show` `capabilities` field. Some capabilities require active probing rather than metadata inspection:
 
-- [ ] **JSON badge** — Test whether the model reliably outputs valid JSON when instructed. Send a structured output prompt with `format: "json"` in the API request, attempt to parse the response. Badge shown on inventory row if pass rate ≥ threshold. Distinct from TOOLS — many models claim JSON mode without it working reliably.
+- [x] **JSON badge** — Test whether the model reliably outputs valid JSON when instructed. Send a structured output prompt with `format: "json"` in the API request, attempt to parse the response. Badge shown on inventory row if pass rate ≥ threshold. Distinct from TOOLS — many models claim JSON mode without it working reliably.
 
-- [ ] **CHAT badge rework** — The current CHAT badge is negative (flags greeting-injection models). Consider splitting into: a red **CHAT⚠** for greeting-injected models (existing) and a neutral **CONV** badge for models that pass a basic multi-turn coherence probe.
+- [x] **CHAT badge rework** — The current CHAT badge is negative (flags greeting-injection models). Reworked as red **CHAT⚠** badge.
 
 ### Tool calling benchmark (new bench type)
-- [ ] **Tool call accuracy test** — New benchmark tab: "Tool Use". Sends the model a set of prompts that require selecting and calling a predefined tool (e.g. `get_weather(location)`, `calculate(expression)`, `search(query)`). Scores on:
-  - **Tool selected correctly** — did the model call the right function?
-  - **Parameters extracted correctly** — are argument names and types right?
-  - **No hallucinated tools** — did the model avoid calling tools that don't exist?
-  - Score expressed as `pass/total` (e.g. `7/10`). Only runs on models with the TOOLS capability badge. Results stored in leaderboard alongside other bench types.
-  - Graded: `≥90% = S`, `75–89% = A`, `55–74% = B`, `35–54% = C`, `<35% = F`.
+- [x] **Tool call accuracy test** — Shipped as "Tool Use" bench type. 8 test cases, 3 tools, scores correct/total, graded S–F.
 
 ### Structured output / JSON benchmark (new bench type)
-- [ ] **JSON reliability test** — New benchmark: "Structured Output". Sends 5–10 prompts requiring JSON responses of varying complexity (flat object, nested, array of objects, schema with required fields). Parses each response; scores on valid JSON rate and schema conformance. Useful for picking a model for agentic pipelines where malformed output breaks the chain.
+- [x] **JSON reliability test** — Shipped as "JSON Output" bench type. 6 prompts, parses response, checks required fields, graded S–F.
 
 ### Conversational / instruction-following benchmark (new bench type)
-- [ ] **Instruction following test** — New benchmark: "Instruction Follow". A suite of prompts with explicit constraints ("respond in exactly 3 bullet points", "reply only in French", "output only a number"). Scores on constraint compliance. Complements the reasoning bench — measures whether a model follows *how* to respond, not just *what* to respond.
-  - Judge model evaluates compliance (pass/fail per constraint).
-  - Overall score as %, graded same scale as reasoning.
+- [x] **Instruction following test** — Shipped as "Instruction Follow" bench type. 6 cases with judge model evaluation, graded S–F.
 
 ### Implementation notes
 - All new bench types follow the same SSE streaming pattern as existing types.

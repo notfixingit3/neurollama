@@ -7252,7 +7252,7 @@ func ollamaUpdateSSEHandler(c *gin.Context) {
 		// ── Update ────────────────────────────────────────────────────────────
 		emit("status", "Fetching latest Ollama version from GitHub…")
 		ver, _ := runSSHCmd(sshClient,
-			`curl -fsSL https://api.github.com/repos/ollama/ollama/releases/latest 2>/dev/null | grep -o '"tag_name":"[^"]*"' | cut -d'"' -f4`)
+			`curl -fsSL https://api.github.com/repos/ollama/ollama/releases/latest 2>/dev/null | sed -n 's/.*"tag_name" *: *"\([^"]*\)".*/\1/p' | head -1`)
 		if ver == "" {
 			fail("Could not fetch latest version tag — GitHub API returned empty response")
 			return false
