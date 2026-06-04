@@ -96,11 +96,26 @@ jobs:
           RELEASE_TYPE: ${{ needs.check-stable.outputs.prerelease == 'true' && 'pre-release' || 'stable' }}
         run: go build -ldflags="-s -w -X main.releaseType=${RELEASE_TYPE}" -o ${{ matrix.binary }} .
 
-      - name: Upload to release
+      # Pre-release: create (or update) a pre-release via the action.
+      - name: Upload to pre-release
+        if: needs.check-stable.outputs.prerelease == 'true'
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ matrix.binary }}
           generate_release_notes: true
-          prerelease: ${{ needs.check-stable.outputs.prerelease == 'true' }}
+          prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Stable: update the existing pre-release in-place (preserves URL, notes,
+      # and history) rather than deleting and recreating it.
+      - name: Promote to stable release
+        if: needs.check-stable.outputs.prerelease == 'false'
+        run: |
+          # Edit existing release (pre-release → stable). If none exists yet, create it.
+          gh release edit "${{ github.ref_name }}" --prerelease=false --draft=false --latest || \
+          gh release create "${{ github.ref_name }}" --generate-notes --latest
+          # Replace binary asset (--clobber overwrites if already present)
+          gh release upload "${{ github.ref_name }}" "${{ matrix.binary }}" --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
