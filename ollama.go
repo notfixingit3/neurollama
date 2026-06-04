@@ -356,10 +356,27 @@ type ChatMessage struct {
 }
 
 type ChatRequest struct {
-	Model    string                 `json:"model"`
-	Messages []ChatMessage          `json:"messages"`
-	Stream   bool                   `json:"stream"`
-	Options  map[string]interface{} `json:"options,omitempty"`
+	Model    string                   `json:"model"`
+	Messages []ChatMessage            `json:"messages"`
+	Stream   bool                     `json:"stream"`
+	Format   string                   `json:"format,omitempty"`
+	Tools    []map[string]interface{} `json:"tools,omitempty"`
+	Options  map[string]interface{}   `json:"options,omitempty"`
+}
+
+type ToolCallFunction struct {
+	Name      string                 `json:"name"`
+	Arguments map[string]interface{} `json:"arguments"`
+}
+type ToolCall struct {
+	Function ToolCallFunction `json:"function"`
+}
+type ChatNonStreamResponse struct {
+	Message struct {
+		Role      string     `json:"role"`
+		Content   string     `json:"content"`
+		ToolCalls []ToolCall `json:"tool_calls"`
+	} `json:"message"`
 }
 
 type GenerateRequest struct {
@@ -597,4 +614,55 @@ func (c *OllamaClient) GetEmbeddings(model string, inputs []string) ([][]float64
 	}
 
 	return embeddings, nil
+}
+
+// GenerateStream streams a generate request and calls onToken for each token received.
+func (c *OllamaClient) GenerateStream(ctx context.Context, genReq GenerateRequest, onToken func(string)) error {
+	stream, err := c.StreamGenerate(ctx, genReq)
+	if err != nil {
+		return err
+	}
+	defer stream.Close()
+	scanner := newStreamScanner(stream)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var chunk struct {
+			Response string `json:"response"`
+			Done     bool   `json:"done"`
+		}
+		if err := json.Unmarshal(line, &chunk); err == nil && chunk.Response != "" {
+			onToken(chunk.Response)
+		}
+	}
+	return scanner.Err()
+}
+
+// ChatWithTools sends a single non-streaming chat request with optional tool definitions.
+func (c *OllamaClient) ChatWithTools(ctx context.Context, req ChatRequest) (*ChatNonStreamResponse, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		fmt.Sprintf("%s/api/chat", c.BaseURL), bytes.NewBuffer(body))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := c.HTTPClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("chat request failed: %s", resp.Status)
+	}
+	var result ChatNonStreamResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }

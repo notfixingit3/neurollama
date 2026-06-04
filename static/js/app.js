@@ -4,6 +4,7 @@ let models = [];
 let modelCtxLengths   = {}; // model_name → trained context length (int)
 let modelCapabilities = {}; // model_name → string[] from /api/show e.g. ["completion","tools","vision","thinking"]
 let modelBenchSummary = {}; // model_name → { std_grade, std_tps, code_grade, code_quality, hallu_recall, hallu_ctx_k }
+let modelJsonCaps     = {}; // model_name → 'pass'|'fail'|'pending'|undefined (localStorage-cached JSON probe results)
 let selectedModels = new Set();
 let inspectedModel = null;
 let openAccordionModel = null;
@@ -624,6 +625,11 @@ async function init() {
   await loadPreferences();
   // Apply theme from DB pref (may override the localStorage early-apply)
   initTheme();
+  // Restore cached JSON capability probe results
+  try {
+    const raw = localStorage.getItem('neurollama-json-caps');
+    if (raw) modelJsonCaps = JSON.parse(raw);
+  } catch (_) {}
 
   initTooltip();
   initAccordionRow();
@@ -2612,6 +2618,122 @@ function fmtCtx(n) {
   return n + ' ctx';
 }
 
+// Parse a parameter-size string (e.g. "7.6B", "671M", "1.5T") to a float in billions.
+// Returns null if unparseable.
+function parseParamB(str) {
+  if (!str) return null;
+  const m = String(str).trim().match(/^([\d.]+)\s*([KkMmBbTt])$/);
+  if (!m) return null;
+  const n = parseFloat(m[1]);
+  const u = m[2].toUpperCase();
+  if (u === 'K') return n / 1_000_000;
+  if (u === 'M') return n / 1000;
+  if (u === 'B') return n;
+  if (u === 'T') return n * 1000;
+  return null;
+}
+
+function setLbParamRange(min, max) {
+  lbParamMin = parseFloat(min) || 0;
+  lbParamMax = parseFloat(max) || 0;
+  fetchBenchmarks();
+}
+
+function toggleLbChart() {
+  lbChartActive = !lbChartActive;
+  const btn   = document.getElementById('lb-chart-toggle');
+  const tbl   = document.getElementById('lb-table-wrapper');
+  const chart = document.getElementById('lb-chart-container');
+  if (btn)   btn.classList.toggle('btn-active', lbChartActive);
+  if (tbl)   tbl.classList.toggle('hidden', lbChartActive);
+  if (chart) chart.classList.toggle('hidden', !lbChartActive);
+  fetchBenchmarks();
+}
+
+function renderLbChart(groups) {
+  const container = document.getElementById('lb-chart-container');
+  if (!container) return;
+  if (!groups.length) {
+    container.innerHTML = '<p class="text-center text-[#4c566a] py-12 italic text-xs font-mono">No data to chart</p>';
+    return;
+  }
+  const LB_TYPE_COLOR = {
+    standard: '#88c0d0', vision: '#b48ead', embedding: '#ebcb8b',
+    longctx: '#a3be8c', reasoning: '#d08770',
+    tool_use: '#8fbcbb', json_output: '#81a1c1', instruction_follow: '#5e81ac',
+  };
+  const BAR_W = 28, GAP = 6, PAD_L = 44, PAD_B = 64, PAD_T = 20, CHART_H = 220;
+  const n = groups.length;
+  const W = PAD_L + n * (BAR_W + GAP) + 16;
+  const H = CHART_H + PAD_T + PAD_B;
+
+  const vals = groups.map(g => {
+    let ex = {};
+    try { ex = JSON.parse(g.summary_run?.extra_json || '{}'); } catch (_) {}
+    if (g.benchmark_type === 'reasoning' || g.benchmark_type === 'tool_use' ||
+        g.benchmark_type === 'json_output' || g.benchmark_type === 'instruction_follow')
+      return ex.accuracy_pct || 0;
+    if (g.benchmark_type === 'embedding') return ex.chunks_per_sec || g.summary_run?.tps || 0;
+    return g.summary_run?.tps || 0;
+  });
+  const maxVal = Math.max(...vals, 0.001);
+
+  const bars = groups.map((g, i) => {
+    const v    = vals[i];
+    const bH   = Math.max(2, Math.round((v / maxVal) * CHART_H));
+    const x    = PAD_L + i * (BAR_W + GAP);
+    const y    = PAD_T + CHART_H - bH;
+    const fill = LB_TYPE_COLOR[g.benchmark_type] || '#4c566a';
+    const label = g.model_name.split(':')[0].slice(0, 14);
+    const isAcc = ['reasoning','tool_use','json_output','instruction_follow'].includes(g.benchmark_type);
+    const valLabel = isAcc ? `${v.toFixed(0)}%` : v.toFixed(1);
+    const lx = x + BAR_W / 2, ly = PAD_T + CHART_H + 6;
+    return `<rect x="${x}" y="${y}" width="${BAR_W}" height="${bH}" fill="${fill}" rx="2" opacity="0.85">
+              <title>${escapeHTML(g.model_name)} (${g.benchmark_type}): ${valLabel}</title>
+            </rect>
+            <text x="${lx}" y="${ly}" text-anchor="end"
+                  transform="rotate(-45 ${lx} ${ly})"
+                  fill="#4c566a" font-size="9" font-family="monospace">${escapeHTML(label)}</text>
+            ${v > 0 ? `<text x="${x + BAR_W / 2}" y="${y - 3}" text-anchor="middle" fill="${fill}" font-size="8" font-family="monospace">${valLabel}</text>` : ''}`;
+  }).join('');
+
+  const ticks = [0, 1, 2, 3, 4].map(i => {
+    const tv  = maxVal * i / 4;
+    const ty  = PAD_T + CHART_H - Math.round((tv / maxVal) * CHART_H);
+    const tl  = tv >= 10 ? tv.toFixed(0) : tv.toFixed(1);
+    return `<line x1="${PAD_L - 2}" y1="${ty}" x2="${W - 4}" y2="${ty}" stroke="#3b4252" stroke-width="0.8"/>
+            <text x="${PAD_L - 4}" y="${ty + 3}" text-anchor="end" fill="#4c566a" font-size="8" font-family="monospace">${tl}</text>`;
+  }).join('');
+
+  container.innerHTML = `<div class="overflow-x-auto pb-1"><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${ticks}${bars}</svg></div>`;
+}
+
+// ── JSON capability probe ──────────────────────────────────────────────────
+async function probeModelJson(modelName) {
+  modelJsonCaps[modelName] = 'pending';
+  renderModels();
+  try {
+    const res = await fetch('/api/models/probe-json', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: modelName }),
+    });
+    const data = await res.json();
+    modelJsonCaps[modelName] = data.pass ? 'pass' : 'fail';
+  } catch (_) {
+    modelJsonCaps[modelName] = 'fail';
+  }
+  try { localStorage.setItem('neurollama-json-caps', JSON.stringify(modelJsonCaps)); } catch (_) {}
+  renderModels();
+}
+
+async function probeAllJson() {
+  for (const m of models) {
+    if (modelJsonCaps[m.name] === 'pass' || modelJsonCaps[m.name] === 'pending') continue;
+    await probeModelJson(m.name);
+  }
+}
+
 // Grade → colour classes for inventory benchmark badges.
 const GRADE_STYLE = {
   S: { border: 'border-[#ebcb8b]/70', text: 'text-[#ebcb8b]' },
@@ -2686,7 +2808,8 @@ function buildSparkline(runs, bType) {
   const values = [...runs].reverse().map(r => {
     try {
       if (bType === 'embedding') return JSON.parse(r.extra_json || '{}').chunks_per_sec || 0;
-      if (bType === 'reasoning') return JSON.parse(r.extra_json || '{}').accuracy_pct   || 0;
+      if (bType === 'reasoning' || bType === 'tool_use' || bType === 'json_output' || bType === 'instruction_follow')
+        return JSON.parse(r.extra_json || '{}').accuracy_pct || 0;
       return r.tps || 0;
     } catch { return 0; }
   });
@@ -2704,7 +2827,9 @@ function buildSparkline(runs, bType) {
     return `<rect x="${x}" y="${H - h}" width="${barW}" height="${h}" fill="${fill}" rx="0.5"/>`;
   }).join('');
 
-  const unit = bType === 'embedding' ? 'ch/s' : bType === 'reasoning' ? '%acc' : 'TPS';
+  const unit = bType === 'embedding' ? 'ch/s'
+             : (bType === 'reasoning' || bType === 'tool_use' || bType === 'json_output' || bType === 'instruction_follow') ? '%acc'
+             : 'TPS';
   const latest = values[values.length - 1];
   const latestStr = bType === 'reasoning' ? `${latest.toFixed(1)}%` : latest.toFixed(1);
   const tipText = `${n} runs · latest: ${latestStr} ${unit}\nOldest ← → newest`;
@@ -2959,6 +3084,13 @@ function renderModels() {
       caps.includes('embedding') ? '<span class="inline-flex items-center gap-0.5 border border-[#ebcb8b] text-[#ebcb8b] rounded px-1 text-[8px] font-mono font-bold cursor-default" data-tip="Embedding model\nConverts text to vector representations\nNot suited for chat or benchmarks"><i class="fa-solid fa-layer-group text-[7px]"></i>EMB</span>' : '',
       caps.includes('tools')     ? '<span class="inline-flex items-center gap-0.5 border border-[#a3be8c] text-[#a3be8c] rounded px-1 text-[8px] font-mono font-bold cursor-default" data-tip="Tool / function calling\nSupports structured tool use via Ollama API"><i class="fa-solid fa-wrench text-[7px]"></i>TOOLS</span>' : '',
       caps.includes('thinking')  ? '<span class="inline-flex items-center gap-0.5 border border-[#8fbcbb] text-[#8fbcbb] rounded px-1 text-[8px] font-mono font-bold cursor-default" data-tip="Chain-of-thought / reasoning\nThink suppression applied automatically in benchmarks"><i class="fa-solid fa-lightbulb text-[7px]"></i>THINK</span>' : '',
+      (() => {
+        const jc = modelJsonCaps[model.name];
+        if (jc === 'pass')    return '<span class="inline-flex items-center gap-0.5 border border-[#81a1c1] text-[#81a1c1] rounded px-1 text-[8px] font-mono font-bold cursor-default" data-tip="JSON structured output\nProbed via format:json — reliably returns valid JSON"><i class="fa-solid fa-code text-[7px]"></i>JSON</span>';
+        if (jc === 'fail')    return '<span class="inline-flex items-center gap-0.5 border border-[#bf616a]/50 text-[#bf616a]/70 rounded px-1 text-[8px] font-mono font-bold cursor-default" data-tip="JSON structured output\nProbe failed — unreliable JSON output"><i class="fa-solid fa-code text-[7px]"></i>JSON✗</span>';
+        if (jc === 'pending') return '<span class="inline-flex items-center gap-0.5 border border-[#4c566a] text-[#4c566a] rounded px-1 text-[8px] font-mono animate-pulse cursor-default" data-tip="Probing JSON capability…"><i class="fa-solid fa-code text-[7px]"></i>JSON</span>';
+        return `<button onclick="event.stopPropagation(); probeModelJson('${escapeHTML(model.name)}')" class="inline-flex items-center gap-0.5 border border-[#4c566a]/40 text-[#4c566a] rounded px-1 text-[8px] font-mono hover:border-[#81a1c1]/60 hover:text-[#81a1c1] transition-colors" data-tip="Click to probe JSON structured output capability"><i class="fa-solid fa-code text-[7px]"></i>JSON?</button>`;
+      })(),
     ].filter(Boolean).join('');
 
     // Context length badge
@@ -7437,14 +7569,23 @@ const PARAM_LABELS = ['≤0.5B', '≤1B', '≤3B', '≤7B', '≤13B', '≤30B', 
 // Tested model names per benchmark type — populated from leaderboard fetch
 const testedModelsByType = {}; // { standard: Set<name>, embedding: Set<name>, … }
 
-const BENCH_TYPES = ['standard', 'vision', 'embedding', 'longctx', 'reasoning'];
+const BENCH_TYPES = ['standard', 'vision', 'embedding', 'longctx', 'reasoning', 'tool_use', 'json_output', 'instruction_follow'];
 const BENCH_TYPE_HINTS = {
-  standard:  'Any LLM model — inference speed test',
-  vision:    'Requires multimodal model (e.g. llava, gemma3, minicpm-v)',
-  embedding: 'Requires embedding model (e.g. nomic-embed-text, mxbai-embed)',
-  longctx:   'LLM with large context window recommended (≥8K)',
-  reasoning: 'Any LLM — factual accuracy & math test',
+  standard:            'Any LLM model — inference speed test',
+  vision:              'Requires multimodal model (e.g. llava, gemma3, minicpm-v)',
+  embedding:           'Requires embedding model (e.g. nomic-embed-text, mxbai-embed)',
+  longctx:             'LLM with large context window recommended (≥8K)',
+  reasoning:           'Any LLM — factual accuracy & math test',
+  tool_use:            'Requires TOOLS capability — tests function call selection and parameter extraction',
+  json_output:         'Any LLM — tests structured JSON output via format:json',
+  instruction_follow:  'Any LLM — tests constraint compliance; judge model evaluates each response',
 };
+
+// Param size filter state for the leaderboard (0 = no bound)
+let lbParamMin = 0;
+let lbParamMax = 0;
+// Chart view toggle for the leaderboard
+let lbChartActive = false;
 
 // Compute letter score from raw benchmark metrics (S/A/B/C/F)
 function autoScore(bType, tps, extra) {
@@ -7835,7 +7976,19 @@ function startBenchmark() {
     benchmarkEventSource.close();
   }
 
-  const url = `/api/benchmarks/run?model=${encodeURIComponent(model)}&type=${encodeURIComponent(currentBenchmarkType)}`;
+  // Route new functional benchmark types to their dedicated endpoints
+  let url;
+  if (currentBenchmarkType === 'tool_use') {
+    url = `/api/benchmarks/tool-use/run?model=${encodeURIComponent(model)}`;
+  } else if (currentBenchmarkType === 'json_output') {
+    url = `/api/benchmarks/json-output/run?model=${encodeURIComponent(model)}`;
+  } else if (currentBenchmarkType === 'instruction_follow') {
+    const judgeEl = document.getElementById('code-judge-model-select');
+    const judge = judgeEl?.value || 'same';
+    url = `/api/benchmarks/instruction-follow/run?model=${encodeURIComponent(model)}&judge_model=${encodeURIComponent(judge)}`;
+  } else {
+    url = `/api/benchmarks/run?model=${encodeURIComponent(model)}&type=${encodeURIComponent(currentBenchmarkType)}`;
+  }
   benchmarkEventSource = new EventSource(url);
 
   benchmarkEventSource.addEventListener('status', (e) => {
@@ -8070,9 +8223,21 @@ async function fetchBenchmarks() {
     }
 
     // Client-side score-grade filter (applied on top of the server-side type filter)
-    const groupList = (currentScoreFilter && currentScoreFilter !== 'all')
+    const scoreFiltered = (currentScoreFilter && currentScoreFilter !== 'all')
       ? allGroups.filter(g => g.display_score === currentScoreFilter)
       : allGroups;
+
+    // Client-side param size range filter
+    const groupList = (lbParamMin || lbParamMax)
+      ? scoreFiltered.filter(g => {
+          const m = models.find(mo => mo.name === g.model_name);
+          const sizeB = m ? parseParamB(m.details?.parameter_size) : null;
+          if (sizeB === null) return true; // unknown size — include by default
+          if (lbParamMin && sizeB < lbParamMin) return false;
+          if (lbParamMax && sizeB > lbParamMax) return false;
+          return true;
+        })
+      : scoreFiltered;
 
     // ── Empty state ──────────────────────────────────────────────────────────
     if (groupList.length === 0) {
@@ -8094,11 +8259,14 @@ async function fetchBenchmarks() {
     const statsBar = document.getElementById('lb-stats-bar');
     if (statsBar && stats.total_runs > 0) {
       const TYPE_META = {
-        standard:  { short:'STD', cls:'text-[#88c0d0]', border:'border-[#88c0d0]/40', bg:'bg-[#88c0d0]/8'  },
-        vision:    { short:'VIS', cls:'text-[#b48ead]', border:'border-[#b48ead]/50', bg:'bg-[#b48ead]/8'  },
-        embedding: { short:'EMB', cls:'text-[#ebcb8b]', border:'border-[#ebcb8b]/40', bg:'bg-[#ebcb8b]/8'  },
-        longctx:   { short:'CTX', cls:'text-[#a3be8c]', border:'border-[#a3be8c]/40', bg:'bg-[#a3be8c]/8'  },
-        reasoning: { short:'RSN', cls:'text-[#d08770]', border:'border-[#d08770]/50', bg:'bg-[#d08770]/8'  },
+        standard:           { short:'STD',  cls:'text-[#88c0d0]', border:'border-[#88c0d0]/40', bg:'bg-[#88c0d0]/8'  },
+        vision:             { short:'VIS',  cls:'text-[#b48ead]', border:'border-[#b48ead]/50', bg:'bg-[#b48ead]/8'  },
+        embedding:          { short:'EMB',  cls:'text-[#ebcb8b]', border:'border-[#ebcb8b]/40', bg:'bg-[#ebcb8b]/8'  },
+        longctx:            { short:'CTX',  cls:'text-[#a3be8c]', border:'border-[#a3be8c]/40', bg:'bg-[#a3be8c]/8'  },
+        reasoning:          { short:'RSN',  cls:'text-[#d08770]', border:'border-[#d08770]/50', bg:'bg-[#d08770]/8'  },
+        tool_use:           { short:'TOOL', cls:'text-[#8fbcbb]', border:'border-[#8fbcbb]/40', bg:'bg-[#8fbcbb]/8'  },
+        json_output:        { short:'JSON', cls:'text-[#81a1c1]', border:'border-[#81a1c1]/40', bg:'bg-[#81a1c1]/8'  },
+        instruction_follow: { short:'INS',  cls:'text-[#5e81ac]', border:'border-[#5e81ac]/40', bg:'bg-[#5e81ac]/8'  },
       };
       const SCORE_BADGE = {
         S: 'text-[#a3be8c]', A: 'text-[#88c0d0]',
@@ -8145,11 +8313,14 @@ async function fetchBenchmarks() {
     // ── Rendering helpers (presentation only — no computation) ───────────────
 
     const TYPE_BADGE = {
-      standard:  { label: 'STD', cls: 'text-[#88c0d0] border-[#88c0d0]' },
-      vision:    { label: 'VIS', cls: 'text-[#b48ead] border-[#b48ead]' },
-      embedding: { label: 'EMB', cls: 'text-[#ebcb8b] border-[#ebcb8b]' },
-      longctx:   { label: 'CTX', cls: 'text-[#a3be8c] border-[#a3be8c]' },
-      reasoning: { label: 'RSN', cls: 'text-[#d08770] border-[#d08770]' },
+      standard:            { label: 'STD',  cls: 'text-[#88c0d0] border-[#88c0d0]' },
+      vision:              { label: 'VIS',  cls: 'text-[#b48ead] border-[#b48ead]' },
+      embedding:           { label: 'EMB',  cls: 'text-[#ebcb8b] border-[#ebcb8b]' },
+      longctx:             { label: 'CTX',  cls: 'text-[#a3be8c] border-[#a3be8c]' },
+      reasoning:           { label: 'RSN',  cls: 'text-[#d08770] border-[#d08770]' },
+      tool_use:            { label: 'TOOL', cls: 'text-[#8fbcbb] border-[#8fbcbb]' },
+      json_output:         { label: 'JSON', cls: 'text-[#81a1c1] border-[#81a1c1]' },
+      instruction_follow:  { label: 'INS',  cls: 'text-[#5e81ac] border-[#5e81ac]' },
     };
 
     function scoreBadgeClass(score) {
@@ -8191,6 +8362,12 @@ async function fetchBenchmarks() {
         ttftCell   = `<td class="text-center">${(sr.ttft_ms || 0).toFixed(1)} ms</td>`;
         metricCell = `<td class="text-center font-bold text-[#88c0d0]">${(sr.tps || 0).toFixed(1)}${degHtml}${rng}${sparkHtml}</td>`;
         latCell    = `<td class="text-center">${(sr.avg_latency_ms || 0).toFixed(0)} ms</td>`;
+      } else if (bType === 'tool_use' || bType === 'json_output' || bType === 'instruction_follow') {
+        const acc = extra.accuracy_pct != null ? extra.accuracy_pct.toFixed(0) + '%' : '—';
+        const COLOR = bType === 'tool_use' ? '#8fbcbb' : bType === 'json_output' ? '#81a1c1' : '#5e81ac';
+        ttftCell   = `<td class="text-center text-[#4c566a]">—</td>`;
+        metricCell = `<td class="text-center font-bold" style="color:${COLOR}">${acc} <span class="text-[9px] text-[#4c566a] font-normal">acc</span>${sparkHtml}</td>`;
+        latCell    = `<td class="text-center text-[#4c566a]">—</td>`;
       } else {
         // standard / vision
         const rng = (isAvg && sr.min_tps != null && sr.max_tps != null && sr.max_tps !== sr.min_tps)
@@ -8237,7 +8414,7 @@ async function fetchBenchmarks() {
       const summaryExtra = (() => { try { return JSON.parse(group.summary_run?.extra_json || '{}'); } catch { return {}; } })();
       const isChatModel = Array.isArray(summaryExtra.flags) && summaryExtra.flags.includes('chat_model');
       const chatBadge = isChatModel
-        ? `<span onclick="event.stopPropagation(); openModelFixWizard('${escapeHTML(group.model_name)}')" class="inline-flex items-center gap-0.5 border border-[#ebcb8b]/70 text-[#ebcb8b] rounded px-1 text-[8px] font-mono font-bold cursor-pointer ml-1 hover:bg-[#ebcb8b]/10 transition-colors" data-tip="Chat-only model — ignores task prompts\nCode &amp; hallucination benchmarks will score 0\nClick to fix Modelfile →">CHAT <i class="fa-solid fa-wrench text-[7px]"></i></span>`
+        ? `<span onclick="event.stopPropagation(); openModelFixWizard('${escapeHTML(group.model_name)}')" class="inline-flex items-center gap-0.5 border border-[#bf616a]/70 text-[#bf616a] rounded px-1 text-[8px] font-mono font-bold cursor-pointer ml-1 hover:bg-[#bf616a]/10 transition-colors" data-tip="Chat-only model — ignores task prompts\nCode &amp; hallucination benchmarks will score 0\nClick to fix Modelfile →">CHAT⚠ <i class="fa-solid fa-wrench text-[7px]"></i></span>`
         : '';
       const expandBtn = multiRun
         ? `<button onclick="event.stopPropagation();toggleBenchGroup('${gkey}')" id="expand-btn-${gkey}"
@@ -8368,7 +8545,11 @@ async function fetchBenchmarks() {
       }
     });
 
-    tbody.innerHTML = html;
+    if (lbChartActive) {
+      renderLbChart(groupList);
+    } else {
+      tbody.innerHTML = html;
+    }
   } catch (error) {
     tbody.innerHTML = `
       <tr>

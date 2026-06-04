@@ -1072,6 +1072,23 @@ func computeBenchmarkScore(benchType string, tps float64, extraJSON string) stri
 		default:
 			return "F"
 		}
+	case "tool_use", "json_output", "instruction_follow":
+		var d struct {
+			AccuracyPct float64 `json:"accuracy_pct"`
+		}
+		_ = json.Unmarshal([]byte(extraJSON), &d)
+		switch {
+		case d.AccuracyPct >= 90:
+			return "S"
+		case d.AccuracyPct >= 75:
+			return "A"
+		case d.AccuracyPct >= 55:
+			return "B"
+		case d.AccuracyPct >= 35:
+			return "C"
+		default:
+			return "F"
+		}
 	default:
 		return speedTier(tps)
 	}

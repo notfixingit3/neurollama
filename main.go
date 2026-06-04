@@ -252,14 +252,14 @@ func newStreamScanner(reader io.Reader) *bufio.Scanner {
 
 func main() {
 	// CLI flags
-	portFlag := flag.Int("port", 0, "Port to listen on (overrides PORT env var, default 8811)")
+	portFlag := flag.Int("port", 0, "Port to listen on (overrides PORT env var, default 8080)")
 	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "NEUROLLAMA %s — Ollama node control panel\n\n", appVersion)
 		fmt.Fprintf(os.Stderr, "Usage:\n  neurollama [flags]\n\nFlags:\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nEnvironment variables:\n")
-		fmt.Fprintf(os.Stderr, "  PORT          Port to listen on (default 8811)\n")
+		fmt.Fprintf(os.Stderr, "  PORT          Port to listen on (default 8080)\n")
 		fmt.Fprintf(os.Stderr, "  GIN_MODE      Set to 'release' to suppress debug output\n\n")
 		fmt.Fprintf(os.Stderr, "Examples:\n")
 		fmt.Fprintf(os.Stderr, "  neurollama --port 9000\n")
@@ -312,25 +312,6 @@ func main() {
 	startSchedulerTicker()
 
 	r := gin.Default()
-	// TRUSTED_PROXIES: comma-separated list of proxy IPs/CIDRs.
-	// Default covers Traefik (or any reverse proxy) running on the same host.
-	// Override when running behind a proxy on a different host or Docker bridge
-	// e.g. TRUSTED_PROXIES=172.17.0.1 or TRUSTED_PROXIES=none to disable.
-	trustedProxies := os.Getenv("TRUSTED_PROXIES")
-	if trustedProxies == "" {
-		trustedProxies = "127.0.0.1,::1"
-	}
-	if trustedProxies == "none" {
-		r.SetTrustedProxies(nil)
-	} else {
-		var proxies []string
-		for _, p := range strings.Split(trustedProxies, ",") {
-			if p = strings.TrimSpace(p); p != "" {
-				proxies = append(proxies, p)
-			}
-		}
-		r.SetTrustedProxies(proxies)
-	}
 
 	// Load HTML templates
 	r.LoadHTMLGlob("templates/*")
@@ -432,6 +413,14 @@ func main() {
 		api.GET("/benchmarks/hallucination", getHallucinationRunsHandler)
 		api.GET("/benchmarks/hallucination/run", runHallucinationSSEHandler)
 		api.DELETE("/benchmarks/hallucination/:id", deleteHallucinationRunHandler)
+
+		// New functional benchmark types
+		api.GET("/benchmarks/tool-use/run", runToolUseBenchmarkSSEHandler)
+		api.GET("/benchmarks/json-output/run", runJSONOutputBenchmarkSSEHandler)
+		api.GET("/benchmarks/instruction-follow/run", runInstructionFollowBenchmarkSSEHandler)
+		// JSON capability probe
+		api.POST("/models/probe-json", probeJSONHandler)
+
 		api.GET("/node-models", nodeModelsHandler)
 
 		// Hyperparameter Optimizer
@@ -492,7 +481,7 @@ func resolvePort(flagPort int) (int, error) {
 	}
 	rawPort := strings.TrimSpace(os.Getenv("PORT"))
 	if rawPort == "" {
-		return 8811, nil
+		return 8080, nil
 	}
 	port, err := strconv.Atoi(rawPort)
 	if err != nil {
@@ -1043,6 +1032,42 @@ func modelCapabilitiesHandler(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, out)
+}
+
+// POST /api/models/probe-json — probe whether a model reliably outputs valid JSON.
+func probeJSONHandler(c *gin.Context) {
+	var req struct {
+		Model string `json:"model" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	activeSrv, err := GetActiveServer()
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "No active server"})
+		return
+	}
+	client := NewOllamaClient(activeSrv)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+	chatReq := ChatRequest{
+		Model: req.Model,
+		Messages: []ChatMessage{
+			{Role: "user", Content: `Return a JSON object with exactly these fields: {"name": "test", "value": 42, "active": true}`},
+		},
+		Stream: false,
+		Format: "json",
+		Options: map[string]interface{}{"temperature": 0.0, "num_predict": 200},
+	}
+	result, err := client.ChatWithTools(ctx, chatReq)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"pass": false, "error": err.Error()})
+		return
+	}
+	var parsed interface{}
+	pass := json.Unmarshal([]byte(strings.TrimSpace(result.Message.Content)), &parsed) == nil
+	c.JSON(http.StatusOK, gin.H{"pass": pass, "response": result.Message.Content})
 }
 
 // deleteModelsHandler deletes a batch of models
@@ -2736,7 +2761,7 @@ func diagnosticsHandler(c *gin.Context) {
 
 	port := strings.TrimSpace(os.Getenv("PORT"))
 	if port == "" {
-		port = "8811"
+		port = "8080"
 	}
 	addCheck("HTTP Listener", "pass", "Runtime port configuration is resolved.", ":"+port)
 	addCheck("Streaming Routes", "pass", "Streaming endpoints are registered and use request cancellation.", "/api/chat, /api/generate, /api/models/create, /api/benchmarks/run, /api/optimizer/run")
@@ -6475,4 +6500,445 @@ func nvnMatchesHandler(c *gin.Context) {
 		matches = []NvnMatch{}
 	}
 	c.JSON(http.StatusOK, matches)
+}
+
+// cullOldBenchmarks keeps only the 3 most recent runs for a given model+type.
+func cullOldBenchmarks(model, benchType string) {
+	activeSrv, err := GetActiveServer()
+	if err != nil {
+		return
+	}
+	_ = CullBenchmarks(model, activeSrv.URL, benchType, 3)
+}
+
+// extractJSONBlock extracts the first {...} JSON block from a string (handles markdown fences).
+func extractJSONBlock(s string) string {
+	start := strings.Index(s, "{")
+	end := strings.LastIndex(s, "}")
+	if start >= 0 && end > start {
+		return s[start : end+1]
+	}
+	return s
+}
+
+// ── Tool-Use Benchmark ────────────────────────────────────────────────────────
+
+var toolUseDefs = []map[string]interface{}{
+	{"type": "function", "function": map[string]interface{}{
+		"name":        "get_weather",
+		"description": "Get the current weather for a location",
+		"parameters": map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"location": map[string]interface{}{"type": "string", "description": "City name"},
+			},
+			"required": []string{"location"},
+		},
+	}},
+	{"type": "function", "function": map[string]interface{}{
+		"name":        "calculate",
+		"description": "Perform arithmetic calculations",
+		"parameters": map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"expression": map[string]interface{}{"type": "string", "description": "Math expression to evaluate"},
+			},
+			"required": []string{"expression"},
+		},
+	}},
+	{"type": "function", "function": map[string]interface{}{
+		"name":        "search",
+		"description": "Search the web for information",
+		"parameters": map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"query": map[string]interface{}{"type": "string", "description": "Search query string"},
+			},
+			"required": []string{"query"},
+		},
+	}},
+}
+
+type toolUseCase struct {
+	Prompt    string
+	WantTool  string
+	WantParam map[string]string
+}
+
+var toolUseCases = []toolUseCase{
+	{"What's the weather like in Oslo right now?", "get_weather", map[string]string{"location": "oslo"}},
+	{"What is 127 multiplied by 43?", "calculate", map[string]string{"expression": "127"}},
+	{"Search for the latest Go 1.24 release notes", "search", map[string]string{"query": "go"}},
+	{"I need weather info for Tokyo.", "get_weather", map[string]string{"location": "tokyo"}},
+	{"Calculate the square root of 1764.", "calculate", map[string]string{"expression": "1764"}},
+	{"Find information about the Ollama open-source project.", "search", map[string]string{"query": "ollama"}},
+	{"What is the temperature in Berlin today?", "get_weather", map[string]string{"location": "berlin"}},
+	{"What is 99 divided by 9?", "calculate", map[string]string{"expression": "99"}},
+}
+
+func runToolUseBenchmarkRun(ctx context.Context, client *OllamaClient, model string, logFunc func(string)) (correct, total int, extraJSON string, err error) {
+	for i, tc := range toolUseCases {
+		if ctx.Err() != nil {
+			return correct, total, "", ctx.Err()
+		}
+		logFunc(fmt.Sprintf("Tool case %d/%d: %s", i+1, len(toolUseCases), tc.Prompt))
+		req := ChatRequest{
+			Model: model,
+			Messages: []ChatMessage{
+				{Role: "user", Content: tc.Prompt},
+			},
+			Stream:  false,
+			Tools:   toolUseDefs,
+			Options: map[string]interface{}{"temperature": 0.0, "num_predict": 500},
+		}
+		resp, callErr := client.ChatWithTools(ctx, req)
+		if callErr != nil {
+			logFunc(fmt.Sprintf("  ✗ request error: %v", callErr))
+			total++
+			continue
+		}
+		total++
+		if len(resp.Message.ToolCalls) == 0 {
+			logFunc(fmt.Sprintf("  ✗ no tool call returned (content: %q)", resp.Message.Content))
+			continue
+		}
+		tc0 := resp.Message.ToolCalls[0]
+		toolNameOk := strings.EqualFold(tc0.Function.Name, tc.WantTool)
+		paramsOk := true
+		for k, wantSubstr := range tc.WantParam {
+			var argVal string
+			if v, ok := tc0.Function.Arguments[k]; ok {
+				argVal = strings.ToLower(fmt.Sprintf("%v", v))
+			}
+			if !strings.Contains(argVal, strings.ToLower(wantSubstr)) {
+				paramsOk = false
+				break
+			}
+		}
+		if toolNameOk && paramsOk {
+			correct++
+			logFunc(fmt.Sprintf("  ✓ called %s correctly", tc0.Function.Name))
+		} else if toolNameOk {
+			logFunc(fmt.Sprintf("  ~ called right tool (%s) but wrong params", tc0.Function.Name))
+		} else {
+			logFunc(fmt.Sprintf("  ✗ called %s (expected %s)", tc0.Function.Name, tc.WantTool))
+		}
+	}
+	acc := 0.0
+	if total > 0 {
+		acc = float64(correct) / float64(total) * 100.0
+	}
+	ej, _ := json.Marshal(map[string]interface{}{
+		"accuracy_pct": acc,
+		"correct":      correct,
+		"total":        total,
+	})
+	return correct, total, string(ej), nil
+}
+
+func runToolUseBenchmarkSSEHandler(c *gin.Context) {
+	model := c.Query("model")
+	if model == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "model parameter required"})
+		return
+	}
+	activeSrv, err := GetActiveServer()
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "No active server"})
+		return
+	}
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Transfer-Encoding", "chunked")
+	LogActivity("benchmark", fmt.Sprintf("Tool-use benchmark started: %s", model))
+	client := NewOllamaClient(activeSrv)
+	ctx := c.Request.Context()
+	ollamaVer, _, _ := client.CheckStatus()
+	c.Stream(func(w io.Writer) bool {
+		emit := func(msg string) {
+			c.SSEvent("status", msg)
+			c.Writer.Flush()
+		}
+		emit(fmt.Sprintf("Initializing tool-use benchmark for %s…", model))
+		warmupModel(ctx, client, model, 0, emit)
+		correct, total, extraJSON, runErr := runToolUseBenchmarkRun(ctx, client, model, emit)
+		if runErr != nil {
+			c.SSEvent("error", runErr.Error())
+			return false
+		}
+		acc := 0.0
+		if total > 0 {
+			acc = float64(correct) / float64(total) * 100.0
+		}
+		emit(fmt.Sprintf("[COMPLETED] %d/%d correct — %.0f%% accuracy", correct, total, acc))
+		id, saveErr := SaveBenchmark(model, activeSrv.Name, activeSrv.URL, "tool_use", extraJSON, ollamaVer, 0, 0, 0)
+		if saveErr != nil {
+			emit(fmt.Sprintf("Warning: failed to save result: %v", saveErr))
+		}
+		cullOldBenchmarks(model, "tool_use")
+		c.SSEvent("done", fmt.Sprintf(`{"id":%d,"model":%q,"bench_type":"tool_use","accuracy_pct":%.1f}`, id, model, acc))
+		return false
+	})
+}
+
+// ── JSON-Output Benchmark ─────────────────────────────────────────────────────
+
+type jsonOutputCase struct {
+	Prompt         string
+	RequiredFields []string
+}
+
+var jsonOutputCases = []jsonOutputCase{
+	{`Return a JSON object with fields: name (string), age (integer), active (boolean).`, []string{"name", "age", "active"}},
+	{`Return a JSON object with fields: title (string), author (string), year (integer).`, []string{"title", "author", "year"}},
+	{`Return nested JSON: an object with a "user" key containing "id" (integer) and "email" (string).`, []string{"user"}},
+	{`Return a JSON object representing a 3D point with numeric fields x, y, z.`, []string{"x", "y", "z"}},
+	{`Return a JSON object with: items (array of strings), count (integer).`, []string{"items", "count"}},
+	{`Return a JSON object with: status (string), code (integer), message (string).`, []string{"status", "code", "message"}},
+}
+
+func runJSONOutputBenchmarkRun(ctx context.Context, client *OllamaClient, model string, logFunc func(string)) (valid, total int, extraJSON string, err error) {
+	for i, tc := range jsonOutputCases {
+		if ctx.Err() != nil {
+			return valid, total, "", ctx.Err()
+		}
+		logFunc(fmt.Sprintf("JSON case %d/%d…", i+1, len(jsonOutputCases)))
+		req := ChatRequest{
+			Model:    model,
+			Messages: []ChatMessage{{Role: "user", Content: tc.Prompt}},
+			Stream:   false,
+			Format:   "json",
+			Options:  map[string]interface{}{"temperature": 0.0, "num_predict": 300},
+		}
+		resp, callErr := client.ChatWithTools(ctx, req)
+		total++
+		if callErr != nil {
+			logFunc(fmt.Sprintf("  ✗ request error: %v", callErr))
+			continue
+		}
+		content := strings.TrimSpace(resp.Message.Content)
+		var parsed map[string]interface{}
+		if json.Unmarshal([]byte(content), &parsed) != nil {
+			logFunc(fmt.Sprintf("  ✗ invalid JSON"))
+			continue
+		}
+		allFields := true
+		for _, f := range tc.RequiredFields {
+			if _, ok := parsed[f]; !ok {
+				allFields = false
+				logFunc(fmt.Sprintf("  ~ valid JSON but missing field %q", f))
+				break
+			}
+		}
+		if allFields {
+			valid++
+			logFunc(fmt.Sprintf("  ✓ valid JSON with all required fields"))
+		}
+	}
+	acc := 0.0
+	if total > 0 {
+		acc = float64(valid) / float64(total) * 100.0
+	}
+	ej, _ := json.Marshal(map[string]interface{}{
+		"accuracy_pct": acc,
+		"valid":        valid,
+		"total":        total,
+	})
+	return valid, total, string(ej), nil
+}
+
+func runJSONOutputBenchmarkSSEHandler(c *gin.Context) {
+	model := c.Query("model")
+	if model == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "model parameter required"})
+		return
+	}
+	activeSrv, err := GetActiveServer()
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "No active server"})
+		return
+	}
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Transfer-Encoding", "chunked")
+	LogActivity("benchmark", fmt.Sprintf("JSON-output benchmark started: %s", model))
+	client := NewOllamaClient(activeSrv)
+	ctx := c.Request.Context()
+	ollamaVer, _, _ := client.CheckStatus()
+	c.Stream(func(w io.Writer) bool {
+		emit := func(msg string) {
+			c.SSEvent("status", msg)
+			c.Writer.Flush()
+		}
+		emit(fmt.Sprintf("Initializing JSON-output benchmark for %s…", model))
+		warmupModel(ctx, client, model, 0, emit)
+		valid, total, extraJSON, runErr := runJSONOutputBenchmarkRun(ctx, client, model, emit)
+		if runErr != nil {
+			c.SSEvent("error", runErr.Error())
+			return false
+		}
+		acc := 0.0
+		if total > 0 {
+			acc = float64(valid) / float64(total) * 100.0
+		}
+		emit(fmt.Sprintf("[COMPLETED] %d/%d valid JSON — %.0f%% accuracy", valid, total, acc))
+		id, saveErr := SaveBenchmark(model, activeSrv.Name, activeSrv.URL, "json_output", extraJSON, ollamaVer, 0, 0, 0)
+		if saveErr != nil {
+			emit(fmt.Sprintf("Warning: failed to save result: %v", saveErr))
+		}
+		cullOldBenchmarks(model, "json_output")
+		c.SSEvent("done", fmt.Sprintf(`{"id":%d,"model":%q,"bench_type":"json_output","accuracy_pct":%.1f}`, id, model, acc))
+		return false
+	})
+}
+
+// ── Instruction-Follow Benchmark ──────────────────────────────────────────────
+
+type instructionCase struct {
+	Prompt      string
+	JudgePrompt string
+}
+
+var instructionCases = []instructionCase{
+	{
+		"List exactly 5 programming languages, one per line, no explanations.",
+		`Does the following response contain EXACTLY 5 programming languages listed one per line with no extra explanations or surrounding text? Reply with JSON only: {"compliant": true/false, "reason": "one sentence"}`,
+	},
+	{
+		"Count from 1 to 5. Each number on its own line. Nothing else.",
+		`Does the following response contain ONLY the numbers 1 through 5 each on its own line, with absolutely no other content? Reply with JSON only: {"compliant": true/false, "reason": "one sentence"}`,
+	},
+	{
+		"Translate 'Hello, how are you?' into French. Reply with ONLY the translation, nothing else.",
+		`Does the following response contain ONLY a French translation of 'Hello, how are you?' with no explanations or extra text? Reply with JSON only: {"compliant": true/false, "reason": "one sentence"}`,
+	},
+	{
+		"What is 2+2? Reply with a single digit only.",
+		`Does the following response contain ONLY the single digit 4 with no other content whatsoever? Reply with JSON only: {"compliant": true/false, "reason": "one sentence"}`,
+	},
+	{
+		"Write exactly 3 bullet points about the Go programming language. Use '-' as the bullet character. No intro, no conclusion.",
+		`Does the following response contain EXACTLY 3 bullet points using '-' as the bullet character, with no introduction, conclusion, or extra text? Reply with JSON only: {"compliant": true/false, "reason": "one sentence"}`,
+	},
+	{
+		"Name the 3 primary colors. Comma-separated on one line. No other text.",
+		`Does the following response contain ONLY 3 primary colors listed comma-separated on a single line with no other text? Reply with JSON only: {"compliant": true/false, "reason": "one sentence"}`,
+	},
+}
+
+func runInstructionFollowBenchmarkRun(ctx context.Context, client *OllamaClient, model, judgeModel string, logFunc func(string)) (compliant, total int, extraJSON string, err error) {
+	if judgeModel == "" || judgeModel == "same" {
+		judgeModel = model
+	}
+	for i, tc := range instructionCases {
+		if ctx.Err() != nil {
+			return compliant, total, "", ctx.Err()
+		}
+		logFunc(fmt.Sprintf("Instruction case %d/%d…", i+1, len(instructionCases)))
+		// Step 1: generate response
+		genReq := GenerateRequest{
+			Model:  model,
+			Prompt: noThinkPrompt(model, tc.Prompt),
+			Think:  thinkParam(model),
+			Stream: true,
+			Options: map[string]interface{}{"temperature": 0.0, "num_predict": 300},
+		}
+		var sb strings.Builder
+		streamErr := client.GenerateStream(ctx, genReq, func(tok string) { sb.WriteString(tok) })
+		total++
+		if streamErr != nil {
+			logFunc(fmt.Sprintf("  ✗ generation error: %v", streamErr))
+			continue
+		}
+		response := strings.TrimSpace(sb.String())
+		if isRefusalResponse(response) {
+			logFunc("  ✗ model refused the prompt")
+			continue
+		}
+		// Step 2: judge
+		judgePromptFull := tc.JudgePrompt + "\n\nResponse to evaluate:\n" + response
+		judgeReq := GenerateRequest{
+			Model:  judgeModel,
+			Prompt: noThinkPrompt(judgeModel, judgePromptFull),
+			System: judgeSystemPrompt,
+			Think:  thinkParam(judgeModel),
+			Stream: true,
+			Options: map[string]interface{}{"temperature": 0.0, "num_predict": 200},
+		}
+		var jsb strings.Builder
+		_ = client.GenerateStream(ctx, judgeReq, func(tok string) { jsb.WriteString(tok) })
+		judgeRaw := extractJSONBlock(jsb.String())
+		var judgeResult struct {
+			Compliant bool   `json:"compliant"`
+			Reason    string `json:"reason"`
+		}
+		if json.Unmarshal([]byte(judgeRaw), &judgeResult) == nil && judgeResult.Compliant {
+			compliant++
+			logFunc(fmt.Sprintf("  ✓ compliant"))
+		} else {
+			logFunc(fmt.Sprintf("  ✗ not compliant: %s", judgeResult.Reason))
+		}
+	}
+	acc := 0.0
+	if total > 0 {
+		acc = float64(compliant) / float64(total) * 100.0
+	}
+	ej, _ := json.Marshal(map[string]interface{}{
+		"accuracy_pct": acc,
+		"compliant":    compliant,
+		"total":        total,
+	})
+	return compliant, total, string(ej), nil
+}
+
+func runInstructionFollowBenchmarkSSEHandler(c *gin.Context) {
+	model := c.Query("model")
+	if model == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "model parameter required"})
+		return
+	}
+	judgeModel := c.DefaultQuery("judge_model", "same")
+	activeSrv, err := GetActiveServer()
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "No active server"})
+		return
+	}
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Transfer-Encoding", "chunked")
+	LogActivity("benchmark", fmt.Sprintf("Instruction-follow benchmark started: %s (judge: %s)", model, judgeModel))
+	client := NewOllamaClient(activeSrv)
+	ctx := c.Request.Context()
+	ollamaVer, _, _ := client.CheckStatus()
+	c.Stream(func(w io.Writer) bool {
+		emit := func(msg string) {
+			c.SSEvent("status", msg)
+			c.Writer.Flush()
+		}
+		emit(fmt.Sprintf("Initializing instruction-follow benchmark for %s (judge: %s)…", model, judgeModel))
+		warmupModel(ctx, client, model, 0, emit)
+		if judgeModel != "same" && judgeModel != model {
+			warmupModel(ctx, client, judgeModel, 0, emit)
+		}
+		compliant, total, extraJSON, runErr := runInstructionFollowBenchmarkRun(ctx, client, model, judgeModel, emit)
+		if runErr != nil {
+			c.SSEvent("error", runErr.Error())
+			return false
+		}
+		acc := 0.0
+		if total > 0 {
+			acc = float64(compliant) / float64(total) * 100.0
+		}
+		emit(fmt.Sprintf("[COMPLETED] %d/%d compliant — %.0f%% accuracy", compliant, total, acc))
+		id, saveErr := SaveBenchmark(model, activeSrv.Name, activeSrv.URL, "instruction_follow", extraJSON, ollamaVer, 0, 0, 0)
+		if saveErr != nil {
+			emit(fmt.Sprintf("Warning: failed to save result: %v", saveErr))
+		}
+		cullOldBenchmarks(model, "instruction_follow")
+		c.SSEvent("done", fmt.Sprintf(`{"id":%d,"model":%q,"bench_type":"instruction_follow","accuracy_pct":%.1f}`, id, model, acc))
+		return false
+	})
 }

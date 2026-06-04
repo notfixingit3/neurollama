@@ -225,6 +225,10 @@
                   </div>
                   <!-- Last synced indicator + manual refresh -->
                   <span id="inventory-last-synced" class="hidden text-[9px] font-mono text-[#4c566a]"></span>
+                  <button onclick="probeAllJson()" title="Probe all models for JSON structured output support"
+                    class="btn btn-xs btn-neutral border-[#4c566a] font-tech text-[9px] px-2 gap-1">
+                    <i class="fa-solid fa-code text-[10px]"></i>JSON
+                  </button>
                   <button onclick="refreshInventory()" class="btn btn-xs btn-ghost text-[#4c566a] hover:text-[#88c0d0] p-1 min-h-0 h-auto" title="Refresh model list">
                     <i class="fa-solid fa-rotate text-[10px]"></i>
                   </button>
@@ -1491,6 +1495,15 @@
                       <button class="bench-type-btn" id="bench-type-reasoning" onclick="setBenchmarkType('reasoning')">
                         <i class="fa-solid fa-brain mr-1"></i>Reason
                       </button>
+                      <button class="bench-type-btn" id="bench-type-tool_use" onclick="setBenchmarkType('tool_use')">
+                        <i class="fa-solid fa-wrench mr-1"></i>Tool Use
+                      </button>
+                      <button class="bench-type-btn" id="bench-type-json_output" onclick="setBenchmarkType('json_output')">
+                        <i class="fa-solid fa-code mr-1"></i>JSON Out
+                      </button>
+                      <button class="bench-type-btn" id="bench-type-instruction_follow" onclick="setBenchmarkType('instruction_follow')">
+                        <i class="fa-solid fa-list-check mr-1"></i>Instruct
+                      </button>
                     </div>
                     <span id="benchmark-type-hint" class="text-[9px] font-mono text-[#4c566a] mt-1.5">Any LLM model — inference speed test</span>
                   </div>
@@ -1552,7 +1565,7 @@
                   <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
                     <i class="fa-solid fa-trophy mr-2"></i>Benchmark Leaderboard
                   </h2>
-                  <!-- Leaderboard type filter + CSV export -->
+                  <!-- Leaderboard type filter + controls -->
                   <div class="flex items-center gap-2 flex-wrap">
                     <div class="flex items-center gap-1.5 flex-wrap">
                       <span class="text-[9px] font-mono text-[#4c566a] uppercase mr-0.5">Filter:</span>
@@ -1562,16 +1575,39 @@
                       <button class="bench-type-btn" id="lb-filter-embedding" onclick="setLbFilter('embedding')"><i class="fa-solid fa-layer-group mr-1"></i>Emb</button>
                       <button class="bench-type-btn" id="lb-filter-longctx" onclick="setLbFilter('longctx')"><i class="fa-solid fa-scroll mr-1"></i>Ctx</button>
                       <button class="bench-type-btn" id="lb-filter-reasoning" onclick="setLbFilter('reasoning')"><i class="fa-solid fa-brain mr-1"></i>Rsn</button>
+                      <button class="bench-type-btn" id="lb-filter-tool_use" onclick="setLbFilter('tool_use')"><i class="fa-solid fa-wrench mr-1"></i>Tool</button>
+                      <button class="bench-type-btn" id="lb-filter-json_output" onclick="setLbFilter('json_output')"><i class="fa-solid fa-code mr-1"></i>JSON</button>
+                      <button class="bench-type-btn" id="lb-filter-instruction_follow" onclick="setLbFilter('instruction_follow')"><i class="fa-solid fa-list-check mr-1"></i>Ins</button>
                     </div>
-                    <button onclick="exportBenchmarksCSV()" title="Export filtered leaderboard as CSV"
-                      class="btn btn-xs btn-neutral border-[#4c566a] font-tech text-[9px] px-2 gap-1">
-                      <i class="fa-solid fa-file-csv text-[10px]"></i>CSV
-                    </button>
+                    <div class="flex items-center gap-1.5 ml-auto">
+                      <button onclick="exportBenchmarksCSV()" title="Export filtered leaderboard as CSV"
+                        class="btn btn-xs btn-neutral border-[#4c566a] font-tech text-[9px] px-2 gap-1">
+                        <i class="fa-solid fa-file-csv text-[10px]"></i>CSV
+                      </button>
+                      <button id="lb-chart-toggle" onclick="toggleLbChart()" title="Toggle bar chart view"
+                        class="btn btn-xs btn-neutral border-[#4c566a] font-tech text-[9px] px-2 gap-1">
+                        <i class="fa-solid fa-chart-bar text-[10px]"></i>Chart
+                      </button>
+                    </div>
+                  </div>
+                  <!-- Param size range filter -->
+                  <div class="flex items-center gap-2 mt-2 text-[10px] font-mono text-[#4c566a]">
+                    <span class="uppercase">Params:</span>
+                    <input id="lb-param-min" type="number" min="0" step="1" placeholder="Min B"
+                      oninput="setLbParamRange(this.value, document.getElementById('lb-param-max').value)"
+                      class="input input-xs w-20 bg-[#2e3440]/60 border-[#4c566a] text-[#d8dee9] font-mono text-[10px] focus:border-[#88c0d0] focus:outline-none" />
+                    <span>–</span>
+                    <input id="lb-param-max" type="number" min="0" step="1" placeholder="Max B"
+                      oninput="setLbParamRange(document.getElementById('lb-param-min').value, this.value)"
+                      class="input input-xs w-20 bg-[#2e3440]/60 border-[#4c566a] text-[#d8dee9] font-mono text-[10px] focus:border-[#88c0d0] focus:outline-none" />
+                    <span class="text-[9px] text-[#4c566a]/60">billions · leave blank for no limit</span>
                   </div>
                 </div>
                 <!-- Stats bar: run count, model count, best performer -->
                 <div id="lb-stats-bar" class="mb-3"></div>
-                <div class="overflow-x-auto">
+                <!-- Bar chart container (hidden by default; shown when Chart toggle is active) -->
+                <div id="lb-chart-container" class="hidden mb-2"></div>
+                <div class="overflow-x-auto" id="lb-table-wrapper">
                   <table class="table table-xs w-full text-xs font-mono text-[#d8dee9] border-collapse table-fixed">
                     <colgroup>
                       <col><!-- MODEL: flexible, takes remaining space -->
