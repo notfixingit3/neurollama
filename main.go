@@ -17,10 +17,12 @@ import (
 	"io"
 	"log"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"sort"
@@ -32,6 +34,7 @@ import (
 	"github.com/gin-gonic/gin"
 	goPDF "github.com/ledongthuc/pdf"
 	gossh "golang.org/x/crypto/ssh"
+	sshagent "golang.org/x/crypto/ssh/agent"
 )
 
 const appVersion = "v0.2.23"
@@ -7085,10 +7088,19 @@ func ollamaUpdateSSEHandler(c *gin.Context) {
 	// Build SSH auth methods
 	var authMethods []gossh.AuthMethod
 	if req.UseSSHKey || req.SSHPassword == "" {
+		// 1. SSH agent — works even when keys are passphrase-protected, since the
+		//    agent already has them unlocked (same reason terminal SSH works).
+		if agentSock := os.Getenv("SSH_AUTH_SOCK"); agentSock != "" {
+			if conn, dialErr := net.Dial("unix", agentSock); dialErr == nil {
+				authMethods = append(authMethods, gossh.PublicKeysCallback(sshagent.NewClient(conn).Signers))
+			}
+		}
+		// 2. Key files — works for unencrypted keys; silently skips passphrase-protected ones.
+		homeDir, _ := os.UserHomeDir()
 		for _, kf := range []string{
-			os.ExpandEnv("$HOME/.ssh/id_ed25519"),
-			os.ExpandEnv("$HOME/.ssh/id_ecdsa"),
-			os.ExpandEnv("$HOME/.ssh/id_rsa"),
+			filepath.Join(homeDir, ".ssh", "id_ed25519"),
+			filepath.Join(homeDir, ".ssh", "id_ecdsa"),
+			filepath.Join(homeDir, ".ssh", "id_rsa"),
 		} {
 			raw, readErr := os.ReadFile(kf)
 			if readErr != nil {
@@ -7096,10 +7108,9 @@ func ollamaUpdateSSEHandler(c *gin.Context) {
 			}
 			signer, parseErr := gossh.ParsePrivateKey(raw)
 			if parseErr != nil {
-				continue
+				continue // passphrase-protected — agent handles it above
 			}
 			authMethods = append(authMethods, gossh.PublicKeys(signer))
-			break
 		}
 	}
 	if req.SSHPassword != "" {
