@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.2.23-bf616a?style=for-the-badge&logo=git&logoColor=white" alt="Version v0.2.23" />
+  <img src="https://img.shields.io/badge/version-v0.2.24-bf616a?style=for-the-badge&logo=git&logoColor=white" alt="Version v0.2.24" />
   <a href="https://golang.org/"><img src="https://img.shields.io/badge/Go-1.26.3-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go Version" /></a>
   <a href="https://tailwindcss.com/"><img src="https://img.shields.io/badge/Tailwind_CSS-4.3%2B-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white" alt="Tailwind CSS" /></a>
   <a href="https://daisyui.com/"><img src="https://img.shields.io/badge/daisyUI-5.5%2B-5A0EF8?style=for-the-badge&logo=daisyui&logoColor=white" alt="DaisyUI" /></a>
@@ -27,7 +27,7 @@
 
 **NEUROLLAMA** is a lightweight, self-hosted web control panel that provides a beautiful, techy interface to connect, monitor, and query your Ollama instances. Styled using the **Nord Palette** and built with **Go (Gin)** and **Tailwind CSS/daisyUI**, it is designed to look like a futuristic command console.
 
-With NEUROLLAMA you can manage multiple Ollama nodes, inspect VRAM telemetry, benchmark models across five test types plus two dedicated deep-eval suites, run multi-language code generation tests with live syntax checking, probe hallucination resistance, build custom models, and more — all from a single binary with zero runtime dependencies.
+With NEUROLLAMA you can manage multiple Ollama nodes, inspect VRAM telemetry, benchmark models across eight test types plus dedicated deep-eval suites, run multi-language code generation tests with live syntax checking, probe hallucination resistance, build and customise models with guided wizards, remotely update Ollama on any registered node, and more — all from a single binary with zero runtime dependencies.
 
 > **What NEUROLLAMA is not:** the primary goal is model management, evaluation, and diagnostics — not day-to-day chat. A TTY0 Chat Playground is included for quick testing and prompt exploration, but if you are looking for a full-featured conversational interface, dedicated tools like **[Open WebUI](https://github.com/open-webui/open-webui)** or **[AnythingLLM](https://github.com/Mintplex-Labs/anything-llm)** will serve you better for that purpose.
 
@@ -76,7 +76,43 @@ The **Node selector** lives in the footer status bar as a bordered pill badge �
 
 ### 🛠️ Model Builder
 - Create new customized models using a graphical interface — compiles a Modelfile from your base model, system prompt, temperature, and custom parameters.
+- **Inline validation**: the model name field checks for collisions with existing models (amber warning) and invalid characters (red error) on every keystroke — no surprises at compile time.
 - Real-time build-progress logs stream to the UI with cancellation support.
+
+### 🧙 NeuroWizard — Guided Model Operations
+Thirteen one-click wizards for common model customisation tasks. No Modelfile knowledge required — each wizard collects only what it needs, shows a live Modelfile preview, streams the creation, and offers an **OPEN IN CHAT** shortcut on success.
+
+| Wizard | What it does |
+|---|---|
+| **Expand Context** | Set a larger `num_ctx` — warns if it exceeds the model's trained maximum |
+| **Custom Persona** | Apply a SYSTEM prompt from 4 presets (Coding, Tutor, Creative, Research) or freeform |
+| **Sampling Profile** | Bake Creative / Balanced / Precise / Fast temperature presets into the Modelfile |
+| **Strip Thinking** | Add `/no_think` system directive — creates a `-nothink` variant of reasoning models |
+| **Merge Models** | Blend two local models at a configurable weight using SLERP or Linear interpolation |
+| **Remove Restrictions** | Strip or replace a model's baked-in SYSTEM prompt |
+| **Terse Mode** | Enforce concise output — three variants: Minimal, Ultra-terse, Technical |
+| **Code Specialist** | Lock to code-only output for a chosen language with temperature 0.1 |
+| **Reproducible Output** | Bake in a fixed seed and optional temperature lock for deterministic responses |
+| **Language Lock** | Force responses in a specific language (14 presets + custom) |
+| **Format Specialist** | Lock output format — Markdown, Plain Text, JSON, Bullet Points, Academic, Socratic, Devil's Advocate |
+| **Character Creator** | Build a named character with personality and speech style (7 options) |
+| **RAG-Optimized** | Tune for retrieval-augmented generation — Strict / Balanced / Permissive context grounding |
+
+### 🔄 Ollama Remote Update
+Update Ollama on any registered node directly from the UI — no SSH client required.
+
+- Select a registered node, provide SSH credentials (password or stored key), and hit update.
+- **Linux**: backs up your custom `ollama.service` file before running the official install script, then restores it — preserving custom model paths, GPU flags, `KEEP_ALIVE`, `CONTEXT_LENGTH`, and other env vars.
+- **macOS**: downloads `Ollama-darwin.zip` (universal bundle), replaces `/Applications/Ollama.app`, clears quarantine, and restarts via `open`.
+- **Pre-flight checks** run before downloading anything: `curl` availability, GitHub API reachability, binary in PATH, service file present, sudo credentials validated with a dry-run, disk space. Any fatal failure aborts immediately.
+- Terminal-style output log with ✔/⚠/✖ per check and an `old → new` version diff on completion.
+
+### 🔑 SSH Key Store
+Store private keys in the app for agent-less deployments (Docker, remote hosts without `SSH_AUTH_SOCK`).
+
+- Keys are encrypted at rest with **AES-256-GCM**; the encryption key lives in `data/ssh_keystore.key` (0600, auto-generated).
+- Only metadata (label, username, fingerprint) is returned to the browser — key material never leaves the server.
+- Auth priority for remote operations: specific stored key → SSH agent → `~/.ssh/` key files → all stored keys.
 
 ### 📼 Memory Telemetry
 - View which models Ollama currently has loaded, their sizes, and GPU VRAM vs system RAM allocation.
@@ -144,11 +180,16 @@ Probe a model's resistance to confabulation by testing fact-recall across increa
 Sweep inference parameters (temperature, top-k, top-p, repeat-penalty, etc.) over a configurable search space and score each combination. Useful for tuning a model for a specific task without manual trial-and-error.
 
 ### 📚 RAG (Retrieval-Augmented Generation)
-- Upload PDF or text documents, chunk and index them into a local SQLite-backed vector store.
-- Query the knowledge base with similarity search and inject retrieved context directly into chat.
+- Upload PDF, TXT, or Markdown documents; chunk, embed, and index them into a local SQLite-backed vector store — entirely server-side, no client-side memory pressure.
+- **Collection Manager**: organise documents into named collections. The upload form has a combobox to assign or create a collection; existing collections appear as a datalist. The similarity query tester and chat RAG sidebar both have collection filter dropdowns so you can restrict retrieval to a specific corpus.
+- **Duplicate detection**: before uploading, the app checks if a file with the same name is already indexed and shows a confirmation with the existing chunk count and collection.
+- **Inline collection rename**: click a document's collection badge in the table to edit it in-place — Enter or blur saves immediately via `PUT /api/rag/documents/:id/collection`.
+- Query the knowledge base with cosine similarity search and inject retrieved context directly into chat. The chat RAG sidebar now includes a collection filter so different chat sessions can target different document sets.
 
-### ⚙️ Settings
+### ⚙️ Settings & System
 - **Model Update Scheduler**: configure automatic background checks for model updates at custom intervals with live log streaming.
+- **Ollama Remote Update**: SSH-based remote update for any registered node — see [Ollama Remote Update](#-ollama-remote-update) above.
+- **SSH Key Store**: encrypted private-key storage for agent-less deployments — see [SSH Key Store](#-ssh-key-store) above.
 
 ### 🩺 Preflight Diagnostics
 Validate SQLite, data-directory writability, static assets, active Ollama reachability, model inventory access, settings, and streaming route readiness — all from one panel.
@@ -164,7 +205,10 @@ Validate SQLite, data-directory writability, static assets, active Ollama reacha
 - Instantly toggle Node Registry, Chat History, and Config sidebars; preferences persist in localStorage.
 - Nord colour palette throughout: Polar Night backgrounds, Snow Storm text, Frost blue accents.
 - **Untested only filter** on Node vs Node, Code Benchmark, and Hallucination tabs: toggle to show only models that have no prior runs of that benchmark type. Automatically refreshes after each completed run so newly-tested models drop off immediately.
-- **Context-size warning (⚠)** on chat and code bench ctx selects: appears when the chosen `num_ctx` exceeds the model's trained context length, with a tooltip explaining Ollama will silently clamp it.
+- **Context-size warning (⚠)** on all context selects (chat, completion, builder, code bench, hallucination bench): appears when the chosen `num_ctx` exceeds the model's trained context length, with a tooltip explaining Ollama will silently clamp it.
+- **Builder inline validation**: the new model name field shows an amber collision warning or a red invalid-chars error on every keystroke, before you hit compile.
+- **Activity Center** (System → Activity): full event log with category filter pills (ALL / PULL / BUILD / BENCH / MODEL / RAG / OPT / NODE / SYS), a new-events badge on the subtab button, a live poll indicator, and an Export button that downloads the filtered log as a timestamped text file.
+- **Release type badge** in the footer: amber **PRE-RELEASE** or grey **DEV** shown when running a non-stable build so it's always clear which version is running.
 - **RAG embedding model selector** groups embedding-capable models at the top of the select, making it immediately clear which models produce valid embeddings.
 
 ---

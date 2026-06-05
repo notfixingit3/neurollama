@@ -2,10 +2,10 @@
 
 **Generated:** 2026-06-04
 **Commit:** HEAD
-**Branch:** main
+**Branch:** dev
 
 ## OVERVIEW
-Self-hosted Go web app for managing local & remote Ollama nodes. Nord-themed dashboard with chat playground, model builder, VRAM telemetry, benchmarks, and diagnostics. Single binary deployment.
+Self-hosted Go web app for managing local & remote Ollama nodes. Nord-themed dashboard with chat playground, model builder + NeuroWizard (13 guided wizards), VRAM telemetry, benchmarks (8 types), RAG with collection manager, SSH-based remote Ollama update, activity log, and diagnostics. Single binary deployment.
 
 ## STRUCTURE
 ```
@@ -87,6 +87,9 @@ docker-compose up -d
 ## NOTES
 - Runs on `http://localhost:8811` by default; override with `PORT` env var
 - Data stored in `data/neurollama.db` (auto-created on first launch)
+- SSH key store encryption key at `data/ssh_keystore.key` (0600, auto-generated, AES-256-GCM)
 - Server credentials (Bearer tokens, Basic Auth passwords) are redacted from API responses
 - Remote node limitation: Ollama API doesn't expose total VRAM capacity — VRAM percentage bars not meaningful for remote servers
 - CI release workflow does NOT build CSS — `static/css/output.css` is pre-compiled and committed; the CI job only compiles the Go binary
+- All `innerHTML` insertions of server/user data MUST use `escapeHTML()` — audit complete as of v0.2.24
+- NeuroWizard shared infrastructure: `_wzLaunch(id, modelfile, newName)` handles all SSE streaming; `launchWz(id)` is the dispatch entry point; `populateWizardSelects()` keeps model selects in sync
