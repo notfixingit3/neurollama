@@ -519,6 +519,12 @@
                   <input type="range" id="chat-rag-top-k" min="1" max="10" step="1" value="3" oninput="document.getElementById('chat-rag-top-k-value').textContent = this.value"
                          class="range range-xs range-info bg-[#4c566a]" />
                 </div>
+                <div class="form-control" id="chat-rag-collection-container">
+                  <label class="label py-0.5"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Collection Filter</span></label>
+                  <select id="chat-rag-collection" class="select select-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-[10px] focus:border-[#88c0d0] focus:outline-none w-full text-[#d8dee9]">
+                    <option value="">All Collections</option>
+                  </select>
+                </div>
               </div>
 
               <!-- Advanced options section -->
@@ -2441,6 +2447,19 @@
                 </select>
               </div>
 
+              <!-- Collection input -->
+              <div class="form-control w-full">
+                <label class="label py-1">
+                  <span class="label-text text-[10px] font-mono text-[#88c0d0] uppercase font-bold">Collection</span>
+                </label>
+                <div class="flex gap-2">
+                  <input type="text" id="rag-collection-input" list="rag-collection-list" placeholder="Default"
+                         class="input input-sm flex-1 bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none text-[#d8dee9]" />
+                  <datalist id="rag-collection-list"><!-- populated by JS --></datalist>
+                </div>
+                <div class="text-[9px] text-[#4c566a] font-mono mt-0.5">Group documents by topic. Type a new name or pick an existing one.</div>
+              </div>
+
               <!-- Drag and drop zone -->
               <div class="form-control w-full">
                 <label class="label py-1">
@@ -2473,9 +2492,15 @@
                 <i class="fa-solid fa-magnifying-glass-chart mr-2"></i>Test Similarity Query
               </h2>
               
-              <div class="flex gap-2 mb-3 shrink-0">
+              <div class="flex gap-2 mb-2 shrink-0">
                 <input type="text" id="rag-test-query" placeholder="Type a prompt to test chunk matching..." class="input input-sm flex-1 bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none text-[#d8dee9]" />
                 <button onclick="runRAGSimilarityQuery()" class="btn btn-sm btn-info font-tech uppercase tracking-wide px-4">Search</button>
+              </div>
+              <div class="flex items-center gap-2 mb-3 shrink-0">
+                <span class="text-[9px] font-mono text-[#4c566a] uppercase shrink-0">Collection:</span>
+                <select id="rag-query-collection" onchange="void(0)" class="select select-xs flex-1 bg-[#2e3440]/60 border-[#4c566a] font-mono text-[10px] focus:border-[#88c0d0] focus:outline-none text-[#d8dee9]">
+                  <option value="">All Collections</option>
+                </select>
               </div>
 
               <!-- Query results -->
@@ -2507,8 +2532,9 @@
                     <tr class="text-[#88c0d0] border-b border-[#4c566a]/30 uppercase text-[9px] font-tech font-bold">
                       <th class="bg-transparent pl-0">Document Name</th>
                       <th class="bg-transparent">Embedding Model</th>
+                      <th class="bg-transparent hidden sm:table-cell">Collection</th>
                       <th class="bg-transparent text-center">Chunks</th>
-                      <th class="bg-transparent">Indexed At</th>
+                      <th class="bg-transparent hidden md:table-cell">Indexed At</th>
                       <th class="bg-transparent text-center pr-0">Action</th>
                     </tr>
                   </thead>

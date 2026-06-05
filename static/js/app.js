@@ -747,7 +747,10 @@ async function init() {
   }
 
   if (chatRagEnabledEl) {
-    chatRagEnabledEl.addEventListener('change', updateChatRAGControlsState);
+    chatRagEnabledEl.addEventListener('change', () => {
+      updateChatRAGControlsState();
+      if (chatRagEnabledEl.checked) fetchRAGCollections();
+    });
     
     const savedRagEnabled = getPref('chat-rag-enabled') === 'true';
     chatRagEnabledEl.checked = savedRagEnabled;
@@ -1018,6 +1021,7 @@ function switchWorkspace(workspace) {
   } else if (workspace === 'rag') {
     populateModelDropdowns();
     loadRAGDocuments();
+    fetchRAGCollections();
   } else if (workspace === 'fleet') {
     fetchFleetOverview();
   }
@@ -4274,7 +4278,8 @@ async function sendChatMessage() {
     num_thread: numThread,
     rag_enabled: ragEnabled,
     rag_embedding_model: ragModel,
-    rag_top_k: ragTopK
+    rag_top_k: ragTopK,
+    rag_collection: document.getElementById('chat-rag-collection')?.value || '',
   };
   if (seedVal) {
     payload.seed = parseInt(seedVal);
@@ -7026,25 +7031,29 @@ function renderCrossNodeResults(results, q) {
   if (accordionEl && accordionEl.parentNode === listBody) listBody.removeChild(accordionEl);
 
   if (results.length === 0) {
-    listBody.innerHTML = `<tr><td colspan="6" class="text-center py-8 text-[#4c566a] italic text-xs">No models matching "${q}" found on any node.</td></tr>`;
+    listBody.innerHTML = `<tr><td colspan="6" class="text-center py-8 text-[#4c566a] italic text-xs">No models matching "${escapeHTML(q)}" found on any node.</td></tr>`;
     return;
   }
 
   listBody.innerHTML = results.map(r => {
     const sizeFormatted = formatBytes(r.size);
-    const paramSize     = (r.details && r.details.parameter_size) || 'N/A';
+    const paramSize     = escapeHTML((r.details && r.details.parameter_size) || 'N/A');
     const dateFormatted = r.modified_at ? new Date(r.modified_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
     const isActiveNode  = servers.find(s => s.id === r.node_id)?.isActive;
     const nodeBadgeColor = isActiveNode ? 'border-[#88c0d0] text-[#88c0d0]' : 'border-[#4c566a] text-[#4c566a]';
+    const safeName      = escapeHTML(r.name || '');
+    const safeNodeName  = escapeHTML(r.node_name || r.node_id || '');
+    const safeUrl       = escapeHTML(r.url || '');
+    const safeNodeId    = escapeHTML(r.node_id || '');
 
     return `
       <tr class="hover:bg-[#3b4252]/30 border-b border-[#4c566a]/30 transition-colors">
         <td>
           <span class="badge badge-outline text-[8px] font-mono font-bold ${nodeBadgeColor} whitespace-nowrap"
-                title="${r.url}">${r.node_name || r.node_id}</span>
+                title="${safeUrl}">${safeNodeName}</span>
         </td>
         <td>
-          <span class="font-bold text-[#e5e9f0] text-xs">${r.name}</span>
+          <span class="font-bold text-[#e5e9f0] text-xs">${safeName}</span>
           <span class="text-[9px] text-[#4c566a] block">${sizeFormatted} // ${paramSize}</span>
         </td>
         <td class="hidden sm:table-cell text-xs">${sizeFormatted}</td>
@@ -7055,11 +7064,11 @@ function renderCrossNodeResults(results, q) {
         <td>
           ${isActiveNode
             ? `<div class="flex items-center gap-1.5">
-                <button onclick="inspectModelFromSearch('${r.name}')" class="btn btn-xs btn-neutral border-[#4c566a] text-[10px] font-tech w-[62px]" title="Inspect">INSPECT</button>
-                <button onclick="cloneModelPrompt('${r.name}')" class="btn btn-xs btn-outline btn-info text-[10px] font-tech" title="Clone Model">CLONE</button>
-                <button onclick="deleteSingleModel('${r.name}')" class="btn btn-xs btn-ghost text-[#bf616a] hover:bg-[#bf616a]/15 p-1" title="Delete Model"><i class="fa-solid fa-trash-can"></i></button>
+                <button onclick="inspectModelFromSearch('${safeName}')" class="btn btn-xs btn-neutral border-[#4c566a] text-[10px] font-tech w-[62px]" title="Inspect">INSPECT</button>
+                <button onclick="cloneModelPrompt('${safeName}')" class="btn btn-xs btn-outline btn-info text-[10px] font-tech" title="Clone Model">CLONE</button>
+                <button onclick="deleteSingleModel('${safeName}')" class="btn btn-xs btn-ghost text-[#bf616a] hover:bg-[#bf616a]/15 p-1" title="Delete Model"><i class="fa-solid fa-trash-can"></i></button>
                </div>`
-            : `<button onclick="selectServer('${r.node_id}')" class="btn btn-xs btn-outline btn-info text-[9px] font-tech">SET ACTIVE</button>`}
+            : `<button onclick="selectServer('${safeNodeId}')" class="btn btn-xs btn-outline btn-info text-[9px] font-tech">SET ACTIVE</button>`}
         </td>
       </tr>
     `;
@@ -10003,7 +10012,7 @@ async function loadOptimizerHistory() {
   } catch (error) {
     container.innerHTML = `
       <div class="text-center py-8 text-[#bf616a] italic text-xs">
-        Failed to load optimization history: ${error.message}
+        Failed to load optimization history: ${escapeHTML(error.message)}
       </div>
     `;
   }
@@ -10054,7 +10063,7 @@ async function handleRAGUpload(file) {
     const time  = new Date().toLocaleTimeString();
     const style = isError ? 'text-[#bf616a]' : 'text-[#d8dee9]/80';
     if (uploadLogs) {
-      uploadLogs.innerHTML += `<div class="${style}">[${time}] ${msg}</div>`;
+      uploadLogs.innerHTML += `<div class="${style}">[${time}] ${escapeHTML(String(msg))}</div>`;
       uploadLogs.scrollTop = uploadLogs.scrollHeight;
     }
   };
@@ -10077,8 +10086,19 @@ async function handleRAGUpload(file) {
     return;
   }
 
+  // Duplicate detection: warn if same filename already indexed
+  const dupDoc = (await fetch('/api/rag/documents').then(r => r.json()).catch(() => [])).find(d => d.name === file.name);
+  if (dupDoc) {
+    if (!confirm(`"${file.name}" is already indexed (${dupDoc.chunk_count} chunks, collection: ${dupDoc.collection || 'Default'}).\n\nProceed? This will create a second copy — to replace, delete the existing document first.`)) {
+      if (progressDiv) progressDiv.classList.add('hidden');
+      return;
+    }
+  }
+
+  const collection = document.getElementById('rag-collection-input')?.value.trim() || 'Default';
+
   updateProgress(3, 'Uploading...');
-  logMessage(`Uploading ${file.name} (${fileMB.toFixed(1)} MB) for server-side processing...`);
+  logMessage(`Uploading ${file.name} (${fileMB.toFixed(1)} MB) → collection: ${collection}`);
   if (fileMB > 20) {
     logMessage(`⚠ Large file — extraction and embedding may take a moment.`);
   }
@@ -10087,6 +10107,7 @@ async function handleRAGUpload(file) {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('embedding_model', model);
+    formData.append('collection', collection);
 
     const response = await fetch('/api/rag/upload-and-index', {
       method: 'POST',
@@ -10178,18 +10199,23 @@ async function loadRAGDocuments() {
     let html = '';
     docs.forEach(doc => {
       const createdDate = new Date(doc.created_at).toLocaleString();
-      // Escape probe phrase for use in onclick attribute (single-quoted JS string)
       const probeEscaped = (doc.probe_phrase || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, ' ').trim();
       const modelEscaped = (doc.embedding_model || '').replace(/'/g, "\\'");
       const hasProbe = probeEscaped.length > 0;
+      const collection = doc.collection || 'Default';
       html += `
         <tr class="hover:bg-[#3b4252]/20 border-b border-[#4c566a]/20 last:border-none transition-colors">
           <td class="py-2.5 pl-0 font-bold text-[#d8dee9] max-w-[180px] truncate" title="${escapeHTML(doc.name)}">
             <i class="fa-regular fa-file-code text-[#88c0d0] mr-1.5"></i>${escapeHTML(doc.name)}
           </td>
           <td class="py-2.5 text-[#4c566a] text-xs font-mono select-all">${escapeHTML(doc.embedding_model)}</td>
+          <td class="py-2.5 hidden sm:table-cell">
+            <span class="rag-collection-badge inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-[#4c566a]/50 text-[9px] font-mono text-[#81a1c1] cursor-pointer hover:border-[#88c0d0]/50 transition-colors"
+                  title="Click to rename collection"
+                  onclick="startRAGCollectionEdit(this, ${doc.id}, '${escapeHTML(collection)}')">${escapeHTML(collection)}</span>
+          </td>
           <td class="py-2.5 text-center text-[#88c0d0] font-bold">${doc.chunk_count || 0}</td>
-          <td class="py-2.5 text-[#4c566a] text-[10px]">${createdDate}</td>
+          <td class="py-2.5 text-[#4c566a] text-[10px] hidden md:table-cell">${createdDate}</td>
           <td class="py-2.5 text-center pr-0">
             <div class="flex items-center justify-center gap-1">
               ${hasProbe ? `
@@ -10207,12 +10233,13 @@ async function loadRAGDocuments() {
       `;
     });
     tbody.innerHTML = html;
+    fetchRAGCollections(); // refresh collection dropdowns after doc list loads
   } catch (error) {
     console.error('Error loading RAG documents:', error);
     tbody.innerHTML = `
       <tr>
         <td colspan="5" class="text-center py-6 text-[#bf616a] italic text-xs">
-          Failed to load indexed documents: ${error.message}
+          Failed to load indexed documents: ${escapeHTML(error.message)}
         </td>
       </tr>
     `;
@@ -10239,6 +10266,70 @@ async function deleteRAGDocument(id, name) {
   } catch (error) {
     showToast(error.message, 'error');
   }
+}
+
+// ── RAG Collection Manager ───────────────────────────────────────────────────
+let ragCollections = [];
+
+async function fetchRAGCollections() {
+  try {
+    const res = await fetch('/api/rag/collections');
+    if (!res.ok) return;
+    ragCollections = await res.json() || [];
+    _populateRAGCollectionDropdowns();
+    _populateRAGCollectionDatalist();
+  } catch { /* silent */ }
+}
+
+function _populateRAGCollectionDatalist() {
+  const dl = document.getElementById('rag-collection-list');
+  if (!dl) return;
+  dl.innerHTML = ragCollections.map(c => `<option value="${escapeHTML(c)}">`).join('');
+}
+
+function _populateRAGCollectionDropdowns() {
+  const opts = '<option value="">All Collections</option>' +
+    ragCollections.map(c => `<option value="${escapeHTML(c)}">${escapeHTML(c)}</option>`).join('');
+  ['rag-query-collection', 'chat-rag-collection'].forEach(id => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    const prev = sel.value;
+    sel.innerHTML = opts;
+    if (prev && sel.querySelector(`option[value="${CSS.escape(prev)}"]`)) sel.value = prev;
+  });
+}
+
+// Inline collection rename on badge click
+function startRAGCollectionEdit(badgeEl, docId, currentCollection) {
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = currentCollection;
+  input.className = 'input input-xs w-28 bg-[#242933] border-[#88c0d0] font-mono text-[9px] text-[#d8dee9] focus:outline-none';
+  input.list = 'rag-collection-list';
+
+  const save = async () => {
+    const newCol = input.value.trim() || 'Default';
+    if (newCol === currentCollection) { loadRAGDocuments(); return; }
+    try {
+      const res = await fetch(`/api/rag/documents/${docId}/collection`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ collection: newCol }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      loadRAGDocuments();
+    } catch (e) { showToast(e.message, 'error'); loadRAGDocuments(); }
+  };
+
+  input.addEventListener('blur', save);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { loadRAGDocuments(); }
+  });
+
+  badgeEl.replaceWith(input);
+  input.focus();
+  input.select();
 }
 
 // Pre-fills the similarity tester with a known phrase from the document and fires the query.
@@ -10291,13 +10382,15 @@ async function runRAGSimilarityQuery() {
   `;
   
   try {
+    const collection = document.getElementById('rag-query-collection')?.value || '';
     const response = await fetch('/api/rag/query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         query: query,
         embedding_model: modelSelect.value,
-        top_k: 3
+        top_k: 3,
+        collection,
       })
     });
     
@@ -10335,7 +10428,7 @@ async function runRAGSimilarityQuery() {
     console.error('Similarity search error:', error);
     resultsDiv.innerHTML = `
       <div class="text-center py-8 text-[#bf616a] italic text-xs border border-[#bf616a]/35 bg-[#bf616a]/5 rounded-lg">
-        Failed to query similarity: ${error.message}
+        Failed to query similarity: ${escapeHTML(error.message)}
       </div>
     `;
     showToast(error.message, 'error');

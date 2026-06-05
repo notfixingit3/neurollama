@@ -87,8 +87,14 @@
 - [ ] **RAG: Large Document Batching**
   - For very large documents (500+ chunks), consider batching the embed call into groups of 100-200 chunks and posting them sequentially rather than one massive payload, with per-batch progress updates. Reduces peak memory pressure on Ollama and gives finer-grained progress.
 
-- [ ] **RAG Collection Manager (filtering & re-indexing)**
-  - Per-document re-indexing, embedding dimension mismatch checks on query (querying with a different model than was used to index), duplicate detection, and per-collection filters so chat RAG can target specific document sets rather than all indexed docs.
+- [x] **RAG Collection Manager**
+  - `collection` field on `rag_documents` table (migration: ALTER TABLE ADD COLUMN, default 'Default')
+  - Collection input on upload form (datalist combobox: type new or pick existing)
+  - Duplicate detection: warns before uploading a file whose name already exists in the index
+  - Inline collection rename: click collection badge in document table → input → Enter/blur saves
+  - Collection filter in similarity query tester and chat RAG sidebar
+  - `GET /api/rag/collections`, `PUT /api/rag/documents/:id/collection`
+  - Collection filter propagated to `GetRAGChunksForModel` (chat RAG + similarity query both respect it)
 
 - [ ] **Memory Telemetry: Real Remote VRAM Monitoring**
   - Ollama's `/api/ps` exposes loaded model sizes but not total GPU VRAM capacity or utilization. The VRAM progress bars currently scale against the NEUROLLAMA host machine's RAM which is meaningless for remote servers.
@@ -110,10 +116,8 @@
   - Make the bind host configurable and default local installs to `127.0.0.1` instead of listening on all interfaces.
   - Update Docker examples to publish `127.0.0.1:8080:8080` by default, with explicit reverse-proxy guidance for public deployments.
 
-- [x] **Stored XSS Hardening Pass (partial — v0.2.20)**
-  - Server registry cards, fleet node cards, scheduler logs, and telemetry active-model rows are now fully escaped via `escapeHTML()`.
-  - Remaining exposure: optimizer tables, RAG document/query output, upload logs — still need a pass.
-  - A safe-render helper (`escapeHTML`) already exists; usage needs to be audited across remaining `innerHTML` sites.
+- [x] **Stored XSS Hardening Pass (complete)**
+  - All known `innerHTML` injection points now use `escapeHTML()`: server/fleet/telemetry cards (v0.2.20), optimizer error messages, RAG upload logMessage, RAG query error div, cross-node search results (name/node/url/paramSize), empty-state query message.
 
 - [ ] **Auto-Compression Current-Turn Fix**
   - When auto-compressing, summarize older history but preserve the current user message in the request sent to Ollama.

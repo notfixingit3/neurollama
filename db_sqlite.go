@@ -163,6 +163,7 @@ type RAGDocument struct {
 	ID             int64  `json:"id"`
 	Name           string `json:"name"`
 	EmbeddingModel string `json:"embedding_model"`
+	Collection     string `json:"collection"`
 	ChunkCount     int    `json:"chunk_count"`
 	CreatedAt      string `json:"created_at"`
 	ProbePhrase    string `json:"probe_phrase"` // first ~200 chars of chunk 0 for the TEST button
@@ -466,6 +467,7 @@ func migrate() error {
 		{"benchmarks", "benchmark_type", "ALTER TABLE benchmarks ADD COLUMN benchmark_type TEXT NOT NULL DEFAULT 'standard'"},
 		{"benchmarks", "extra_json",     "ALTER TABLE benchmarks ADD COLUMN extra_json TEXT NOT NULL DEFAULT ''"},
 		{"benchmarks", "ollama_version", "ALTER TABLE benchmarks ADD COLUMN ollama_version TEXT NOT NULL DEFAULT ''"},
+		{"rag_documents", "collection",   "ALTER TABLE rag_documents ADD COLUMN collection TEXT NOT NULL DEFAULT 'Default'"},
 	}
 
 	for _, alter := range alterQueries {
@@ -1274,14 +1276,17 @@ func GetGroupedOptimizerRuns() ([]OptimizerRunGroup, error) {
 
 // RAG Helper Functions
 
-func SaveRAGDocument(name string, embeddingModel string, chunks []RAGChunk) (int64, error) {
+func SaveRAGDocument(name string, embeddingModel string, collection string, chunks []RAGChunk) (int64, error) {
+	if collection == "" {
+		collection = "Default"
+	}
 	tx, err := DB.Begin()
 	if err != nil {
 		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }() // no-op after Commit
 
-	res, err := tx.Exec("INSERT INTO rag_documents (name, embedding_model) VALUES (?, ?)", name, embeddingModel)
+	res, err := tx.Exec("INSERT INTO rag_documents (name, embedding_model, collection) VALUES (?, ?, ?)", name, embeddingModel, collection)
 	if err != nil {
 		return 0, err
 	}
@@ -1342,7 +1347,7 @@ func AppendRAGChunks(docID int64, chunks []RAGChunk) error {
 func GetRAGDocuments() ([]RAGDocument, error) {
 	// Pull the first ~200 chars of chunk 0 per document as a probe phrase for the TEST button.
 	rows, err := DB.Query(`
-		SELECT d.id, d.name, d.embedding_model,
+		SELECT d.id, d.name, d.embedding_model, COALESCE(d.collection,'Default'),
 		       (SELECT COUNT(*) FROM rag_chunks WHERE document_id = d.id) AS chunk_count,
 		       datetime(d.created_at, 'localtime'),
 		       SUBSTR(COALESCE(
@@ -1350,7 +1355,7 @@ func GetRAGDocuments() ([]RAGDocument, error) {
 		           ''
 		       ), 1, 200) AS probe_phrase
 		FROM rag_documents d
-		ORDER BY d.id DESC
+		ORDER BY d.collection, d.id DESC
 	`)
 	if err != nil {
 		return nil, err
@@ -1360,12 +1365,43 @@ func GetRAGDocuments() ([]RAGDocument, error) {
 	var list []RAGDocument
 	for rows.Next() {
 		var doc RAGDocument
-		if err := rows.Scan(&doc.ID, &doc.Name, &doc.EmbeddingModel, &doc.ChunkCount, &doc.CreatedAt, &doc.ProbePhrase); err != nil {
+		if err := rows.Scan(&doc.ID, &doc.Name, &doc.EmbeddingModel, &doc.Collection, &doc.ChunkCount, &doc.CreatedAt, &doc.ProbePhrase); err != nil {
 			return nil, err
 		}
 		list = append(list, doc)
 	}
 	return list, nil
+}
+
+func GetRAGCollections() ([]string, error) {
+	rows, err := DB.Query(`SELECT DISTINCT COALESCE(collection,'Default') FROM rag_documents ORDER BY 1`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var list []string
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			return nil, err
+		}
+		list = append(list, c)
+	}
+	return list, nil
+}
+
+func UpdateRAGDocumentCollection(id int64, collection string) error {
+	if collection == "" {
+		collection = "Default"
+	}
+	_, err := DB.Exec("UPDATE rag_documents SET collection = ? WHERE id = ?", collection, id)
+	return err
+}
+
+func CheckRAGDocumentDuplicate(name string) (bool, error) {
+	var count int
+	err := DB.QueryRow("SELECT COUNT(*) FROM rag_documents WHERE name = ?", name).Scan(&count)
+	return count > 0, err
 }
 
 func DeleteRAGDocument(id int64) error {
@@ -1377,12 +1413,26 @@ func DeleteRAGDocument(id int64) error {
 	return err
 }
 
-func GetRAGChunksForModel(embeddingModel string) ([]RAGChunkWithDocInfo, error) {
-	rows, err := DB.Query(`
-		SELECT c.id, c.document_id, d.name, c.chunk_index, c.content, c.embedding 
-		FROM rag_chunks c 
-		JOIN rag_documents d ON c.document_id = d.id 
-		WHERE d.embedding_model = ?`, embeddingModel)
+func GetRAGChunksForModel(embeddingModel string, collection ...string) ([]RAGChunkWithDocInfo, error) {
+	var rows *sql.Rows
+	var err error
+	col := ""
+	if len(collection) > 0 {
+		col = collection[0]
+	}
+	if col != "" && col != "all" {
+		rows, err = DB.Query(`
+			SELECT c.id, c.document_id, d.name, c.chunk_index, c.content, c.embedding
+			FROM rag_chunks c
+			JOIN rag_documents d ON c.document_id = d.id
+			WHERE d.embedding_model = ? AND COALESCE(d.collection,'Default') = ?`, embeddingModel, col)
+	} else {
+		rows, err = DB.Query(`
+			SELECT c.id, c.document_id, d.name, c.chunk_index, c.content, c.embedding
+			FROM rag_chunks c
+			JOIN rag_documents d ON c.document_id = d.id
+			WHERE d.embedding_model = ?`, embeddingModel)
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -467,7 +467,9 @@ func main() {
 		api.POST("/rag/documents", uploadRAGDocumentHandler)
 		api.POST("/rag/documents/:id/chunks", appendRAGChunksHandler)
 		api.DELETE("/rag/documents/:id", deleteRAGDocumentHandler)
+		api.PUT("/rag/documents/:id/collection", updateRAGDocumentCollectionHandler)
 		api.POST("/rag/query", queryRAGSimilarityHandler)
+		api.GET("/rag/collections", getRAGCollectionsHandler)
 
 		// User preferences (DB-backed, default admin user)
 		api.GET("/preferences", getPreferencesHandler)
@@ -1315,6 +1317,7 @@ type ChatStreamRequest struct {
 	RagEnabled        *bool         `json:"rag_enabled"`
 	RagEmbeddingModel string        `json:"rag_embedding_model"`
 	RagTopK           *int          `json:"rag_top_k"`
+	RagCollection     string        `json:"rag_collection"`
 }
 
 func chatStreamHandler(c *gin.Context) {
@@ -1447,7 +1450,7 @@ func chatStreamHandler(c *gin.Context) {
 			embeddings, err := client.GetEmbeddings(req.RagEmbeddingModel, []string{chatReq.Messages[lastUserMsgIdx].Content})
 			if err == nil && len(embeddings) > 0 {
 				queryEmbed := embeddings[0]
-				allChunks, err := GetRAGChunksForModel(req.RagEmbeddingModel)
+				allChunks, err := GetRAGChunksForModel(req.RagEmbeddingModel, req.RagCollection)
 				if err == nil && len(allChunks) > 0 {
 					type matchResult struct {
 						chunk RAGChunkWithDocInfo
@@ -5844,14 +5847,18 @@ func uploadAndIndexHandler(c *gin.Context) {
 		}
 	}
 
-	docID, err := SaveRAGDocument(filename, embeddingModel, ragChunks)
+	collection := c.PostForm("collection")
+	if collection == "" {
+		collection = "Default"
+	}
+	docID, err := SaveRAGDocument(filename, embeddingModel, collection, ragChunks)
 	if err != nil {
 		emit(ndjsonEvent{"type": "error", "message": fmt.Sprintf("Database save failed: %v", err)})
 		return
 	}
 
-	LogActivity("rag", fmt.Sprintf("Indexed: %s — %d chunks via %s", filename, len(ragChunks), embeddingModel))
-	emit(ndjsonEvent{"type": "done", "document_id": docID, "chunks": len(ragChunks)})
+	LogActivity("rag", fmt.Sprintf("Indexed: %s — %d chunks via %s (collection: %s)", filename, len(ragChunks), embeddingModel, collection))
+	emit(ndjsonEvent{"type": "done", "document_id": docID, "chunks": len(ragChunks), "collection": collection})
 }
 
 func uploadRAGDocumentHandler(c *gin.Context) {
@@ -5926,7 +5933,7 @@ func uploadRAGDocumentHandler(c *gin.Context) {
 		})
 	}
 
-	docID, err := SaveRAGDocument(req.Name, req.EmbeddingModel, chunksToSave)
+	docID, err := SaveRAGDocument(req.Name, req.EmbeddingModel, "Default", chunksToSave)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -6042,11 +6049,45 @@ func deleteRAGDocumentHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Document deleted successfully"})
 }
 
+func updateRAGDocumentCollectionHandler(c *gin.Context) {
+	idStr := c.Param("id")
+	var id int64
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid document ID"})
+		return
+	}
+	var body struct {
+		Collection string `json:"collection"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := UpdateRAGDocumentCollection(id, body.Collection); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Collection updated"})
+}
+
+func getRAGCollectionsHandler(c *gin.Context) {
+	cols, err := GetRAGCollections()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if cols == nil {
+		cols = []string{}
+	}
+	c.JSON(http.StatusOK, cols)
+}
+
 func queryRAGSimilarityHandler(c *gin.Context) {
 	var req struct {
 		Query          string `json:"query" binding:"required"`
 		EmbeddingModel string `json:"embedding_model" binding:"required"`
 		TopK           int    `json:"top_k"`
+		Collection     string `json:"collection"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -6074,8 +6115,8 @@ func queryRAGSimilarityHandler(c *gin.Context) {
 	}
 	queryEmbed := embeddings[0]
 
-	// Fetch all chunks for target model
-	allChunks, err := GetRAGChunksForModel(req.EmbeddingModel)
+	// Fetch all chunks for target model (optionally filtered by collection)
+	allChunks, err := GetRAGChunksForModel(req.EmbeddingModel, req.Collection)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
