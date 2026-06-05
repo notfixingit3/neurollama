@@ -1064,6 +1064,7 @@ function switchSystemSubtab(subtab) {
     renderStreamFailureLog();
   } else if (subtab === 'activity') {
     startActivityPoll();
+    markActivitySeen();
   } else if (subtab === 'about') {
     stopActivityPoll();
     fetchAbout();
@@ -1397,11 +1398,20 @@ const ACTIVITY_CATEGORY_STYLE = {
   model:     { bg: 'bg-[#81a1c1]/15', text: 'text-[#81a1c1]',  label: 'MODEL'     },
   node:      { bg: 'bg-[#b48ead]/15', text: 'text-[#b48ead]',  label: 'NODE'      },
   benchmark: { bg: 'bg-[#ebcb8b]/15', text: 'text-[#ebcb8b]',  label: 'BENCH'     },
+  rag:       { bg: 'bg-[#8fbcbb]/15', text: 'text-[#8fbcbb]',  label: 'RAG'       },
+  optimizer: { bg: 'bg-[#d08770]/15', text: 'text-[#d08770]',  label: 'OPT'       },
   system:    { bg: 'bg-[#4c566a]/30', text: 'text-[#d8dee9]',   label: 'SYSTEM'    },
 };
 
+let _activityFilter    = 'all';
+let _activityLastCount = 0;  // count seen when activity panel was last opened
+
+let _activityAllEntries = []; // full list, filtered on render
+
 function startActivityPoll() {
   fetchActivity();
+  const liveEl = document.getElementById('activity-live-dot');
+  if (liveEl) liveEl.classList.remove('hidden');
   if (!activityPollInterval) {
     activityPollInterval = setInterval(fetchActivity, 5000);
   }
@@ -1412,6 +1422,8 @@ function stopActivityPoll() {
     clearInterval(activityPollInterval);
     activityPollInterval = null;
   }
+  const liveEl = document.getElementById('activity-live-dot');
+  if (liveEl) liveEl.classList.add('hidden');
 }
 
 async function fetchActivity() {
@@ -1419,8 +1431,46 @@ async function fetchActivity() {
     const res = await fetch('/api/activity');
     if (!res.ok) return;
     const entries = await res.json();
+    _activityAllEntries = entries;
     renderActivityLog(entries);
+    // Update tab badge if activity panel is not currently open
+    const panel = document.getElementById('ws-panel-activity');
+    const panelVisible = panel && !panel.classList.contains('hidden');
+    const badge = document.getElementById('activity-new-badge');
+    if (badge) {
+      if (!panelVisible && entries.length > _activityLastCount) {
+        const diff = entries.length - _activityLastCount;
+        badge.textContent = diff > 99 ? '99+' : String(diff);
+        badge.classList.remove('hidden');
+      } else if (panelVisible) {
+        _activityLastCount = entries.length;
+        badge.classList.add('hidden');
+      }
+    }
   } catch { /* silent — poll will retry */ }
+}
+
+function markActivitySeen() {
+  _activityLastCount = _activityAllEntries.length;
+  const badge = document.getElementById('activity-new-badge');
+  if (badge) badge.classList.add('hidden');
+}
+
+function setActivityFilter(cat) {
+  _activityFilter = cat;
+  // Update pill styles
+  document.querySelectorAll('.activity-filter-btn').forEach(btn => {
+    const isCat = btn.id === `af-${cat}`;
+    btn.classList.toggle('active', isCat);
+    if (isCat) {
+      btn.classList.add('border-[#88c0d0]/50', 'text-[#88c0d0]', 'bg-[#88c0d0]/10');
+      btn.classList.remove('border-[#4c566a]/50', 'text-[#4c566a]');
+    } else {
+      btn.classList.remove('border-[#88c0d0]/50', 'text-[#88c0d0]', 'bg-[#88c0d0]/10');
+      btn.classList.add('border-[#4c566a]/50', 'text-[#4c566a]');
+    }
+  });
+  renderActivityLog(_activityAllEntries);
 }
 
 function renderActivityLog(entries) {
@@ -1428,25 +1478,51 @@ function renderActivityLog(entries) {
   const countEl = document.getElementById('activity-count');
   if (!list) return;
 
-  if (countEl) countEl.textContent = entries.length ? `(${entries.length})` : '';
+  const filtered = _activityFilter === 'all'
+    ? entries
+    : entries.filter(e => e.category === _activityFilter);
 
-  if (!entries.length) {
-    list.innerHTML = '<div class="px-4 py-6 text-center text-[#4c566a] text-[11px]">No activity yet. Events will appear here as you use the app.</div>';
+  if (countEl) countEl.textContent = filtered.length ? `(${filtered.length})` : '';
+
+  if (!filtered.length) {
+    const msg = _activityFilter === 'all'
+      ? 'No activity yet. Events will appear here as you use the app.'
+      : `No ${_activityFilter} events recorded yet.`;
+    list.innerHTML = `<div class="px-4 py-6 text-center text-[#4c566a] text-[11px]">${msg}</div>`;
     return;
   }
 
-  list.innerHTML = entries.map(e => {
+  list.innerHTML = filtered.map(e => {
     const style = ACTIVITY_CATEGORY_STYLE[e.category] || ACTIVITY_CATEGORY_STYLE.system;
     return `
       <div class="flex items-start gap-3 px-4 py-2.5 hover:bg-[#2e3440]/40 transition-colors">
-        <span class="font-mono text-[10px] text-[#4c566a] shrink-0 pt-px w-16">${e.time}</span>
+        <span class="font-mono text-[10px] text-[#4c566a] shrink-0 pt-px w-24">${escapeHTML(e.time)}</span>
         <span class="shrink-0 inline-block px-1.5 py-0.5 rounded text-[9px] font-mono font-bold tracking-wider ${style.bg} ${style.text}">${style.label}</span>
         <span class="font-mono text-[11px] text-[#d8dee9] leading-relaxed">${escapeHTML(e.message)}</span>
       </div>`;
   }).join('');
 }
 
+function exportActivityLog() {
+  const entries = _activityFilter === 'all'
+    ? _activityAllEntries
+    : _activityAllEntries.filter(e => e.category === _activityFilter);
+  if (!entries.length) { showToast('No entries to export', 'warning'); return; }
+  const text = entries.map(e => `[${e.time}] [${e.category.toUpperCase()}] ${e.message}`).join('\n');
+  const blob = new Blob([text], { type: 'text/plain' });
+  const url  = URL.createObjectURL(blob);
+  const a    = Object.assign(document.createElement('a'), {
+    href: url,
+    download: `neurollama-activity-${new Date().toISOString().slice(0, 10)}.txt`,
+  });
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 function clearActivityDisplay() {
+  _activityAllEntries = [];
   const list = document.getElementById('activity-log-list');
   const countEl = document.getElementById('activity-count');
   if (list) list.innerHTML = '<div class="px-4 py-6 text-center text-[#4c566a] text-[11px]">Display cleared. New events will appear as they occur.</div>';
@@ -1689,6 +1765,8 @@ function populateModelDropdowns() {
   }
   // Keep wizard selects in sync whenever the model list changes
   populateWizardSelects();
+  // Re-check name collision now that model list is updated
+  builderValidateName();
 }
 
 // --- TOAST SYSTEM ---
@@ -4568,6 +4646,30 @@ async function onBaseModelChange() {
   updateCtxWarning('builder-base-select', 'builder-ctx-select', 'builder-ctx-warn');
 }
 
+// Validate builder name field inline — called on every keystroke and before compile.
+// Returns true if valid (proceed), false if invalid (abort).
+function builderValidateName() {
+  const nameEl      = document.getElementById('builder-name-input');
+  const collisionEl = document.getElementById('builder-name-collision');
+  const invalidEl   = document.getElementById('builder-name-invalid');
+  if (!nameEl) return true;
+
+  const name = nameEl.value.trim().toLowerCase();
+  const validPattern = /^[a-z0-9][a-z0-9-_.:]*$/;
+  const isInvalid  = name.length > 0 && !validPattern.test(name);
+  const isCollision = name.length > 0 && validPattern.test(name) && models.some(m => m.name === name || m.name === `${name}:latest`);
+
+  if (collisionEl) collisionEl.classList.toggle('hidden', !isCollision);
+  if (invalidEl)   invalidEl.classList.toggle('hidden', !isInvalid);
+
+  // Border feedback
+  nameEl.classList.toggle('border-[#bf616a]', isInvalid);
+  nameEl.classList.toggle('border-[#ebcb8b]', isCollision && !isInvalid);
+  nameEl.classList.toggle('border-[#4c566a]', !isInvalid && !isCollision);
+
+  return !isInvalid; // collision is a warning, not a hard block
+}
+
 async function buildCustomModel() {
   if (isBuildingModel) return;
 
@@ -4579,6 +4681,7 @@ async function buildCustomModel() {
 
   const name = document.getElementById('builder-name-input').value.trim().toLowerCase();
   if (!name || !/^[a-z0-9-_.:]+$/.test(name)) {
+    builderValidateName();
     showToast('Enter a valid, URL-safe alphanumeric name', 'warning');
     return;
   }

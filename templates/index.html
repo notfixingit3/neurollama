@@ -978,8 +978,15 @@
               <!-- New model name input -->
               <div class="form-control">
                 <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">New Model Name</span></label>
-                <input type="text" id="builder-name-input" placeholder="e.g. customized-llama3" oninput="generateModelfilePreview()" required
+                <input type="text" id="builder-name-input" placeholder="e.g. customized-llama3"
+                       oninput="generateModelfilePreview(); builderValidateName()"
                        class="input input-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                <div id="builder-name-collision" class="hidden mt-1 text-[9px] font-mono text-[#ebcb8b]">
+                  <i class="fa-solid fa-triangle-exclamation mr-1"></i>Name matches an existing model — compiling will overwrite it
+                </div>
+                <div id="builder-name-invalid" class="hidden mt-1 text-[9px] font-mono text-[#bf616a]">
+                  <i class="fa-solid fa-circle-xmark mr-1"></i>Name must be lowercase alphanumeric with only - _ . : allowed
+                </div>
               </div>
 
               <!-- Temperature slider -->
@@ -1323,6 +1330,7 @@
             </button>
             <button id="system-subtab-activity" onclick="switchSystemSubtab('activity')" class="bench-subtab">
               <i class="fa-solid fa-timeline mr-1.5"></i>ACTIVITY
+              <span id="activity-new-badge" class="hidden ml-1 px-1 py-0 rounded-full text-[8px] font-bold bg-[#88c0d0] text-[#2e3440] leading-tight"></span>
             </button>
             <button id="system-subtab-memory" onclick="switchSystemSubtab('memory')" class="bench-subtab">
               <i class="fa-solid fa-memory mr-1.5"></i>MEMORY
@@ -1339,17 +1347,35 @@
         <!-- PANEL: ACTIVITY LOG -->
         <div id="ws-panel-activity" class="ws-panel hidden flex flex-col gap-4">
           <div class="tech-panel rounded-xl flex flex-col overflow-hidden">
-            <div class="px-4 py-3 border-b border-[#4c566a]/40 flex items-center justify-between">
-              <div class="flex items-center gap-2">
+            <div class="px-4 py-3 border-b border-[#4c566a]/40 flex flex-wrap items-center gap-3">
+              <div class="flex items-center gap-2 mr-auto">
                 <i class="fa-solid fa-timeline text-[#88c0d0] text-sm"></i>
                 <h3 class="text-[#88c0d0] font-mono font-bold text-xs tracking-widest">ACTIVITY LOG</h3>
                 <span id="activity-count" class="font-mono text-[10px] text-[#4c566a]"></span>
+                <span id="activity-live-dot" class="h-1.5 w-1.5 rounded-full bg-[#a3be8c] animate-pulse hidden" title="Live — polling for new events"></span>
               </div>
-              <button onclick="clearActivityDisplay()" class="btn btn-xs font-mono border-[#4c566a] text-[#4c566a] hover:text-[#d8dee9] hover:border-[#d8dee9]">
-                <i class="fa-solid fa-ban mr-1"></i>Clear Display
-              </button>
+              <!-- Category filter pills -->
+              <div class="flex flex-wrap gap-1" id="activity-filter-bar">
+                <button onclick="setActivityFilter('all')"   id="af-all"       class="activity-filter-btn active px-2 py-0.5 rounded text-[9px] font-mono font-bold border border-[#88c0d0]/50 text-[#88c0d0] bg-[#88c0d0]/10">ALL</button>
+                <button onclick="setActivityFilter('pull')"  id="af-pull"      class="activity-filter-btn px-2 py-0.5 rounded text-[9px] font-mono font-bold border border-[#4c566a]/50 text-[#4c566a]">PULL</button>
+                <button onclick="setActivityFilter('build')" id="af-build"     class="activity-filter-btn px-2 py-0.5 rounded text-[9px] font-mono font-bold border border-[#4c566a]/50 text-[#4c566a]">BUILD</button>
+                <button onclick="setActivityFilter('benchmark')" id="af-benchmark" class="activity-filter-btn px-2 py-0.5 rounded text-[9px] font-mono font-bold border border-[#4c566a]/50 text-[#4c566a]">BENCH</button>
+                <button onclick="setActivityFilter('model')" id="af-model"     class="activity-filter-btn px-2 py-0.5 rounded text-[9px] font-mono font-bold border border-[#4c566a]/50 text-[#4c566a]">MODEL</button>
+                <button onclick="setActivityFilter('rag')"   id="af-rag"       class="activity-filter-btn px-2 py-0.5 rounded text-[9px] font-mono font-bold border border-[#4c566a]/50 text-[#4c566a]">RAG</button>
+                <button onclick="setActivityFilter('optimizer')" id="af-optimizer" class="activity-filter-btn px-2 py-0.5 rounded text-[9px] font-mono font-bold border border-[#4c566a]/50 text-[#4c566a]">OPT</button>
+                <button onclick="setActivityFilter('node')"  id="af-node"      class="activity-filter-btn px-2 py-0.5 rounded text-[9px] font-mono font-bold border border-[#4c566a]/50 text-[#4c566a]">NODE</button>
+                <button onclick="setActivityFilter('system')" id="af-system"   class="activity-filter-btn px-2 py-0.5 rounded text-[9px] font-mono font-bold border border-[#4c566a]/50 text-[#4c566a]">SYS</button>
+              </div>
+              <div class="flex gap-1.5">
+                <button onclick="exportActivityLog()" class="btn btn-xs font-mono border-[#4c566a] text-[#4c566a] hover:text-[#d8dee9] hover:border-[#d8dee9]">
+                  <i class="fa-solid fa-download mr-1"></i>Export
+                </button>
+                <button onclick="clearActivityDisplay()" class="btn btn-xs font-mono border-[#4c566a] text-[#4c566a] hover:text-[#d8dee9] hover:border-[#d8dee9]">
+                  <i class="fa-solid fa-ban mr-1"></i>Clear
+                </button>
+              </div>
             </div>
-            <div id="activity-log-list" class="flex flex-col divide-y divide-[#3b4252]/50 max-h-[520px] overflow-y-auto scrollbar-thin font-mono text-xs">
+            <div id="activity-log-list" class="flex flex-col divide-y divide-[#3b4252]/50 max-h-[600px] overflow-y-auto scrollbar-thin font-mono text-xs">
               <div class="px-4 py-6 text-center text-[#4c566a] text-[11px]">No activity yet. Events will appear here as you use the app.</div>
             </div>
           </div>

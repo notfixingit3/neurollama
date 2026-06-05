@@ -2124,7 +2124,7 @@ func LogActivity(category, message string) {
 	activityMu.Lock()
 	defer activityMu.Unlock()
 	activityBuf = append(activityBuf, ActivityEntry{
-		Time:     time.Now().Format("15:04:05"),
+		Time:     time.Now().Format("Jan 02 15:04:05"),
 		Category: category,
 		Message:  message,
 	})
@@ -4647,6 +4647,7 @@ func runCodeBenchmarkSSEHandler(c *gin.Context) {
 			}
 		}()
 
+		LogActivity("benchmark", fmt.Sprintf("Code benchmark completed: %s — %.0f%% pass, %.1f TPS", model, overallScore, avgTPS))
 		doneBytes, _ := json.Marshal(map[string]interface{}{
 			"id":                   id,
 			"model_name":           model,
@@ -4929,6 +4930,7 @@ func runHallucinationSSEHandler(c *gin.Context) {
 			return false
 		}
 
+		LogActivity("benchmark", fmt.Sprintf("Hallucination test completed: %s — Recall: %.1f%%, Halluc: %.1f%%", model, recallPct, hallPct))
 		hemit(fmt.Sprintf("✓ Complete — Recall: %.1f%% | Hallucinations: %.1f%%", recallPct, hallPct))
 
 		// Unload model from VRAM
@@ -5231,6 +5233,7 @@ func runBenchmarkSSEHandler(c *gin.Context) {
 			log.Printf("Warning: failed to cull benchmarks: %v", cullErr)
 		}
 
+		LogActivity("benchmark", fmt.Sprintf("Benchmark completed: %s [%s] — %.1f TPS", model, strings.ToUpper(benchType), avgTps))
 		c.SSEvent("status", fmt.Sprintf("%s benchmark complete.", strings.ToUpper(benchType)))
 
 		result := map[string]interface{}{
@@ -5400,6 +5403,7 @@ func runOptimizerSSEHandler(c *gin.Context) {
 		{"Set 3 (Creative)", 1.2, 0.95, 60},
 	}
 
+	LogActivity("optimizer", fmt.Sprintf("Optimizer started: %s", model))
 	c.Stream(func(w io.Writer) bool {
 		c.SSEvent("status", fmt.Sprintf("Initializing Hyperparameter Optimizer for %s...", model))
 		c.SSEvent("status", fmt.Sprintf("Test Prompt: \"%s\"", prompt))
@@ -5442,6 +5446,7 @@ func runOptimizerSSEHandler(c *gin.Context) {
 			c.SSEvent("config_result", string(resBytes))
 		}
 
+		LogActivity("optimizer", fmt.Sprintf("Optimizer completed: %s", model))
 		c.SSEvent("done", "Optimization run completed successfully.")
 		return false
 	})
@@ -5845,6 +5850,7 @@ func uploadAndIndexHandler(c *gin.Context) {
 		return
 	}
 
+	LogActivity("rag", fmt.Sprintf("Indexed: %s — %d chunks via %s", filename, len(ragChunks), embeddingModel))
 	emit(ndjsonEvent{"type": "done", "document_id": docID, "chunks": len(ragChunks)})
 }
 
@@ -6717,7 +6723,8 @@ func runToolUseBenchmarkSSEHandler(c *gin.Context) {
 			emit(fmt.Sprintf("Warning: failed to save result: %v", saveErr))
 		}
 		cullOldBenchmarks(model, "tool_use")
-		c.SSEvent("done", fmt.Sprintf(`{"id":%d,"model":%q,"bench_type":"tool_use","accuracy_pct":%.1f}`, id, model, acc))
+		LogActivity("benchmark", fmt.Sprintf("Tool-use benchmark completed: %s — %.0f%% accuracy", model, acc))
+	c.SSEvent("done", fmt.Sprintf(`{"id":%d,"model":%q,"bench_type":"tool_use","accuracy_pct":%.1f}`, id, model, acc))
 		return false
 	})
 }
@@ -6829,7 +6836,8 @@ func runJSONOutputBenchmarkSSEHandler(c *gin.Context) {
 			emit(fmt.Sprintf("Warning: failed to save result: %v", saveErr))
 		}
 		cullOldBenchmarks(model, "json_output")
-		c.SSEvent("done", fmt.Sprintf(`{"id":%d,"model":%q,"bench_type":"json_output","accuracy_pct":%.1f}`, id, model, acc))
+		LogActivity("benchmark", fmt.Sprintf("JSON-output benchmark completed: %s — %.0f%% accuracy", model, acc))
+	c.SSEvent("done", fmt.Sprintf(`{"id":%d,"model":%q,"bench_type":"json_output","accuracy_pct":%.1f}`, id, model, acc))
 		return false
 	})
 }
@@ -6978,7 +6986,8 @@ func runInstructionFollowBenchmarkSSEHandler(c *gin.Context) {
 			emit(fmt.Sprintf("Warning: failed to save result: %v", saveErr))
 		}
 		cullOldBenchmarks(model, "instruction_follow")
-		c.SSEvent("done", fmt.Sprintf(`{"id":%d,"model":%q,"bench_type":"instruction_follow","accuracy_pct":%.1f}`, id, model, acc))
+		LogActivity("benchmark", fmt.Sprintf("Instruction-follow benchmark completed: %s — %.0f%% accuracy", model, acc))
+	c.SSEvent("done", fmt.Sprintf(`{"id":%d,"model":%q,"bench_type":"instruction_follow","accuracy_pct":%.1f}`, id, model, acc))
 		return false
 	})
 }
