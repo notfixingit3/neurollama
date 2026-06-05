@@ -715,35 +715,31 @@ async function init() {
   const chatRagEnabledEl = document.getElementById('chat-rag-enabled');
   const chatRagModelContainer = document.getElementById('chat-rag-model-container');
   const chatRagTopKContainer = document.getElementById('chat-rag-top-k-container');
-  
+  const chatRagCollectionContainer = document.getElementById('chat-rag-collection-container');
+
   function updateChatRAGControlsState() {
     if (!chatRagEnabledEl) return;
     const enabled = chatRagEnabledEl.checked;
-    
+
     setPref('chat-rag-enabled', enabled);
-    
-    if (chatRagModelContainer) {
+
+    // Toggle each RAG control container consistently
+    [
+      { el: chatRagModelContainer,      selector: 'select' },
+      { el: chatRagTopKContainer,       selector: 'input'  },
+      { el: chatRagCollectionContainer, selector: 'select' },
+    ].forEach(({ el, selector }) => {
+      if (!el) return;
       if (enabled) {
-        chatRagModelContainer.classList.remove('opacity-50', 'pointer-events-none');
-        const select = chatRagModelContainer.querySelector('select');
-        if (select) select.disabled = false;
+        el.classList.remove('opacity-50', 'pointer-events-none');
+        const ctrl = el.querySelector(selector);
+        if (ctrl) ctrl.disabled = false;
       } else {
-        chatRagModelContainer.classList.add('opacity-50', 'pointer-events-none');
-        const select = chatRagModelContainer.querySelector('select');
-        if (select) select.disabled = true;
+        el.classList.add('opacity-50', 'pointer-events-none');
+        const ctrl = el.querySelector(selector);
+        if (ctrl) ctrl.disabled = true;
       }
-    }
-    if (chatRagTopKContainer) {
-      if (enabled) {
-        chatRagTopKContainer.classList.remove('opacity-50', 'pointer-events-none');
-        const range = chatRagTopKContainer.querySelector('input');
-        if (range) range.disabled = false;
-      } else {
-        chatRagTopKContainer.classList.add('opacity-50', 'pointer-events-none');
-        const range = chatRagTopKContainer.querySelector('input');
-        if (range) range.disabled = true;
-      }
-    }
+    });
   }
 
   if (chatRagEnabledEl) {
@@ -1126,7 +1122,7 @@ async function fetchAbout() {
     // Render Ollama release note tiles
     renderOllamaReleaseTiles();
   } catch (e) {
-    grid.innerHTML = `<div class="col-span-full text-[#bf616a] font-mono text-xs">Failed to load app info: ${e.message}</div>`;
+    grid.innerHTML = `<div class="col-span-full text-[#bf616a] font-mono text-xs">Failed to load app info: ${escapeHTML(e.message)}</div>`;
   }
 }
 
@@ -6907,7 +6903,7 @@ async function fetchFleetOverview() {
     const nodes = await resp.json();
     renderFleetGrid(nodes);
   } catch (e) {
-    if (grid) grid.innerHTML = `<div class="text-center py-8 text-[#bf616a]/80 text-xs col-span-full"><i class="fa-solid fa-circle-exclamation mr-1.5"></i>${e.message}</div>`;
+    if (grid) grid.innerHTML = `<div class="text-center py-8 text-[#bf616a]/80 text-xs col-span-full"><i class="fa-solid fa-circle-exclamation mr-1.5"></i>${escapeHTML(e.message)}</div>`;
   }
 }
 
@@ -10343,6 +10339,10 @@ function testRAGDocument(probePhrase, embeddingModel) {
   if (embeddingModel && modelSelect.querySelector(`option[value="${CSS.escape(embeddingModel)}"]`)) {
     modelSelect.value = embeddingModel;
   }
+
+  // Clear collection filter so we're searching all collections for this document
+  const collectionSel = document.getElementById('rag-query-collection');
+  if (collectionSel) collectionSel.value = '';
 
   // Fill the query with the probe phrase
   queryInput.value = probePhrase;
