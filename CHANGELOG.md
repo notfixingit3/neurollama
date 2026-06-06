@@ -4,7 +4,7 @@ All notable changes to NEUROLLAMA are documented here.
 
 ---
 
-## [v0.2.24] — 2026-06-04
+## [v0.3.0] — 2026-06-04
 
 ### Added
 - **NeuroWizard** (Builder → NEUROWIZARD subtab) — guided model operations, no Modelfile knowledge required:

@@ -46,11 +46,11 @@
 - [x] **Hardware Thread & Layer Allocation Profile (num_gpu, num_thread)**
   - Expose request-level hardware tuning controls (such as GPU layers offload `num_gpu` and CPU threads `num_thread`) inside the playground sidebar settings.
 
-<!-- v0.2.24 — 2026-06-04 -->
+<!-- v0.3.0 — 2026-06-04 -->
 <!-- NeuroWizard: Builder subtabs (Recipe Builder / NEUROWIZARD), 5 wizard modals (ctx, persona, sampling, nothink, merge) -->
 <!-- Context window validation extended to completion + builder panels -->
 
-## v0.2.24 Session Notes
+## v0.3.0 Session Notes
 
 - [x] **NeuroWizard hub** — NEUROWIZARD subtab inside Builder workspace. Card grid of 5 wizards; each opens a modal with live Modelfile preview, SSE creation stream, OPEN IN CHAT on success.
 - [x] **Expand Context wizard** — model + ctx size selector (8K–256K), ⚠ if exceeds trained max, auto-name `{model}-ctx{n}k`
