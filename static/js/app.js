@@ -2976,12 +2976,14 @@ function initAccordionRow() {
           <button id="detail-tab-template" onclick="switchDetailTab('template')" class="detail-tab">TEMPLATE</button>
           <button id="detail-tab-system" onclick="switchDetailTab('system')" class="detail-tab">SYSTEM</button>
           <button id="detail-tab-card" onclick="switchDetailTab('card')" class="detail-tab">CARD</button>
+          <button id="detail-tab-notes" onclick="switchDetailTab('notes')" class="detail-tab">NOTES</button>
         </div>
         <div class="overflow-auto max-h-72 bg-[#161820] border border-[#4c566a]/60 rounded-lg p-3 text-[11px] font-mono text-[#d8dee9] relative">
-          <button onclick="copyTabContent()" class="btn btn-xs btn-neutral absolute top-2 right-2 border-[#4c566a] hover:bg-[#4c566a]" title="Copy to clipboard">
+          <button id="detail-copy-btn" onclick="copyTabContent()" class="btn btn-xs btn-neutral absolute top-2 right-2 border-[#4c566a] hover:bg-[#4c566a]" title="Copy to clipboard">
             <i class="fa-regular fa-copy"></i>
           </button>
           <div id="tab-content-text" class="whitespace-pre-wrap break-all pr-8 leading-relaxed font-tech">Loading...</div>
+          <textarea id="model-notes-area" class="hidden w-full h-56 bg-transparent text-[#d8dee9] text-[11px] font-mono resize-none outline-none leading-relaxed placeholder-[#4c566a]" placeholder="Personal notes about this model (stored in browser)..." oninput="saveModelNote()"></textarea>
         </div>
       </div>
     </td>`;
@@ -3718,7 +3720,7 @@ async function inspectModel(name) {
 
   // Reset to modelfile tab
   activeDetailTab = 'modelfile';
-  const tabs = ['modelfile', 'parameters', 'template', 'system', 'card'];
+  const tabs = ['modelfile', 'parameters', 'template', 'system', 'card', 'notes'];
   tabs.forEach(t => {
     const btn = accordionEl.querySelector(`#detail-tab-${t}`);
     if (btn) btn.classList.toggle('detail-tab-active', t === 'modelfile');
@@ -3759,7 +3761,7 @@ function clearInspectedModel() {
 }
 
 function switchDetailTab(tabName) {
-  const tabs = ['modelfile', 'parameters', 'template', 'system', 'card'];
+  const tabs = ['modelfile', 'parameters', 'template', 'system', 'card', 'notes'];
   tabs.forEach(t => {
     const btn = document.getElementById(`detail-tab-${t}`);
     if (btn) {
@@ -3775,8 +3777,23 @@ function renderTabContent() {
   if (!inspectedModel) return;
 
   const tabContent = document.getElementById('tab-content-text');
-  
-  // Clear HTML rendering styles
+  const notesArea = document.getElementById('model-notes-area');
+  const copyBtn = document.getElementById('detail-copy-btn');
+
+  if (activeDetailTab === 'notes') {
+    tabContent.classList.add('hidden');
+    if (copyBtn) copyBtn.classList.add('hidden');
+    if (notesArea) {
+      notesArea.classList.remove('hidden');
+      notesArea.value = localStorage.getItem('model-note::' + inspectedModel.name) || '';
+    }
+    return;
+  }
+
+  tabContent.classList.remove('hidden');
+  if (copyBtn) copyBtn.classList.remove('hidden');
+  if (notesArea) notesArea.classList.add('hidden');
+
   tabContent.className = "whitespace-pre-wrap break-all pr-8 leading-relaxed font-tech text-[11px] font-mono text-[#d8dee9]";
 
   switch (activeDetailTab) {
@@ -3797,6 +3814,17 @@ function renderTabContent() {
       modelCardViewMode = 'safe';
       fetchModelCard(inspectedModel.name, tabContent);
       break;
+  }
+}
+
+function saveModelNote() {
+  const notesArea = document.getElementById('model-notes-area');
+  if (!notesArea || !inspectedModel) return;
+  const key = 'model-note::' + inspectedModel.name;
+  if (notesArea.value.trim()) {
+    localStorage.setItem(key, notesArea.value);
+  } else {
+    localStorage.removeItem(key);
   }
 }
 
@@ -3912,7 +3940,14 @@ function renderChatHistory() {
       }
       html += `
         <div class="chat chat-end animate-fade-in">
-          <div class="chat-header text-[10px] text-[#4c566a] mb-1">USER // DEV</div>
+          <div class="chat-header text-[10px] text-[#4c566a] mb-1 flex items-center gap-2 justify-end">
+            <button id="copy-msg-${msgIndex}" onclick="copyMessageToClipboard(${msgIndex})"
+              title="Copy message"
+              class="opacity-30 hover:opacity-100 transition-opacity text-[#88c0d0] cursor-pointer text-[10px]">
+              <i class="fa-regular fa-copy"></i>
+            </button>
+            <span>USER // DEV</span>
+          </div>
           <div class="chat-bubble bg-[#3b4252] border border-[#4c566a]/50 text-[#e5e9f0] leading-relaxed max-w-[85%] whitespace-pre-wrap">${escapeHTML(msg.content)}${imgHTML}</div>
         </div>
       `;
