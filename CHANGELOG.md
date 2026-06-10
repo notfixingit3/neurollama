@@ -4,6 +4,14 @@ All notable changes to NEUROLLAMA are documented here.
 
 ---
 
+## [v0.3.1] — 2026-06-10
+
+### Added
+- **Copy button on user messages** — hover-reveal clipboard icon in the chat header of every user message, matching the existing copy button on assistant messages. Uses the same `copyMessageToClipboard` flow (checkmark feedback + toast).
+- **Model NOTES tab in INSPECT accordion** — personal scratch-pad per model alongside FILE/PARAMS/TEMPLATE/SYSTEM/CARD. Auto-saves to `localStorage` on every keystroke; clearing the textarea removes the key. The tab-content copy button hides while NOTES is active.
+
+---
+
 ## [v0.3.0] — 2026-06-04
 
 ### Added

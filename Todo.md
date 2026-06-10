@@ -46,6 +46,9 @@
 - [x] **Hardware Thread & Layer Allocation Profile (num_gpu, num_thread)**
   - Expose request-level hardware tuning controls (such as GPU layers offload `num_gpu` and CPU threads `num_thread`) inside the playground sidebar settings.
 
+<!-- v0.3.1 — 2026-06-10 -->
+<!-- Copy button on user messages; model NOTES tab in INSPECT accordion (localStorage) -->
+
 <!-- v0.3.0 — 2026-06-04 -->
 <!-- NeuroWizard: Builder subtabs (Recipe Builder / NEUROWIZARD), 5 wizard modals (ctx, persona, sampling, nothink, merge) -->
 <!-- Context window validation extended to completion + builder panels -->
