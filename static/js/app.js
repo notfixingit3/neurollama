@@ -4,6 +4,7 @@ let models = [];
 let modelCtxLengths   = {}; // model_name → trained context length (int)
 let modelCapabilities = {}; // model_name → string[] from /api/show e.g. ["completion","tools","vision","thinking"]
 let modelBenchSummary = {}; // model_name → { std_grade, std_tps, code_grade, code_quality, hallu_recall, hallu_ctx_k }
+let dashRagDocCount = null;
 let modelJsonCaps     = {}; // model_name → 'pass'|'fail'|'pending'|undefined (localStorage-cached JSON probe results)
 let selectedModels = new Set();
 let inspectedModel = null;
@@ -960,7 +961,7 @@ function switchWorkspace(workspace) {
   });
 
   // Toggle top-level tab buttons and panels
-  const tabs = ['inventory', 'playground', 'completion', 'builder', 'benchmark', 'rag', 'system', 'fleet'];
+  const tabs = ['home', 'inventory', 'playground', 'completion', 'builder', 'benchmark', 'rag', 'system', 'fleet'];
   tabs.forEach(t => {
     const btn = document.getElementById(`ws-tab-${t}`);
     const panel = document.getElementById(`ws-panel-${t}`);
@@ -972,7 +973,10 @@ function switchWorkspace(workspace) {
   setPref('active-workspace', workspace);
 
   // Tab specific actions
-  if (workspace === 'inventory') {
+  if (workspace === 'home') {
+    renderDashboard();
+    if (dashRagDocCount === null) fetchDashRagCount();
+  } else if (workspace === 'inventory') {
     // Restore the last-used inventory sub-tab (models or hub)
     switchInventorySubtab(activeInventorySubtab);
 
@@ -2636,6 +2640,7 @@ async function fetchModels() {
     fetchModelCtxLengths();
     fetchModelCapabilities();
     fetchModelBenchSummary();
+    if (activeWorkspace === 'home') renderDashboard();
     // Persist for stale-while-revalidate on next page load.
     try {
       localStorage.setItem('neurollama-model-cache', JSON.stringify({ models, ts: Date.now() }));
@@ -2688,10 +2693,156 @@ async function fetchModelBenchSummary() {
     const res = await fetch('/api/benchmarks/model-summary');
     if (!res.ok) return;
     modelBenchSummary = await res.json();
-    // Re-render inventory if it's currently visible so badges appear without a reload
     const listBody = document.getElementById('models-list-body');
     if (listBody && listBody.children.length > 0) renderModels();
+    if (activeWorkspace === 'home') renderDashboard();
   } catch { /* silently ignore */ }
+}
+
+async function fetchDashRagCount() {
+  try {
+    const res = await fetch('/api/rag/documents');
+    if (!res.ok) return;
+    const docs = await res.json();
+    dashRagDocCount = Array.isArray(docs) ? docs.length : 0;
+    if (activeWorkspace === 'home') renderDashboard();
+  } catch { /* silent */ }
+}
+
+function renderDashboard() {
+  const panel = document.getElementById('ws-panel-home');
+  if (!panel) return;
+
+  // ── Stat chips ───────────────────────────────────────────────────────────────
+  const onlineCount = servers.filter(s => s.status === 'online').length;
+  const totalCount  = servers.length;
+
+  const elModels    = document.getElementById('dash-stat-models');
+  const elModelsSub = document.getElementById('dash-stat-models-sub');
+  const elNodes     = document.getElementById('dash-stat-nodes');
+  const elNodesSub  = document.getElementById('dash-stat-nodes-sub');
+  const elRag       = document.getElementById('dash-stat-rag');
+  const elRagSub    = document.getElementById('dash-stat-rag-sub');
+  const elBench     = document.getElementById('dash-stat-bench');
+  const elBenchSub  = document.getElementById('dash-stat-bench-sub');
+
+  if (elModels) elModels.textContent = models.length || '—';
+  if (elModelsSub) elModelsSub.textContent = models.length ? 'on active node' : 'no node selected';
+
+  if (elNodes) {
+    elNodes.innerHTML = totalCount
+      ? `${onlineCount}<span style="font-size:13px;color:#4c566a"> / ${totalCount}</span>`
+      : '—';
+  }
+  if (elNodesSub) {
+    elNodesSub.textContent = totalCount === 0
+      ? 'no nodes registered'
+      : onlineCount === totalCount
+        ? 'all nodes reachable'
+        : `${totalCount - onlineCount} unreachable`;
+  }
+
+  if (elRag) elRag.textContent = dashRagDocCount !== null ? String(dashRagDocCount) : '—';
+  if (elRagSub) {
+    const collCount = ragCollections.length;
+    elRagSub.textContent = dashRagDocCount !== null
+      ? (collCount > 0 ? `${collCount} collection${collCount !== 1 ? 's' : ''}` : 'default collection')
+      : 'open RAG to load';
+  }
+
+  const benchCount = Object.keys(modelBenchSummary).length;
+  if (elBench) elBench.textContent = benchCount || '—';
+  if (elBenchSub) {
+    const lastBench = _activityAllEntries.find(e => e.category === 'benchmark');
+    elBenchSub.textContent = lastBench ? `last run ${lastBench.time}` : (benchCount ? 'models with data' : 'none run yet');
+  }
+
+  // ── Node cards ───────────────────────────────────────────────────────────────
+  const nodesList = document.getElementById('dash-nodes-list');
+  if (nodesList) {
+    if (servers.length === 0) {
+      nodesList.innerHTML = `<div class="text-[10px] text-[#4c566a] italic px-1">No nodes registered. Add one in SYSTEM → Settings.</div>`;
+    } else {
+      nodesList.innerHTML = servers.map(srv => {
+        const online  = srv.status === 'online';
+        const dot     = online ? 'bg-[#a3be8c]' : 'bg-[#bf616a]';
+        const latency = online && srv.latency != null ? `${srv.latency} ms` : '';
+        const version = online && srv.version ? srv.version : '';
+        const seenAgo = serverLastSeen[srv.id] ? timeAgoShort(serverLastSeen[srv.id]) : '';
+        return `
+          <div class="bg-[#242933]/60 border border-[#4c566a]/30 rounded-lg p-2.5 cursor-pointer hover:border-[#88c0d0]/30 transition-colors" onclick="switchWorkspace('fleet')">
+            <div class="flex items-center justify-between mb-1.5">
+              <div class="flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full shrink-0 ${dot}"></span>
+                <span class="text-[11px] font-tech font-bold text-[#d8dee9] truncate">${escapeHTML(srv.name)}</span>
+                ${srv.isActive ? '<span class="text-[8px] bg-[#88c0d0]/15 text-[#88c0d0] border border-[#88c0d0]/30 rounded px-1 ml-1">ACTIVE</span>' : ''}
+              </div>
+              <span class="text-[9px] ${online ? 'text-[#a3be8c]' : 'text-[#bf616a]'} font-tech">${online ? 'ONLINE' : 'OFFLINE'}</span>
+            </div>
+            <div class="flex flex-wrap gap-x-3 gap-y-0.5 text-[9px] text-[#4c566a] font-mono">
+              ${latency ? `<span>${latency}</span>` : ''}
+              ${version ? `<span>${escapeHTML(version)}</span>` : ''}
+              ${!online && seenAgo ? `<span>last seen ${seenAgo}</span>` : ''}
+              ${online ? `<span>${models.length && srv.isActive ? models.length + ' models' : ''}</span>` : ''}
+            </div>
+          </div>`;
+      }).join('');
+    }
+  }
+
+  // ── Recent activity ──────────────────────────────────────────────────────────
+  const actList = document.getElementById('dash-activity-list');
+  if (actList) {
+    const recent = _activityAllEntries.slice(0, 6);
+    if (recent.length === 0) {
+      actList.innerHTML = `<div class="px-3 py-3 text-[10px] text-[#4c566a] italic">No activity yet.</div>`;
+    } else {
+      actList.innerHTML = recent.map(e => {
+        const style = ACTIVITY_CATEGORY_STYLE[e.category] || ACTIVITY_CATEGORY_STYLE.system;
+        return `
+          <div class="flex items-start gap-2 px-3 py-2">
+            <span class="text-[8px] font-tech font-bold px-1.5 py-0.5 rounded shrink-0 mt-0.5 ${style.bg} ${style.text} border border-current/20">${escapeHTML(style.label)}</span>
+            <div class="flex-1 min-w-0">
+              <div class="text-[10px] text-[#d8dee9] leading-snug truncate">${escapeHTML(e.message)}</div>
+              <div class="text-[9px] text-[#4c566a] mt-0.5">${escapeHTML(e.time)}</div>
+            </div>
+          </div>`;
+      }).join('');
+    }
+  }
+
+  // ── Top models ───────────────────────────────────────────────────────────────
+  const topEl = document.getElementById('dash-top-models');
+  if (topEl) {
+    const GRADE_ORDER = { S: 0, A: 1, B: 2, C: 3, F: 4 };
+    const ranked = Object.entries(modelBenchSummary)
+      .map(([name, b]) => {
+        const candidates = [
+          b.std_grade  ? { letter: b.std_grade[0],  type: 'std'  } : null,
+          b.code_grade ? { letter: b.code_grade[0], type: 'code' } : null,
+        ].filter(Boolean).sort((a, x) => (GRADE_ORDER[a.letter] ?? 9) - (GRADE_ORDER[x.letter] ?? 9));
+        return candidates.length ? { name, letter: candidates[0].letter, type: candidates[0].type } : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => (GRADE_ORDER[a.letter] ?? 9) - (GRADE_ORDER[b.letter] ?? 9))
+      .slice(0, 6);
+
+    if (ranked.length === 0) {
+      topEl.innerHTML = `<div class="px-3 py-3 text-[10px] text-[#4c566a] italic">No benchmarks run yet.</div>`;
+    } else {
+      const gradeColor = { S: '#ebcb8b', A: '#a3be8c', B: '#88c0d0', C: '#d08770', F: '#bf616a' };
+      topEl.innerHTML = ranked.map(m => {
+        const col = gradeColor[m.letter] || '#4c566a';
+        const shortName = m.name.length > 22 ? m.name.slice(0, 21) + '…' : m.name;
+        return `
+          <div class="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-[#242933]/60 transition-colors" onclick="inspectModel('${escapeHTML(m.name)}'); switchWorkspace('inventory');">
+            <span class="text-[11px] font-bold font-tech w-5 text-center shrink-0" style="color:${col}">${m.letter}</span>
+            <span class="text-[10px] text-[#d8dee9] flex-1 truncate font-mono">${escapeHTML(shortName)}</span>
+            <span class="text-[8px] text-[#4c566a] border border-[#4c566a]/40 rounded px-1 shrink-0">${m.type}</span>
+          </div>`;
+      }).join('');
+    }
+  }
 }
 
 // Hallucination-specific ctx warning: halluc-max-context values are in K (e.g. 32 = 32768 tokens).

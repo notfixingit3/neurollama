@@ -157,6 +157,9 @@
       
       <!-- Top Workspace Tabs Bar -->
       <div class="flex overflow-x-auto whitespace-nowrap gap-2 bg-[#242933]/60 p-1.5 border border-[#4c566a]/40 rounded-xl font-tech font-bold text-[10px] md:text-xs scrollbar-none">
+        <button id="ws-tab-home" onclick="switchWorkspace('home')" class="ws-tab flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
+          <i class="fa-solid fa-house text-[10px]"></i> HOME
+        </button>
         <button id="ws-tab-inventory" onclick="switchWorkspace('inventory')" class="ws-tab tab-active flex-shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border transition-all">
           <i class="fa-solid fa-tags text-[10px]"></i> INVENTORY
         </button>
@@ -185,6 +188,102 @@
 
       <!-- Workspace Panels Wrapper -->
       <div>
+
+        <!-- PANEL 0: HOME DASHBOARD -->
+        <div id="ws-panel-home" class="ws-panel hidden flex flex-col gap-4">
+
+          <!-- Stat chips -->
+          <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div class="bg-[#1e2430] border border-[#4c566a]/40 rounded-xl p-4">
+              <div class="text-[9px] text-[#4c566a] font-tech uppercase tracking-wider mb-1">Models Installed</div>
+              <div id="dash-stat-models" class="text-2xl font-bold text-[#88c0d0] font-tech leading-none">—</div>
+              <div id="dash-stat-models-sub" class="text-[9px] text-[#4c566a] mt-1.5"></div>
+            </div>
+            <div class="bg-[#1e2430] border border-[#4c566a]/40 rounded-xl p-4">
+              <div class="text-[9px] text-[#4c566a] font-tech uppercase tracking-wider mb-1">Nodes Online</div>
+              <div id="dash-stat-nodes" class="text-2xl font-bold text-[#a3be8c] font-tech leading-none">—</div>
+              <div id="dash-stat-nodes-sub" class="text-[9px] text-[#4c566a] mt-1.5"></div>
+            </div>
+            <div class="bg-[#1e2430] border border-[#4c566a]/40 rounded-xl p-4">
+              <div class="text-[9px] text-[#4c566a] font-tech uppercase tracking-wider mb-1">RAG Documents</div>
+              <div id="dash-stat-rag" class="text-2xl font-bold text-[#ebcb8b] font-tech leading-none">—</div>
+              <div id="dash-stat-rag-sub" class="text-[9px] text-[#4c566a] mt-1.5"></div>
+            </div>
+            <div class="bg-[#1e2430] border border-[#4c566a]/40 rounded-xl p-4">
+              <div class="text-[9px] text-[#4c566a] font-tech uppercase tracking-wider mb-1">Models Benchmarked</div>
+              <div id="dash-stat-bench" class="text-2xl font-bold text-[#b48ead] font-tech leading-none">—</div>
+              <div id="dash-stat-bench-sub" class="text-[9px] text-[#4c566a] mt-1.5"></div>
+            </div>
+          </div>
+
+          <!-- 3-column info grid -->
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+            <!-- Nodes -->
+            <div class="bg-[#1e2430] border border-[#4c566a]/40 rounded-xl overflow-hidden flex flex-col">
+              <div class="flex items-center justify-between px-3 py-2 border-b border-[#4c566a]/30">
+                <span class="text-[10px] font-tech font-bold text-[#88c0d0] uppercase tracking-wider"><i class="fa-solid fa-network-wired mr-1.5"></i>Nodes</span>
+                <button onclick="switchWorkspace('fleet')" class="text-[9px] text-[#4c566a] hover:text-[#88c0d0] transition-colors font-tech">→ FLEET</button>
+              </div>
+              <div id="dash-nodes-list" class="p-3 flex flex-col gap-2 flex-1">
+                <div class="text-[10px] text-[#4c566a] italic">Loading…</div>
+              </div>
+            </div>
+
+            <!-- Recent Activity -->
+            <div class="bg-[#1e2430] border border-[#4c566a]/40 rounded-xl overflow-hidden flex flex-col">
+              <div class="flex items-center justify-between px-3 py-2 border-b border-[#4c566a]/30">
+                <span class="text-[10px] font-tech font-bold text-[#88c0d0] uppercase tracking-wider"><i class="fa-solid fa-bolt mr-1.5"></i>Recent Activity</span>
+                <button onclick="switchWorkspace('system'); setTimeout(()=>switchSystemSubtab('activity'),50)" class="text-[9px] text-[#4c566a] hover:text-[#88c0d0] transition-colors font-tech">→ ALL</button>
+              </div>
+              <div id="dash-activity-list" class="flex-1 divide-y divide-[#2e3440]">
+                <div class="px-3 py-2 text-[10px] text-[#4c566a] italic">Loading…</div>
+              </div>
+            </div>
+
+            <!-- Top Models -->
+            <div class="bg-[#1e2430] border border-[#4c566a]/40 rounded-xl overflow-hidden flex flex-col">
+              <div class="flex items-center justify-between px-3 py-2 border-b border-[#4c566a]/30">
+                <span class="text-[10px] font-tech font-bold text-[#88c0d0] uppercase tracking-wider"><i class="fa-solid fa-trophy mr-1.5"></i>Top Models</span>
+                <button onclick="switchWorkspace('benchmark')" class="text-[9px] text-[#4c566a] hover:text-[#88c0d0] transition-colors font-tech">→ LEADERBOARD</button>
+              </div>
+              <div id="dash-top-models" class="flex-1 divide-y divide-[#2e3440]">
+                <div class="px-3 py-2 text-[10px] text-[#4c566a] italic">Loading…</div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Quick Actions -->
+          <div class="grid grid-cols-3 sm:grid-cols-5 gap-2">
+            <button onclick="switchWorkspace('inventory'); setTimeout(()=>switchInventorySubtab('hub'),50)" class="bg-[#1e2430] border border-[#4c566a]/40 hover:border-[#88c0d0]/40 rounded-xl p-3 flex flex-col items-center gap-1.5 transition-colors group">
+              <i class="fa-solid fa-cloud-arrow-down text-[#88c0d0] text-base group-hover:text-[#81a1c1]"></i>
+              <span class="text-[10px] font-tech text-[#d8dee9]">Pull Model</span>
+              <span class="text-[9px] text-[#4c566a]">Model Hub</span>
+            </button>
+            <button onclick="switchWorkspace('playground')" class="bg-[#1e2430] border border-[#4c566a]/40 hover:border-[#88c0d0]/40 rounded-xl p-3 flex flex-col items-center gap-1.5 transition-colors group">
+              <i class="fa-solid fa-terminal text-[#88c0d0] text-base group-hover:text-[#81a1c1]"></i>
+              <span class="text-[10px] font-tech text-[#d8dee9]">Start Chat</span>
+              <span class="text-[9px] text-[#4c566a]">Playground</span>
+            </button>
+            <button onclick="switchWorkspace('benchmark')" class="bg-[#1e2430] border border-[#4c566a]/40 hover:border-[#88c0d0]/40 rounded-xl p-3 flex flex-col items-center gap-1.5 transition-colors group">
+              <i class="fa-solid fa-gauge-high text-[#88c0d0] text-base group-hover:text-[#81a1c1]"></i>
+              <span class="text-[10px] font-tech text-[#d8dee9]">Run Benchmark</span>
+              <span class="text-[9px] text-[#4c566a]">Benchmarks</span>
+            </button>
+            <button onclick="switchWorkspace('rag')" class="bg-[#1e2430] border border-[#4c566a]/40 hover:border-[#88c0d0]/40 rounded-xl p-3 flex flex-col items-center gap-1.5 transition-colors group">
+              <i class="fa-solid fa-file-shield text-[#88c0d0] text-base group-hover:text-[#81a1c1]"></i>
+              <span class="text-[10px] font-tech text-[#d8dee9]">Upload Doc</span>
+              <span class="text-[9px] text-[#4c566a]">RAG</span>
+            </button>
+            <button onclick="switchWorkspace('builder'); setTimeout(()=>switchBuilderSubtab('wizards'),50)" class="bg-[#1e2430] border border-[#4c566a]/40 hover:border-[#88c0d0]/40 rounded-xl p-3 flex flex-col items-center gap-1.5 transition-colors group">
+              <i class="fa-solid fa-wand-magic-sparkles text-[#88c0d0] text-base group-hover:text-[#81a1c1]"></i>
+              <span class="text-[10px] font-tech text-[#d8dee9]">Create Model</span>
+              <span class="text-[9px] text-[#4c566a]">NeuroWizard</span>
+            </button>
+          </div>
+
+        </div>
 
         <!-- PANEL 1: INVENTORY & TELEMETRY -->
         <div id="ws-panel-inventory" class="ws-panel flex flex-col gap-4">
