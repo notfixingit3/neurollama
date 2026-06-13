@@ -1027,6 +1027,7 @@ function switchWorkspace(workspace) {
     fetchRAGCollections();
   } else if (workspace === 'fleet') {
     fetchFleetOverview();
+    fetchSSHKeys();
   }
 }
 
