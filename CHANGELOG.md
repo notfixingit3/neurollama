@@ -4,6 +4,12 @@ All notable changes to NEUROLLAMA are documented here.
 
 ---
 
+## [v0.2.25-beta.0] — 2026-06-13
+
+_(in progress)_
+
+---
+
 ## [v0.2.24] — 2026-06-13
 
 ### Added

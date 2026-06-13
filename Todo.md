@@ -1,5 +1,8 @@
 # NEUROLLAMA Roadmap & Feature Todo List
 
+<!-- v0.2.25-beta.0 — 2026-06-13 -->
+<!-- in progress -->
+
 <!-- v0.2.24 — 2026-06-13 -->
 <!-- stable promotion of beta.0+beta.1; HOME dashboard seeding, btn fix, chat branching, auto-title, rename, NeuroWizard, RAG collections, activity center, model notes, XSS audit, CI version injection -->
 
