@@ -46,23 +46,27 @@
 - [x] **Hardware Thread & Layer Allocation Profile (num_gpu, num_thread)**
   - Expose request-level hardware tuning controls (such as GPU layers offload `num_gpu` and CPU threads `num_thread`) inside the playground sidebar settings.
 
-<!-- v0.3.1 — 2026-06-10 -->
-<!-- Copy button on user messages; model NOTES tab in INSPECT accordion (localStorage) -->
+<!-- v0.2.24-beta.0 — 2026-06-13 -->
+<!-- HOME dashboard; chat branching (TrimChatMessages + POST /api/chats/:id/trim); auto-title + inline rename (PATCH /api/chats/:id/title); notes server persistence; appVersion const→var + CI ldflags injection -->
+<!-- NeuroWizard (13 wizards); copy btn on user msgs; model NOTES tab; RAG collection manager; activity center pills; builder validation; XSS audit complete -->
 
-<!-- v0.3.0 — 2026-06-04 -->
-<!-- NeuroWizard: Builder subtabs (Recipe Builder / NEUROWIZARD), 5 wizard modals (ctx, persona, sampling, nothink, merge) -->
-<!-- Context window validation extended to completion + builder panels -->
+## v0.2.24-beta.0 Session Notes
 
-## v0.3.0 Session Notes
-
-- [x] **NeuroWizard hub** — NEUROWIZARD subtab inside Builder workspace. Card grid of 5 wizards; each opens a modal with live Modelfile preview, SSE creation stream, OPEN IN CHAT on success.
+- [x] **HOME dashboard tab** — stat chips (models/nodes/RAG/bench), node cards, last-6 activity feed, top-6 benchmark performers, quick-action buttons
+- [x] **Chat message branching** — `fa-code-branch` hover button on every message; user msg rewinds + pre-fills input; assistant msg rewinds after response; aborts stream before trim; `TrimChatMessages()` + `POST /api/chats/:id/trim`
+- [x] **Chat auto-title** — first message generates title from first 60 chars; `PATCH /api/chats/:id/title`; `UpdateChatTitle` DB helper finally wired to a route
+- [x] **Inline chat rename** — pencil icon on hover in sidebar; inline input; Enter/blur saves, Escape cancels
+- [x] **Model NOTES server persistence** — debounced 500ms localStorage write + fire-and-forget `setPref()` to backend; loads from `prefs` map (server-synced) with localStorage fallback
+- [x] **appVersion const→var + CI ldflags** — binary now self-reports correct git tag version; workflow passes `-X main.appVersion` alongside existing `-X main.releaseType`
+- [x] **Dead code cleanup** — removed `PruneChatMessages` (never called); branch guard aborts stream; branch pre-fill strips `<think>` blocks
+- [x] **NeuroWizard hub** — NEUROWIZARD subtab inside Builder workspace. Card grid of 13 wizards; each opens a modal with live Modelfile preview, SSE creation stream, OPEN IN CHAT on success.
 - [x] **Expand Context wizard** — model + ctx size selector (8K–256K), ⚠ if exceeds trained max, auto-name `{model}-ctx{n}k`
 - [x] **Custom Persona wizard** — 4 role presets (coding/tutor/creative/research) + Custom; SYSTEM prompt auto-filled + editable
 - [x] **Sampling Profile wizard** — Creative / Balanced / Precise / Fast presets with baked PARAMETER lines
 - [x] **Strip Thinking wizard** — `-nothink` variant via `SYSTEM "/no_think"`; for Qwen3, DeepSeek-R1, QwQ
 - [x] **Merge Models wizard** — two model selects, blend weight slider (0.1–0.9), SLERP/Linear method
-- [x] **Ctx warning: completion + builder** — `⚠` span added to completion context limit and builder context window; wired to `updateCtxWarning()` via change listeners + `fetchModelCtxLengths()` initial call + `onBaseModelChange()`
 - [x] **8 additional NeuroWizards** — Remove Restrictions (clear/neutral/custom), Terse Mode (minimal/ultra-terse/technical), Code Specialist (14 language presets + custom + temp 0.1), Reproducible Output (seed + optional temp lock), Language Lock (14 languages + custom), Format Specialist (7 presets), Character Creator (name + personality + 7 speech styles), RAG-Optimized (strict/balanced/permissive)
+- [x] **Ctx warning: completion + builder** — `⚠` span added to completion context limit and builder context window; wired to `updateCtxWarning()` via change listeners + `fetchModelCtxLengths()` initial call + `onBaseModelChange()`
 
 ## v0.2.21 Session Notes
 

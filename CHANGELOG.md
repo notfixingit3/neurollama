@@ -4,34 +4,28 @@ All notable changes to NEUROLLAMA are documented here.
 
 ---
 
-## [v0.3.1] — 2026-06-10
+## [v0.2.24-beta.0] — 2026-06-13
 
 ### Added
-- **Copy button on user messages** — hover-reveal clipboard icon in the chat header of every user message, matching the existing copy button on assistant messages. Uses the same `copyMessageToClipboard` flow (checkmark feedback + toast).
-- **Model NOTES tab in INSPECT accordion** — personal scratch-pad per model alongside FILE/PARAMS/TEMPLATE/SYSTEM/CARD. Auto-saves to `localStorage` on every keystroke; clearing the textarea removes the key. The tab-content copy button hides while NOTES is active.
+- **HOME dashboard tab** — landing page with four live stat chips (models, nodes, RAG docs, benchmarks), node status cards, activity feed (last 6 entries), top-6 benchmark performers, and quick-action buttons to the main workspaces. Data pulled from existing global state; RAG doc count lazy-fetched and cached.
+- **Chat message branching** — `fa-code-branch` button (hover-reveal, mauve) on every user and assistant chat bubble. User-message button rewinds before that message and restores the text to the input; assistant-message button rewinds to just after that response. Aborts any in-flight stream before trimming. Backend: `TrimChatMessages()` + `POST /api/chats/:id/trim`.
+- **Chat auto-title** — first message sent in a new chat auto-generates a title from the first 60 characters of the prompt (trimmed at word boundary), replacing the `Chat // HH:MM:SS` placeholder. Backend: `PATCH /api/chats/:id/title` using the existing `UpdateChatTitle` DB helper, now finally wired to a route.
+- **Inline chat rename** — pencil icon appears on hover in the chat sidebar alongside the existing delete button; clicking replaces the title with an editable input (Enter/blur saves, Escape cancels).
+- **NeuroWizard** (Builder → NEUROWIZARD subtab) — 13 guided model operations with live Modelfile preview and SSE creation streams:
+  - Expand Context, Custom Persona (4 presets), Sampling Profile (Creative/Balanced/Precise/Fast), Strip Thinking (`/no_think`), Merge Models (SLERP/Linear), Remove Restrictions (clear/neutral/custom), Terse Mode (3 variants), Code Specialist (14 lang presets + temp 0.1), Reproducible Output (seed + temp lock), Language Lock (14 langs), Format Specialist (7 presets), Character Creator (name + personality + 7 speech styles), RAG-Optimized (3 strictness levels)
+- **Copy button on user messages** — hover-reveal clipboard icon in the chat header of every user message, matching the existing assistant copy button.
+- **Model NOTES tab in INSPECT accordion** — personal scratch-pad per model; auto-saves to `localStorage` on keystroke (debounced 500ms) and persists server-side via `PUT /api/preferences` so notes survive across browsers and devices.
+- **Context window validation** — `⚠` warning now covers all five panels: chat, code bench, hallucination bench, completion workspace, and builder recipe.
+- **RAG Collection Manager** — `collection` column on `rag_documents`, inline-editable collection badge per document, collection filter in query tester and chat RAG sidebar. Routes: `GET /api/rag/collections`, `PUT /api/rag/documents/:id/collection`.
+- **Activity center improvements** — category filter pills (ALL/PULL/BUILD/BENCH/MODEL/RAG/OPT/NODE/SYS), badge counting new events, export button for filtered log as timestamped `.txt`, new `rag` and `optimizer` categories.
+- **Builder inline validation** — amber border + collision warning on name conflict; red border + block on invalid characters.
 
----
-
-## [v0.3.0] — 2026-06-04
-
-### Added
-- **NeuroWizard** (Builder → NEUROWIZARD subtab) — guided model operations, no Modelfile knowledge required:
-  - **Expand Context** — set a larger `num_ctx` for any model with a context-window warning if it exceeds the trained max
-  - **Custom Persona** — apply a SYSTEM prompt from presets (Coding Assistant, Language Tutor, Creative Writer, Research Assistant) or freeform custom text
-  - **Sampling Profile** — bake Creative / Balanced / Precise / Fast temperature presets into a new Modelfile variant
-  - **Strip Thinking** — create a `-nothink` variant via `/no_think` SYSTEM directive (Qwen3, DeepSeek-R1, QwQ, etc.)
-  - **Merge Models** — blend two models with configurable weight and SLERP/Linear method
-  - Each wizard: live Modelfile preview, SSE streaming creation log, OPEN IN CHAT shortcut on success
-- **8 additional NeuroWizards**:
-  - **Remove Restrictions** — strips or replaces baked-in SYSTEM prompt; modes: Clear / Neutral baseline / Custom
-  - **Terse Mode** — three "no fluff" variants: Minimal / Ultra-terse / Technical
-  - **Code Specialist** — locks to code-only output for a chosen language + temperature 0.1; includes custom language entry
-  - **Reproducible Output** — bakes in fixed seed + optional temperature lock for deterministic responses
-  - **Language Lock** — forces responses in a chosen language (14 presets + custom)
-  - **Format Specialist** — 7 output/style presets: Markdown, Plain Text, JSON Only, Bullet Points, Academic, Socratic, Devil's Advocate
-  - **Character Creator** — named character with personality, speech style (7 options), and backstory
-  - **RAG-Optimized** — 3 strictness levels (Strict / Balanced / Permissive) for context-grounded Q&A
-- **Context window validation** now covers all panels: completion workspace and builder recipe now also show the `⚠` warning when selected context exceeds the model's trained maximum (chat, code bench, and hallucination bench already had it)
+### Fixed / Improved
+- `PruneChatMessages` dead code removed; `TrimChatMessages` (keep-first-N semantics) is the active helper.
+- Branch pre-fill strips `<think>…</think>` blocks before restoring text to the input.
+- Branch button aborts any in-flight generation before trimming.
+- `appVersion` changed from `const` to `var` so CI can inject the git tag via `-ldflags "-X main.appVersion=<tag>"`. Workflow updated to pass both `appVersion` and `releaseType` at build time.
+- XSS: all known `innerHTML` injection points use `escapeHTML()` — complete audit as of this release.
 
 ---
 

@@ -94,7 +94,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
           RELEASE_TYPE: ${{ needs.check-stable.outputs.prerelease == 'true' && 'pre-release' || 'stable' }}
-        run: go build -ldflags="-s -w -X main.releaseType=${RELEASE_TYPE}" -o ${{ matrix.binary }} .
+        run: go build -ldflags="-s -w -X main.appVersion=${{ github.ref_name }} -X main.releaseType=${RELEASE_TYPE}" -o ${{ matrix.binary }} .
 
       # Pre-release: create (or update) a pre-release via the action.
       - name: Upload to pre-release
