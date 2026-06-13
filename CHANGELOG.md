@@ -4,9 +4,21 @@ All notable changes to NEUROLLAMA are documented here.
 
 ---
 
+## [v0.2.25-beta.1] — 2026-06-13
+
+### Changed
+- **Ollama Remote Update moved to Fleet** — SSH into a node and upgrade Ollama now lives below the node grid in Fleet, where node management belongs. Settings no longer has it.
+- **SSH Key Store moved to Fleet** — keys are used exclusively for node SSH auth; they now live next to the Update Ollama form that consumes them. Fleet has three panels: node grid, Update Ollama, SSH Key Store.
+- **Settings simplified** — now contains only the Model Update Scheduler; cleaned up from 12-column grid to flat flex layout.
+
+### Fixed
+- HOME dashboard Recent Activity and Top Models now populate on first load without requiring a prior Inventory or Activity tab visit (`seedActivityFromDB()` seeds the last 20 benchmark runs on startup; lazy `fetchModelBenchSummary()` fires when switching to HOME).
+
+---
+
 ## [v0.2.25-beta.0] — 2026-06-13
 
-_(in progress)_
+_(superseded by beta.1)_
 
 ---
 

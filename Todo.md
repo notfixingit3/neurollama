@@ -1,7 +1,10 @@
 # NEUROLLAMA Roadmap & Feature Todo List
 
+<!-- v0.2.25-beta.1 — 2026-06-13 -->
+<!-- Ollama Remote Update + SSH Key Store moved from Settings → Fleet; HOME dashboard seeding fix (seedActivityFromDB + lazy fetchModelBenchSummary) -->
+
 <!-- v0.2.25-beta.0 — 2026-06-13 -->
-<!-- in progress -->
+<!-- initial beta.0 placeholder -->
 
 <!-- v0.2.24 — 2026-06-13 -->
 <!-- stable promotion of beta.0+beta.1; HOME dashboard seeding, btn fix, chat branching, auto-title, rename, NeuroWizard, RAG collections, activity center, model notes, XSS audit, CI version injection -->

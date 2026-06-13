@@ -38,7 +38,7 @@ import (
 )
 
 // appVersion is the default for local dev; CI overrides via -ldflags "-X main.appVersion=<tag>"
-var appVersion = "v0.2.25-beta.0"
+var appVersion = "v0.2.25-beta.1"
 
 // releaseType is "dev" by default; CI overrides via -ldflags "-X main.releaseType=pre-release|stable"
 var releaseType = "dev"
