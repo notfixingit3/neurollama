@@ -1175,32 +1175,6 @@ func TrimChatMessages(chatID int64, keepCount int) error {
 	return err
 }
 
-// Chat Context Pruning Helper
-
-func PruneChatMessages(chatID int64, keepCount int) error {
-	var count int
-	err := DB.QueryRow("SELECT COUNT(*) FROM messages WHERE chat_id = ?", chatID).Scan(&count)
-	if err != nil {
-		return err
-	}
-
-	if count <= keepCount {
-		return nil
-	}
-
-	limit := count - keepCount
-	_, err = DB.Exec(`
-		DELETE FROM messages 
-		WHERE chat_id = ? 
-		AND id IN (
-			SELECT id FROM messages 
-			WHERE chat_id = ? 
-			ORDER BY id ASC 
-			LIMIT ?
-		)
-	`, chatID, chatID, limit)
-	return err
-}
 
 // Optimizer Run Helpers
 

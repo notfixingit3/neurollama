@@ -5,6 +5,7 @@ let modelCtxLengths   = {}; // model_name → trained context length (int)
 let modelCapabilities = {}; // model_name → string[] from /api/show e.g. ["completion","tools","vision","thinking"]
 let modelBenchSummary = {}; // model_name → { std_grade, std_tps, code_grade, code_quality, hallu_recall, hallu_ctx_k }
 let dashRagDocCount = null;
+let _notesSaveTimer = null;
 let modelJsonCaps     = {}; // model_name → 'pass'|'fail'|'pending'|undefined (localStorage-cached JSON probe results)
 let selectedModels = new Set();
 let inspectedModel = null;
@@ -1663,6 +1664,10 @@ async function copyMessageToClipboard(index) {
 
 async function branchFromMessage(index) {
   if (!activeChatId) return;
+  if (isGeneratingChat) {
+    abortChatGeneration();
+    await new Promise(r => setTimeout(r, 150));
+  }
   const trimmedMsg = chatMessages[index];
   try {
     const res = await fetch(`/api/chats/${activeChatId}/trim`, {
@@ -1676,7 +1681,7 @@ async function branchFromMessage(index) {
     if (trimmedMsg && trimmedMsg.role === 'user') {
       const input = document.getElementById('chat-input-text');
       if (input) {
-        input.value = trimmedMsg.content;
+        input.value = trimmedMsg.content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
         input.focus();
         input.dispatchEvent(new Event('input'));
       }
@@ -3962,7 +3967,8 @@ function renderTabContent() {
     if (copyBtn) copyBtn.classList.add('hidden');
     if (notesArea) {
       notesArea.classList.remove('hidden');
-      notesArea.value = localStorage.getItem('model-note::' + inspectedModel.name) || '';
+      const noteKey = 'model-note::' + inspectedModel.name;
+      notesArea.value = getPref(noteKey) || localStorage.getItem(noteKey) || '';
     }
     return;
   }
@@ -3998,11 +4004,23 @@ function saveModelNote() {
   const notesArea = document.getElementById('model-notes-area');
   if (!notesArea || !inspectedModel) return;
   const key = 'model-note::' + inspectedModel.name;
-  if (notesArea.value.trim()) {
-    localStorage.setItem(key, notesArea.value);
+  const val = notesArea.value;
+  // Instant localStorage write for snappy perceived saves
+  if (val.trim()) {
+    localStorage.setItem(key, val);
   } else {
     localStorage.removeItem(key);
   }
+  // Debounced server-side persistence (500ms quiet period)
+  clearTimeout(_notesSaveTimer);
+  _notesSaveTimer = setTimeout(() => {
+    if (val.trim()) {
+      setPref(key, val);
+    } else {
+      // Clear the pref by setting empty — setPref handles the PUT
+      setPref(key, '');
+    }
+  }, 500);
 }
 
 function copyTabContent() {
@@ -4119,7 +4137,7 @@ function renderChatHistory() {
         <div class="chat chat-end animate-fade-in">
           <div class="chat-header text-[10px] text-[#4c566a] mb-1 flex items-center gap-2 justify-end">
             <button onclick="branchFromMessage(${msgIndex})"
-              title="Branch from here — rewind to before this message"
+              title="Re-prompt — remove this and all later messages, restore text to input"
               class="opacity-30 hover:opacity-100 transition-opacity text-[#b48ead] cursor-pointer text-[10px]">
               <i class="fa-solid fa-code-branch"></i>
             </button>
@@ -4185,7 +4203,7 @@ function renderChatHistory() {
               <i class="fa-regular fa-copy"></i>
             </button>
             <button onclick="branchFromMessage(${msgIndex + 1})"
-              title="Branch from here — rewind to after this response"
+              title="Re-roll — remove everything after this response and try again"
               class="opacity-30 hover:opacity-100 transition-opacity text-[#b48ead] cursor-pointer text-[10px]">
               <i class="fa-solid fa-code-branch"></i>
             </button>
