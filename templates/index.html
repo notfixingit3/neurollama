@@ -410,11 +410,11 @@
                   <!-- Browse external libraries -->
                   <div class="flex gap-1">
                     <a href="https://ollama.com/library" target="_blank" rel="noopener"
-                       class="btn btn-xs font-tech text-[9px] px-2 h-6 min-h-0 border-[#4c566a] text-[#88c0d0] hover:border-[#88c0d0] hover:bg-[#88c0d0]/10 uppercase gap-1">
+                       class="btn btn-xs font-tech text-[9px] px-2 h-6 min-h-0 bg-transparent border-[#4c566a] text-[#88c0d0] hover:border-[#88c0d0] hover:bg-[#88c0d0]/10 uppercase gap-1">
                       <i class="fa-solid fa-arrow-up-right-from-square text-[8px]"></i>Ollama Library
                     </a>
                     <a href="https://huggingface.co/models?library=gguf&sort=trending" target="_blank" rel="noopener"
-                       class="btn btn-xs font-tech text-[9px] px-2 h-6 min-h-0 border-[#4c566a] text-[#ebcb8b] hover:border-[#ebcb8b] hover:bg-[#ebcb8b]/10 uppercase gap-1">
+                       class="btn btn-xs font-tech text-[9px] px-2 h-6 min-h-0 bg-transparent border-[#4c566a] text-[#ebcb8b] hover:border-[#ebcb8b] hover:bg-[#ebcb8b]/10 uppercase gap-1">
                       <i class="fa-solid fa-arrow-up-right-from-square text-[8px]"></i>HF GGUF Models
                     </a>
                   </div>
@@ -1472,10 +1472,10 @@
                 <button onclick="setActivityFilter('system')" id="af-system"   class="activity-filter-btn px-2 py-0.5 rounded text-[9px] font-mono font-bold border border-[#4c566a]/50 text-[#4c566a]">SYS</button>
               </div>
               <div class="flex gap-1.5">
-                <button onclick="exportActivityLog()" class="btn btn-xs font-mono border-[#4c566a] text-[#4c566a] hover:text-[#d8dee9] hover:border-[#d8dee9]">
+                <button onclick="exportActivityLog()" class="btn btn-xs font-mono bg-transparent border-[#4c566a] text-[#4c566a] hover:text-[#d8dee9] hover:border-[#d8dee9]">
                   <i class="fa-solid fa-download mr-1"></i>Export
                 </button>
-                <button onclick="clearActivityDisplay()" class="btn btn-xs font-mono border-[#4c566a] text-[#4c566a] hover:text-[#d8dee9] hover:border-[#d8dee9]">
+                <button onclick="clearActivityDisplay()" class="btn btn-xs font-mono bg-transparent border-[#4c566a] text-[#4c566a] hover:text-[#d8dee9] hover:border-[#d8dee9]">
                   <i class="fa-solid fa-ban mr-1"></i>Clear
                 </button>
               </div>
@@ -1497,10 +1497,10 @@
               <div class="col-span-full text-[#4c566a] animate-pulse">Loading…</div>
             </div>
             <div class="flex flex-wrap gap-2">
-              <a href="https://github.com/notfixingit3/neurollama" target="_blank" rel="noopener" class="btn btn-xs font-mono border-[#4c566a] text-[#81a1c1] hover:border-[#81a1c1]">
+              <a href="https://github.com/notfixingit3/neurollama" target="_blank" rel="noopener" class="btn btn-xs font-mono bg-transparent border-[#4c566a] text-[#81a1c1] hover:border-[#81a1c1]">
                 <i class="fa-brands fa-github mr-1"></i>GitHub
               </a>
-              <a href="https://buymeacoffee.com/notfixingit" target="_blank" rel="noopener" class="btn btn-xs font-mono border-[#4c566a] text-[#a3be8c] hover:border-[#a3be8c]">
+              <a href="https://buymeacoffee.com/notfixingit" target="_blank" rel="noopener" class="btn btn-xs font-mono bg-transparent border-[#4c566a] text-[#a3be8c] hover:border-[#a3be8c]">
                 <i class="fa-solid fa-mug-hot mr-1"></i>Buy Me A Coffee
               </a>
             </div>
@@ -1531,7 +1531,7 @@
                   <div class="font-mono text-xs text-[#d8dee9]">Model Cache</div>
                   <div id="cache-model-desc" class="font-mono text-[10px] text-[#4c566a] mt-0.5">Stale-while-revalidate model list for fast page loads</div>
                 </div>
-                <button onclick="clearModelCache()" class="btn btn-xs font-mono border-[#4c566a] text-[#ebcb8b] hover:border-[#ebcb8b]">
+                <button onclick="clearModelCache()" class="btn btn-xs font-mono bg-transparent border-[#4c566a] text-[#ebcb8b] hover:border-[#ebcb8b]">
                   <i class="fa-solid fa-eraser mr-1"></i>Clear
                 </button>
               </div>
@@ -1540,7 +1540,7 @@
                   <div class="font-mono text-xs text-[#d8dee9]">Preferences</div>
                   <div class="font-mono text-[10px] text-[#4c566a] mt-0.5">Active workspace, model selections, sidebar states, prompt history</div>
                 </div>
-                <button onclick="clearPreferences()" class="btn btn-xs font-mono border-[#4c566a] text-[#ebcb8b] hover:border-[#ebcb8b]">
+                <button onclick="clearPreferences()" class="btn btn-xs font-mono bg-transparent border-[#4c566a] text-[#ebcb8b] hover:border-[#ebcb8b]">
                   <i class="fa-solid fa-eraser mr-1"></i>Clear
                 </button>
               </div>
@@ -1549,7 +1549,7 @@
                   <div class="font-mono text-xs text-[#bf616a]">Wipe All Browser Data</div>
                   <div class="font-mono text-[10px] text-[#4c566a] mt-0.5">Removes every NEUROLLAMA key from localStorage</div>
                 </div>
-                <button onclick="wipeAllLocalStorage()" class="btn btn-xs font-mono border-[#bf616a] text-[#bf616a] hover:bg-[#bf616a]/10">
+                <button onclick="wipeAllLocalStorage()" class="btn btn-xs font-mono bg-transparent border-[#bf616a] text-[#bf616a] hover:bg-[#bf616a]/10">
                   <i class="fa-solid fa-trash mr-1"></i>Wipe
                 </button>
               </div>
@@ -1568,7 +1568,7 @@
                   <div class="font-mono text-xs text-[#d8dee9]">Chat History</div>
                   <div id="db-chat-desc" class="font-mono text-[10px] text-[#4c566a] mt-0.5">All sessions and messages</div>
                 </div>
-                <button onclick="clearAllChats()" class="btn btn-xs font-mono border-[#4c566a] text-[#ebcb8b] hover:border-[#ebcb8b]">
+                <button onclick="clearAllChats()" class="btn btn-xs font-mono bg-transparent border-[#4c566a] text-[#ebcb8b] hover:border-[#ebcb8b]">
                   <i class="fa-solid fa-eraser mr-1"></i>Clear
                 </button>
               </div>
@@ -1577,7 +1577,7 @@
                   <div class="font-mono text-xs text-[#d8dee9]">Benchmark Results</div>
                   <div id="db-bench-desc" class="font-mono text-[10px] text-[#4c566a] mt-0.5">All benchmark runs and leaderboard data</div>
                 </div>
-                <button onclick="clearAllBenchmarks()" class="btn btn-xs font-mono border-[#4c566a] text-[#ebcb8b] hover:border-[#ebcb8b]">
+                <button onclick="clearAllBenchmarks()" class="btn btn-xs font-mono bg-transparent border-[#4c566a] text-[#ebcb8b] hover:border-[#ebcb8b]">
                   <i class="fa-solid fa-eraser mr-1"></i>Clear
                 </button>
               </div>
@@ -1596,7 +1596,7 @@
                   <div class="font-mono text-xs text-[#d8dee9]">Export Database</div>
                   <div class="font-mono text-[10px] text-[#4c566a] mt-0.5">Download a complete snapshot of neurollama.db</div>
                 </div>
-                <button onclick="downloadBackup()" class="btn btn-xs font-mono border-[#4c566a] text-[#a3be8c] hover:border-[#a3be8c]">
+                <button onclick="downloadBackup()" class="btn btn-xs font-mono bg-transparent border-[#4c566a] text-[#a3be8c] hover:border-[#a3be8c]">
                   <i class="fa-solid fa-download mr-1"></i>Download
                 </button>
               </div>
@@ -1605,7 +1605,7 @@
                 <div class="font-mono text-[10px] text-[#4c566a] mb-3">Upload a previously exported <code class="text-[#88c0d0]">.db</code> file. The app must be restarted to apply the restore.</div>
                 <div class="flex items-center gap-2 flex-wrap">
                   <input type="file" id="restore-file-input" accept=".db" class="file-input file-input-xs font-mono border-[#4c566a] bg-[#2e3440] max-w-xs" />
-                  <button onclick="uploadRestore()" class="btn btn-xs font-mono border-[#4c566a] text-[#81a1c1] hover:border-[#81a1c1]">
+                  <button onclick="uploadRestore()" class="btn btn-xs font-mono bg-transparent border-[#4c566a] text-[#81a1c1] hover:border-[#81a1c1]">
                     <i class="fa-solid fa-upload mr-1"></i>Restore
                   </button>
                 </div>
@@ -1626,7 +1626,7 @@
                   <div class="font-mono text-xs text-[#d8dee9]">Export Presets</div>
                   <div class="font-mono text-[10px] text-[#4c566a] mt-0.5">Download all system prompt presets as a JSON file</div>
                 </div>
-                <button onclick="downloadPresets()" class="btn btn-xs font-mono border-[#4c566a] text-[#a3be8c] hover:border-[#a3be8c]">
+                <button onclick="downloadPresets()" class="btn btn-xs font-mono bg-transparent border-[#4c566a] text-[#a3be8c] hover:border-[#a3be8c]">
                   <i class="fa-solid fa-download mr-1"></i>Export
                 </button>
               </div>
@@ -1635,7 +1635,7 @@
                 <div class="font-mono text-[10px] text-[#4c566a] mb-3">Upload a previously exported <code class="text-[#88c0d0]">.json</code> presets file to add them to your library.</div>
                 <div class="flex items-center gap-2 flex-wrap">
                   <input type="file" id="preset-import-input" accept=".json" class="file-input file-input-xs font-mono border-[#4c566a] bg-[#2e3440] max-w-xs" />
-                  <button onclick="uploadImportPresets()" class="btn btn-xs font-mono border-[#4c566a] text-[#81a1c1] hover:border-[#81a1c1]">
+                  <button onclick="uploadImportPresets()" class="btn btn-xs font-mono bg-transparent border-[#4c566a] text-[#81a1c1] hover:border-[#81a1c1]">
                     <i class="fa-solid fa-upload mr-1"></i>Import
                   </button>
                 </div>
@@ -2957,7 +2957,7 @@
         <div id="ssh-key-error" class="hidden text-[#bf616a] text-[10px] font-mono"></div>
         <div class="flex justify-end gap-2 pt-1">
           <button type="button" onclick="document.getElementById('add-ssh-key-modal').close()"
-                  class="btn btn-xs font-mono border-[#4c566a] text-[#4c566a] hover:text-[#d8dee9]">Cancel</button>
+                  class="btn btn-xs font-mono bg-transparent border-[#4c566a] text-[#4c566a] hover:text-[#d8dee9]">Cancel</button>
           <button type="submit" id="ssh-key-submit-btn" class="btn btn-xs btn-info font-tech uppercase tracking-wide">
             <i class="fa-solid fa-key mr-1"></i>Store Key
           </button>

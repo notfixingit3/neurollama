@@ -213,6 +213,7 @@
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
   font-weight: 700;
   color: #4c566a;
+  background-color: transparent;
   border: 1px solid rgba(76, 86, 106, 0.4);
   transition: color 0.15s, background-color 0.15s, border-color 0.15s;
   cursor: pointer;
