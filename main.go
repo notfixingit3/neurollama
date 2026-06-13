@@ -7502,14 +7502,18 @@ func ollamaUpdateSSEHandler(c *gin.Context) {
 					return false
 				}
 				emit("status", "Stopping Ollama…")
-				_, _ = runSSHCmd(sshClient, "killall -q Ollama ollama 2>/dev/null; sleep 1") // fire-and-forget; process may already be stopped
+				// Stop the LaunchAgent and kill any running process; LaunchAgent will restart after we're done
+				_, _ = runSSHCmd(sshClient, "launchctl stop com.ollama.ollama 2>/dev/null; killall -q Ollama ollama 2>/dev/null; sleep 1")
 				emit("status", "Replacing Ollama.app…")
+				// Use ditto for both extract and copy — cp -r does not preserve HFS+ extended
+				// attributes, resource forks, or code-signing metadata, which macOS rejects as a
+				// corrupt/damaged binary. ditto preserves everything.
 				replaceCmd := `set -e
 rm -rf /tmp/ollama-update-tmp
 mkdir /tmp/ollama-update-tmp
 ditto -xk /tmp/Ollama-darwin.zip /tmp/ollama-update-tmp/
 rm -rf /Applications/Ollama.app
-cp -r /tmp/ollama-update-tmp/Ollama.app /Applications/Ollama.app
+ditto /tmp/ollama-update-tmp/Ollama.app /Applications/Ollama.app
 xattr -dr com.apple.quarantine /Applications/Ollama.app 2>/dev/null || true
 rm -rf /tmp/ollama-update-tmp /tmp/Ollama-darwin.zip`
 				if rErr := runSSHCmdStream(sshClient, replaceCmd, line); rErr != nil {
@@ -7517,7 +7521,8 @@ rm -rf /tmp/ollama-update-tmp /tmp/Ollama-darwin.zip`
 					return false
 				}
 				emit("status", "Restarting Ollama…")
-				_, _ = runSSHCmd(sshClient, "open /Applications/Ollama.app") // fire-and-forget restart; Ollama GUI app
+				// Prefer LaunchAgent restart; fall back to open for non-LaunchAgent installs
+				_, _ = runSSHCmd(sshClient, "launchctl start com.ollama.ollama 2>/dev/null || open /Applications/Ollama.app")
 			} else {
 				emit("status", "CLI install — running Ollama install script…")
 				if sErr := runSSHCmdStream(sshClient, "curl -fsSL https://ollama.com/install.sh | sh", line); sErr != nil {
