@@ -1066,7 +1066,6 @@ function switchSystemSubtab(subtab) {
   } else if (subtab === 'settings') {
     fetchSchedulerSettings();
     fetchSchedulerLogs();
-    fetchSSHKeys();
   } else if (subtab === 'diagnostics') {
     runDiagnostics();
     renderStreamFailureLog();

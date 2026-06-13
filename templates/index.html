@@ -2653,11 +2653,10 @@
         </div>
 
         <!-- PANEL 8: SETTINGS -->
-        <div id="ws-panel-settings" class="ws-panel hidden grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div id="ws-panel-settings" class="ws-panel hidden flex flex-col gap-6">
 
           <!-- Model Update Scheduler -->
-          <div class="lg:col-span-12 flex flex-col gap-6">
-            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col">
+          <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col">
               <div class="mb-3 pb-2 border-b border-[#4c566a]/40">
                 <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
                   <i class="fa-solid fa-clock-rotate-left mr-2"></i>Model Update Scheduler
@@ -2688,29 +2687,6 @@
                 </div>
               </div>
             </div>
-          </div>
-
-          <!-- SSH Key Store — full-width row -->
-          <div class="lg:col-span-12 flex flex-col gap-6">
-            <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col">
-              <div class="mb-3 pb-2 border-b border-[#4c566a]/40 flex items-center justify-between">
-                <div>
-                  <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
-                    <i class="fa-solid fa-key mr-2"></i>SSH Key Store
-                  </h2>
-                  <p class="text-[10px] text-[#4c566a] mt-1">
-                    Stored keys are AES-256-GCM encrypted at rest. Key material never leaves the server — only the label, username, and fingerprint are returned to the UI.
-                    Use this as a fallback when no SSH agent or <code class="text-[#a3be8c]">~/.ssh/</code> keys are available (e.g. Docker deployments).
-                  </p>
-                </div>
-                <button onclick="openAddSSHKeyModal()"
-                        class="btn btn-xs btn-info font-tech uppercase tracking-wide shrink-0 ml-4">
-                  <i class="fa-solid fa-plus mr-1"></i>Add Key
-                </button>
-              </div>
-              <div id="ssh-keys-list" class="font-mono text-xs text-[#4c566a] italic">Loading…</div>
-            </div>
-          </div>
 
         </div>
 
@@ -2834,6 +2810,26 @@
                 </div>
               </div>
             </div>
+          </div>
+
+          <!-- SSH Key Store -->
+          <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col">
+            <div class="mb-3 pb-2 border-b border-[#4c566a]/40 flex items-center justify-between">
+              <div>
+                <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
+                  <i class="fa-solid fa-key mr-2"></i>SSH Key Store
+                </h2>
+                <p class="text-[10px] text-[#4c566a] mt-1">
+                  Stored keys are AES-256-GCM encrypted at rest. Key material never leaves the server — only the label, username, and fingerprint are returned to the UI.
+                  Use this as a fallback when no SSH agent or <code class="text-[#a3be8c]">~/.ssh/</code> keys are available (e.g. Docker deployments).
+                </p>
+              </div>
+              <button onclick="openAddSSHKeyModal()"
+                      class="btn btn-xs btn-info font-tech uppercase tracking-wide shrink-0 ml-4">
+                <i class="fa-solid fa-plus mr-1"></i>Add Key
+              </button>
+            </div>
+            <div id="ssh-keys-list" class="font-mono text-xs text-[#4c566a] italic">Loading…</div>
           </div>
 
         </div>
