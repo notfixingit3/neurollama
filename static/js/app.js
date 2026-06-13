@@ -977,6 +977,8 @@ function switchWorkspace(workspace) {
   if (workspace === 'home') {
     renderDashboard();
     if (dashRagDocCount === null) fetchDashRagCount();
+    if (_activityAllEntries.length === 0) fetchDashActivity();
+    if (Object.keys(modelBenchSummary).length === 0) fetchModelBenchSummary();
   } else if (workspace === 'inventory') {
     // Restore the last-used inventory sub-tab (models or hub)
     switchInventorySubtab(activeInventorySubtab);
@@ -2736,6 +2738,16 @@ async function fetchDashRagCount() {
     if (!res.ok) return;
     const docs = await res.json();
     dashRagDocCount = Array.isArray(docs) ? docs.length : 0;
+    if (activeWorkspace === 'home') renderDashboard();
+  } catch { /* silent */ }
+}
+
+async function fetchDashActivity() {
+  try {
+    const res = await fetch('/api/activity');
+    if (!res.ok) return;
+    const entries = await res.json();
+    _activityAllEntries = entries;
     if (activeWorkspace === 'home') renderDashboard();
   } catch { /* silent */ }
 }

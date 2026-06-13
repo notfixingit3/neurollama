@@ -314,6 +314,7 @@ func main() {
 	if err := InitDB(dbPath); err != nil {
 		log.Fatalf("Error initializing database: %v", err)
 	}
+	seedActivityFromDB()
 
 	// Start background pollers and scheduler
 	startNodeCachePoller() // warms node-status and model-list caches before first request
@@ -2167,6 +2168,33 @@ func LogActivity(category, message string) {
 	if len(activityBuf) > activityMaxSize {
 		activityBuf = activityBuf[len(activityBuf)-activityMaxSize:]
 	}
+}
+
+// seedActivityFromDB pre-populates the activity buffer with recent DB history so
+// the HOME dashboard shows useful data immediately after server restart.
+func seedActivityFromDB() {
+	benches, err := GetBenchmarks()
+	if err != nil || len(benches) == 0 {
+		return
+	}
+	// GetBenchmarks returns newest-first; take up to 20 and reverse so the buffer
+	// stays oldest-first (LogActivity appends; the handler reverses for display).
+	cap := 20
+	if len(benches) < cap {
+		cap = len(benches)
+	}
+	recent := benches[:cap]
+	activityMu.Lock()
+	for i := cap - 1; i >= 0; i-- {
+		b := recent[i]
+		msg := fmt.Sprintf("Benchmark completed: %s (%s) on %s", b.ModelName, b.BenchmarkType, b.ServerName)
+		activityBuf = append(activityBuf, ActivityEntry{
+			Time:     b.CreatedAt,
+			Category: "benchmark",
+			Message:  msg,
+		})
+	}
+	activityMu.Unlock()
 }
 
 func activityLogHandler(c *gin.Context) {
