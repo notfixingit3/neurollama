@@ -1661,6 +1661,32 @@ async function copyMessageToClipboard(index) {
   showToast('Copied to clipboard.', 'success');
 }
 
+async function branchFromMessage(index) {
+  if (!activeChatId) return;
+  const trimmedMsg = chatMessages[index];
+  try {
+    const res = await fetch(`/api/chats/${activeChatId}/trim`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keep_count: index })
+    });
+    if (!res.ok) throw new Error('Trim failed');
+    chatMessages = chatMessages.slice(0, index);
+    renderChatHistory();
+    if (trimmedMsg && trimmedMsg.role === 'user') {
+      const input = document.getElementById('chat-input-text');
+      if (input) {
+        input.value = trimmedMsg.content;
+        input.focus();
+        input.dispatchEvent(new Event('input'));
+      }
+    }
+    showToast('Branched — conversation rewound.', 'success');
+  } catch {
+    showToast('Branch failed.', 'error');
+  }
+}
+
 function populateModelDropdowns() {
   const chatSelect = document.getElementById('chat-model-select');
   const builderSelect = document.getElementById('builder-base-select');
@@ -4092,6 +4118,11 @@ function renderChatHistory() {
       html += `
         <div class="chat chat-end animate-fade-in">
           <div class="chat-header text-[10px] text-[#4c566a] mb-1 flex items-center gap-2 justify-end">
+            <button onclick="branchFromMessage(${msgIndex})"
+              title="Branch from here — rewind to before this message"
+              class="opacity-30 hover:opacity-100 transition-opacity text-[#b48ead] cursor-pointer text-[10px]">
+              <i class="fa-solid fa-code-branch"></i>
+            </button>
             <button id="copy-msg-${msgIndex}" onclick="copyMessageToClipboard(${msgIndex})"
               title="Copy message"
               class="opacity-30 hover:opacity-100 transition-opacity text-[#88c0d0] cursor-pointer text-[10px]">
@@ -4152,6 +4183,11 @@ function renderChatHistory() {
               title="Copy response"
               class="ml-1 opacity-30 hover:opacity-100 transition-opacity text-[#88c0d0] cursor-pointer text-[10px]">
               <i class="fa-regular fa-copy"></i>
+            </button>
+            <button onclick="branchFromMessage(${msgIndex + 1})"
+              title="Branch from here — rewind to after this response"
+              class="opacity-30 hover:opacity-100 transition-opacity text-[#b48ead] cursor-pointer text-[10px]">
+              <i class="fa-solid fa-code-branch"></i>
             </button>
           </div>
           <div class="chat-bubble bg-[#242933] border border-[#4c566a]/50 text-[#e5e9f0] leading-relaxed max-w-[85%] whitespace-pre-wrap">${ragHTML}${formattedContent}</div>

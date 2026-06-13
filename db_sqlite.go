@@ -1155,6 +1155,26 @@ func DeleteBenchmark(id int64) error {
 	return err
 }
 
+// TrimChatMessages keeps the first keepCount messages and deletes all subsequent ones.
+// Used for chat branching — rolls back the conversation tail.
+func TrimChatMessages(chatID int64, keepCount int) error {
+	if keepCount <= 0 {
+		_, err := DB.Exec("DELETE FROM messages WHERE chat_id = ?", chatID)
+		return err
+	}
+	_, err := DB.Exec(`
+		DELETE FROM messages
+		WHERE chat_id = ?
+		AND id NOT IN (
+			SELECT id FROM messages
+			WHERE chat_id = ?
+			ORDER BY id ASC
+			LIMIT ?
+		)
+	`, chatID, chatID, keepCount)
+	return err
+}
+
 // Chat Context Pruning Helper
 
 func PruneChatMessages(chatID int64, keepCount int) error {

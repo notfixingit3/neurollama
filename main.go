@@ -416,8 +416,9 @@ func main() {
 		api.POST("/scheduler/check", checkModelUpdatesNowHandler)
 		api.GET("/telemetry/stream", telemetryStreamHandler)
 
-		// Context Compression
+		// Context Compression & Branching
 		api.POST("/chats/:id/compress", compressChatHandler)
+		api.POST("/chats/:id/trim", trimChatHandler)
 
 		// Benchmarks
 		api.GET("/benchmarks", getBenchmarksHandler)
@@ -3033,6 +3034,34 @@ func compressChatHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Chat compressed successfully", "summary": summary})
+}
+
+func trimChatHandler(c *gin.Context) {
+	idStr := c.Param("id")
+	var id int64
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid chat ID"})
+		return
+	}
+
+	var req struct {
+		KeepCount int `json:"keep_count"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+	if req.KeepCount < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "keep_count must be >= 0"})
+		return
+	}
+
+	if err := TrimChatMessages(id, req.KeepCount); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Chat trimmed", "keep_count": req.KeepCount})
 }
 
 // Benchmarking Functions
