@@ -1,5 +1,11 @@
 # NEUROLLAMA Roadmap & Feature Todo List
 
+<!-- v0.2.24-beta.1 — 2026-06-13 -->
+<!-- fix: bg-transparent on bare btn elements (GitHub/HuggingFace/BuyMeCoffee links + bench-type-btn) — illegible against Nord light base-100 -->
+
+<!-- v0.2.24-beta.0 — 2026-06-13 -->
+<!-- HOME dashboard tab, chat branching, chat auto-title + inline rename, model NOTES server persistence, NeuroWizard (13 wizards), copy button on user msgs, RAG Collection Manager, activity center improvements, builder inline validation, XSS audit complete, CI version injection fix -->
+
 <!-- v0.2.23 — 2026-06-04 -->
 <!-- Ollama Remote Update via SSH (System > Settings): password/key auth, macOS .app bundle path, Linux binary swap preserving custom systemd service, pre-flight checks (curl, GitHub API, binary path, service file, sudo creds, disk space) -->
 <!-- Three new bench types: tool_use, json_output, instruction_follow; leaderboard bar chart; param size filter; JSON badge; CHAT⚠ rework; halluc ctx warning -->

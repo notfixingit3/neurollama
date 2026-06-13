@@ -4,6 +4,13 @@ All notable changes to NEUROLLAMA are documented here.
 
 ---
 
+## [v0.2.24-beta.1] — 2026-06-13
+
+### Fixed
+- White background on bare `btn` elements (GitHub, HuggingFace, Buy Me a Coffee links in Model Hub and About panel, bench-type-btn selectors) — DaisyUI v5 Nord theme's `--b1` base color is light `#ECEFF4`, so uncolored buttons were illegible. Added `bg-transparent` via Tailwind class and CSS `background-color: transparent` to `.bench-type-btn`.
+
+---
+
 ## [v0.2.24-beta.0] — 2026-06-13
 
 ### Added
