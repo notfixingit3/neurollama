@@ -1,5 +1,8 @@
 # NEUROLLAMA Roadmap & Feature Todo List
 
+<!-- v0.2.24 — 2026-06-13 -->
+<!-- stable promotion of beta.0+beta.1; HOME dashboard seeding, btn fix, chat branching, auto-title, rename, NeuroWizard, RAG collections, activity center, model notes, XSS audit, CI version injection -->
+
 <!-- v0.2.24-beta.1 — 2026-06-13 -->
 <!-- fix: bg-transparent on bare btn elements (GitHub/HuggingFace/BuyMeCoffee links + bench-type-btn) — illegible against Nord light base-100 -->
 

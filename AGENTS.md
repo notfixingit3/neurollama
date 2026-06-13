@@ -1,6 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
 **Generated:** 2026-06-13
+**Version:** v0.2.24
 **Commit:** HEAD
 **Branch:** dev
 

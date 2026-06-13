@@ -4,10 +4,27 @@ All notable changes to NEUROLLAMA are documented here.
 
 ---
 
-## [v0.2.24-beta.1] — 2026-06-13
+## [v0.2.24] — 2026-06-13
+
+### Added
+- **HOME dashboard tab** — landing page with four live stat chips (models, nodes, RAG docs, benchmarks), node status cards, activity feed (last 6 entries), top-6 benchmark performers, and quick-action buttons to the main workspaces. Data pulled from existing global state; RAG doc count lazy-fetched and cached.
+- **Chat message branching** — `fa-code-branch` button (hover-reveal, mauve) on every user and assistant chat bubble. User-message button rewinds before that message and restores the text to the input; assistant-message button rewinds to just after that response. Aborts any in-flight stream before trimming. Backend: `TrimChatMessages()` + `POST /api/chats/:id/trim`.
+- **Chat auto-title** — first message sent in a new chat auto-generates a title from the first 60 characters of the prompt (trimmed at word boundary). Backend: `PATCH /api/chats/:id/title` using the existing `UpdateChatTitle` DB helper.
+- **Inline chat rename** — pencil icon appears on hover in the chat sidebar; clicking replaces the title with an editable input (Enter/blur saves, Escape cancels).
+- **NeuroWizard** (Builder → NEUROWIZARD subtab) — 13 guided model operations with live Modelfile preview and SSE creation streams: Expand Context, Custom Persona, Sampling Profile, Strip Thinking, Merge Models, Remove Restrictions, Terse Mode, Code Specialist, Reproducible Output, Language Lock, Format Specialist, Character Creator, RAG-Optimized.
+- **Model NOTES tab** in INSPECT accordion — personal scratch-pad per model; auto-saves to `localStorage` and persists server-side via `PUT /api/preferences` across browsers and devices.
+- **RAG Collection Manager** — `collection` column on `rag_documents`, inline-editable collection badge, collection filter in query tester and chat sidebar. Routes: `GET /api/rag/collections`, `PUT /api/rag/documents/:id/collection`.
+- **Activity center improvements** — category filter pills, badge counting new events, export button, new `rag` and `optimizer` categories.
+- **Copy button on user messages** — hover-reveal clipboard icon in chat header of every user message.
+- **Context window validation** — `⚠` warning covers all five panels: chat, code bench, hallucination bench, completion workspace, and builder recipe.
 
 ### Fixed
-- White background on bare `btn` elements (GitHub, HuggingFace, Buy Me a Coffee links in Model Hub and About panel, bench-type-btn selectors) — DaisyUI v5 Nord theme's `--b1` base color is light `#ECEFF4`, so uncolored buttons were illegible. Added `bg-transparent` via Tailwind class and CSS `background-color: transparent` to `.bench-type-btn`.
+- White background on bare `btn` elements (GitHub, HuggingFace, Buy Me a Coffee, bench-type-btn selectors) — DaisyUI v5 Nord theme `--b1` is light `#ECEFF4`; added `bg-transparent` to affected elements.
+- HOME dashboard Recent Activity and Top Models sections now populate on first load without requiring a prior visit to Inventory or the Activity tab.
+- CI version injection: `const appVersion` → `var appVersion` so `-ldflags -X` can override it; binaries now self-report the correct git tag.
+
+### Removed
+- Dead code `PruneChatMessages` (never called; superseded by `TrimChatMessages`).
 
 ---
 
