@@ -4356,6 +4356,11 @@ async function sendChatMessage() {
   }
   chatMessages.push(userMsg);
 
+  // Auto-title on the first user message
+  if (chatMessages.length === 1 && activeChatId) {
+    autoTitleChat(activeChatId, promptText);
+  }
+
   // Clear selected images and update preview bar UI
   selectedImages = [];
   renderImagePreviews();
@@ -5314,20 +5319,94 @@ function renderChatSessions() {
     }
 
     return `
-      <div class="p-2 border rounded-lg flex items-center justify-between gap-2 transition-all cursor-pointer ${activeBorder} group" onclick="switchChatSession(${chat.id})">
+      <div data-chat-id="${chat.id}" class="p-2 border rounded-lg flex items-center justify-between gap-2 transition-all cursor-pointer ${activeBorder} group" onclick="switchChatSession(${chat.id})">
         <div class="flex-1 min-w-0">
-          <h3 class="font-bold text-xs truncate group-hover:text-[#88c0d0] transition-colors">${escapeHTML(chat.title)}</h3>
+          <h3 class="chat-title-text font-bold text-xs truncate group-hover:text-[#88c0d0] transition-colors">${escapeHTML(chat.title)}</h3>
           <p class="text-[9px] font-mono text-[#4c566a] truncate flex justify-between gap-1 mt-0.5">
             <span class="truncate">${escapeHTML(chat.model)}</span>
             <span class="shrink-0">${dateStr}</span>
           </p>
         </div>
-        <button onclick="deleteChatSession(${chat.id}, event)" class="btn btn-ghost btn-xs p-1 text-[#bf616a] opacity-0 group-hover:opacity-100 transition-opacity" title="Delete Session">
-          <i class="fa-solid fa-trash-can text-[10px]"></i>
-        </button>
+        <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+          <button onclick="startChatRename(${chat.id}, ${JSON.stringify(chat.title)}, event)" class="btn btn-ghost btn-xs p-1 text-[#88c0d0]" title="Rename">
+            <i class="fa-solid fa-pencil text-[10px]"></i>
+          </button>
+          <button onclick="deleteChatSession(${chat.id}, event)" class="btn btn-ghost btn-xs p-1 text-[#bf616a]" title="Delete Session">
+            <i class="fa-solid fa-trash-can text-[10px]"></i>
+          </button>
+        </div>
       </div>
     `;
   }).join('');
+}
+
+// ── Chat Title ───────────────────────────────────────────────────────────────
+
+async function autoTitleChat(chatId, promptText) {
+  let title = promptText.replace(/\s+/g, ' ').trim();
+  if (title.length > 60) {
+    title = title.slice(0, 60).replace(/\s+\S*$/, '').trim();
+  }
+  if (!title) return;
+  try {
+    await fetch(`/api/chats/${chatId}/title`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title })
+    });
+    const session = chatSessions.find(c => c.id === chatId);
+    if (session) session.title = title;
+    renderChatSessions();
+    const el = document.getElementById('chat-session-active-title');
+    if (el) el.textContent = title.toUpperCase();
+  } catch { /* cosmetic — silent */ }
+}
+
+async function saveChatRename(chatId, newTitle) {
+  const title = newTitle.trim();
+  if (!title) return;
+  try {
+    const res = await fetch(`/api/chats/${chatId}/title`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title })
+    });
+    if (!res.ok) throw new Error();
+    const session = chatSessions.find(c => c.id === chatId);
+    if (session) session.title = title;
+    renderChatSessions();
+    if (chatId === activeChatId) {
+      const el = document.getElementById('chat-session-active-title');
+      if (el) el.textContent = title.toUpperCase();
+    }
+  } catch {
+    showToast('Rename failed', 'error');
+    renderChatSessions();
+  }
+}
+
+function startChatRename(chatId, currentTitle, event) {
+  event.stopPropagation();
+  const item = event.target.closest('[data-chat-id]');
+  if (!item) return;
+  const titleEl = item.querySelector('.chat-title-text');
+  if (!titleEl) return;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = currentTitle;
+  input.className = 'bg-transparent border-b border-[#88c0d0] text-xs text-[#d8dee9] outline-none w-full font-bold';
+  input.onclick = e => e.stopPropagation();
+  input.onkeydown = e => {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { input.dataset.cancelled = '1'; input.blur(); }
+  };
+  input.onblur = () => {
+    if (input.dataset.cancelled) { renderChatSessions(); return; }
+    saveChatRename(chatId, input.value);
+  };
+  titleEl.replaceWith(input);
+  input.focus();
+  input.select();
 }
 
 // ── Chat FTS5 Search ──────────────────────────────────────────────────────────

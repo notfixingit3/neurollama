@@ -400,6 +400,7 @@ func main() {
 		api.GET("/chats/:id", getChatMessagesHandler)
 		api.POST("/chats", createChatHandler)
 		api.PUT("/chats/:id", updateChatHandler)
+		api.PATCH("/chats/:id/title", renameChatHandler)
 		api.DELETE("/chats/:id", deleteChatHandler)
 		api.GET("/presets", getPresetsHandler)
 		api.POST("/presets", createPresetHandler)
@@ -1656,6 +1657,36 @@ func updateChatHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Chat config updated successfully"})
+}
+
+func renameChatHandler(c *gin.Context) {
+	idStr := c.Param("id")
+	var id int64
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid chat ID"})
+		return
+	}
+	var req struct {
+		Title string `json:"title" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	title := strings.TrimSpace(req.Title)
+	if title == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Title cannot be empty"})
+		return
+	}
+	if len([]rune(title)) > 120 {
+		runes := []rune(title)
+		title = string(runes[:120])
+	}
+	if err := UpdateChatTitle(id, title); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"title": title})
 }
 
 func deleteChatHandler(c *gin.Context) {
