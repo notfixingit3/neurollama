@@ -4,6 +4,13 @@ All notable changes to NEUROLLAMA are documented here.
 
 ---
 
+## [v0.2.25-beta.3] — 2026-06-13
+
+### Added
+- **Node filter toggle on all benchmark leaderboards** — a `Node` pill button (default ON) limits results to the currently selected node across all five leaderboard/history views: standard benchmark leaderboard, code bench lang leaderboard, code bench run history, hallucination leaderboard, and hallucination run history. Toggle persisted to preferences. Clicking the button on any leaderboard syncs all three toggle buttons simultaneously.
+
+---
+
 ## [v0.2.25-beta.2] — 2026-06-13
 
 ### Fixed

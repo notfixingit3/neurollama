@@ -8318,6 +8318,8 @@ let lbParamMin = 0;
 let lbParamMax = 0;
 // Chart view toggle for the leaderboard
 let lbChartActive = false;
+// Node filter — true = show only the active node's results across all leaderboards (default ON)
+let lbNodeFilter = true;
 
 // Compute letter score from raw benchmark metrics (S/A/B/C/F)
 function autoScore(bType, tps, extra) {
@@ -8638,6 +8640,27 @@ function restoreLbFilterUI() {
     indicator.innerHTML = `<i class="fa-solid fa-sort-${lbSortDir === 'asc' ? 'up' : 'down'} text-[9px]"></i>`;
     indicator.className = 'text-[#88c0d0]';
   }
+  // Restore node filter state (default ON)
+  lbNodeFilter = getPref('neurollama-lb-node-filter', 'true') === 'true';
+  _syncLbNodeFilterBtns();
+}
+
+function _syncLbNodeFilterBtns() {
+  ['lb-node-filter-btn', 'code-node-filter-btn', 'halluc-node-filter-btn'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (btn) btn.classList.toggle('bench-type-btn-active', lbNodeFilter);
+  });
+}
+
+function toggleLbNodeFilter() {
+  lbNodeFilter = !lbNodeFilter;
+  setPref('neurollama-lb-node-filter', lbNodeFilter ? 'true' : 'false');
+  _syncLbNodeFilterBtns();
+  fetchBenchmarks();
+  renderLangLeaderboard();
+  renderCodeBenchResults();
+  renderHallucLeaderboard();
+  renderHallucinationHistory();
 }
 
 // Leaderboard sort state — persisted in DB preferences (restored in init after loadPreferences)
@@ -8959,9 +8982,15 @@ async function fetchBenchmarks() {
       ? allGroups.filter(g => g.display_score === currentScoreFilter)
       : allGroups;
 
+    // Client-side node filter — limit to active node when toggle is ON
+    const activeNode = activeServerLabel();
+    const nodeFiltered = (lbNodeFilter && activeNode)
+      ? scoreFiltered.filter(g => g.server_name === activeNode)
+      : scoreFiltered;
+
     // Client-side param size range filter
     const groupList = (lbParamMin || lbParamMax)
-      ? scoreFiltered.filter(g => {
+      ? nodeFiltered.filter(g => {
           const m = models.find(mo => mo.name === g.model_name);
           const sizeB = m ? parseParamB(m.details?.parameter_size) : null;
           if (sizeB === null) return true; // unknown size — include by default
@@ -8969,7 +8998,7 @@ async function fetchBenchmarks() {
           if (lbParamMax && sizeB > lbParamMax) return false;
           return true;
         })
-      : scoreFiltered;
+      : nodeFiltered;
 
     // ── Empty state ──────────────────────────────────────────────────────────
     if (groupList.length === 0) {
@@ -11138,7 +11167,12 @@ function renderLangLeaderboard() {
   const top3   = {};
   const nodeSet = new Set();
 
-  codeBenchRuns.forEach(run => {
+  const activeLbl = activeServerLabel();
+  const langRuns = (lbNodeFilter && activeLbl)
+    ? codeBenchRuns.filter(r => r.server_name === activeLbl)
+    : codeBenchRuns;
+
+  langRuns.forEach(run => {
     const node = run.server_name || '(local)';
     nodeSet.add(node);
     let langs = [];
@@ -11258,7 +11292,11 @@ function renderHallucLeaderboard() {
   // Rank by highest context_k where at least one cell has status='recall'.
   // This is the true NIAH metric: "how deep can this model actually find the needle?"
   const byModel = new Map();
-  hallucinationRuns.forEach(r => {
+  const hallucActiveLbl = activeServerLabel();
+  const hallucFiltered = (lbNodeFilter && hallucActiveLbl)
+    ? hallucinationRuns.filter(r => r.server_name === hallucActiveLbl)
+    : hallucinationRuns;
+  hallucFiltered.forEach(r => {
     const key = `${r.model_name}|||${r.server_name || '(local)'}`;
     let cells = [];
     try { cells = JSON.parse(r.extra_json).cells || []; } catch {}
@@ -11308,6 +11346,10 @@ function renderCodeBenchResults() {
   let runs = codeBenchRuns;
   if (langFilter) {
     runs = runs.filter(r => r.languages && r.languages.split(',').includes(langFilter));
+  }
+  const activeNodeLbl = activeServerLabel();
+  if (lbNodeFilter && activeNodeLbl) {
+    runs = runs.filter(r => r.server_name === activeNodeLbl);
   }
 
   if (runs.length === 0) {
@@ -11672,8 +11714,12 @@ function renderHallucinationHistory() {
   }
 
   // Group by model_name + server_name, most recent first within each group
+  const hallucHistActiveLbl = activeServerLabel();
+  const hallucHistRuns = (lbNodeFilter && hallucHistActiveLbl)
+    ? hallucinationRuns.filter(r => r.server_name === hallucHistActiveLbl)
+    : hallucinationRuns;
   const groups = new Map();
-  hallucinationRuns.forEach(r => {
+  hallucHistRuns.forEach(r => {
     const key = `${r.model_name}|||${r.server_name || ''}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(r);

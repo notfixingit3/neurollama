@@ -1930,6 +1930,10 @@
                       <button class="bench-type-btn" id="lb-filter-instruction_follow" onclick="setLbFilter('instruction_follow')"><i class="fa-solid fa-list-check mr-1"></i>Ins</button>
                     </div>
                     <div class="flex items-center gap-1.5 ml-auto">
+                      <button id="lb-node-filter-btn" onclick="toggleLbNodeFilter()" title="Show only selected node's results"
+                        class="bench-type-btn bench-type-btn-active">
+                        <i class="fa-solid fa-server mr-1 text-[8px]"></i>Node
+                      </button>
                       <button onclick="exportBenchmarksCSV()" title="Export filtered leaderboard as CSV"
                         class="btn btn-xs btn-neutral border-[#4c566a] font-tech text-[9px] px-2 gap-1">
                         <i class="fa-solid fa-file-csv text-[10px]"></i>CSV
@@ -2356,6 +2360,10 @@
                     <i class="fa-solid fa-trophy mr-2"></i>Run History
                   </h2>
                   <div class="flex gap-2 items-center">
+                    <button id="code-node-filter-btn" onclick="toggleLbNodeFilter()" title="Show only selected node's results"
+                      class="bench-type-btn bench-type-btn-active">
+                      <i class="fa-solid fa-server mr-1 text-[8px]"></i>Node
+                    </button>
                     <span class="text-[9px] font-mono text-[#4c566a]">Filter by language:</span>
                     <select id="code-lang-filter" onchange="renderCodeBenchResults()" class="select select-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-[10px] focus:border-[#88c0d0] focus:outline-none">
                       <option value="">All languages</option>
@@ -2512,9 +2520,15 @@
 
               <!-- Run history -->
               <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col gap-3">
-                <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
-                  <i class="fa-solid fa-clock-rotate-left mr-2"></i>Run History
-                </h2>
+                <div class="flex items-center justify-between">
+                  <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
+                    <i class="fa-solid fa-clock-rotate-left mr-2"></i>Run History
+                  </h2>
+                  <button id="halluc-node-filter-btn" onclick="toggleLbNodeFilter()" title="Show only selected node's results"
+                    class="bench-type-btn bench-type-btn-active">
+                    <i class="fa-solid fa-server mr-1 text-[8px]"></i>Node
+                  </button>
+                </div>
                 <div id="halluc-history">
                   <div class="text-center text-[#4c566a] text-xs font-mono py-8">No hallucination tests yet. Select a model and run.</div>
                 </div>
