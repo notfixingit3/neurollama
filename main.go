@@ -7502,9 +7502,17 @@ func ollamaUpdateSSEHandler(c *gin.Context) {
 					return false
 				}
 				emit("status", "Stopping Ollama…")
-				// unload unregisters the LaunchAgent (stops + removes from launchd); kill catches
-				// any process not managed by a plist.
-				_, _ = runSSHCmd(sshClient, "launchctl unload ~/Library/LaunchAgents/com.ollama.ollama.plist 2>/dev/null; killall -q Ollama ollama 2>/dev/null; sleep 1")
+				// Detect the plist — Ollama ships com.ollama.plist on some versions and
+				// com.ollama.ollama.plist on others. Unload whichever exists, then kill any
+				// remaining process not managed by launchd.
+				_, _ = runSSHCmd(sshClient, `
+PLIST=""
+for p in ~/Library/LaunchAgents/com.ollama.plist ~/Library/LaunchAgents/com.ollama.ollama.plist; do
+  [ -f "$p" ] && PLIST="$p" && break
+done
+[ -n "$PLIST" ] && launchctl unload "$PLIST" 2>/dev/null
+killall -q Ollama ollama 2>/dev/null
+sleep 1`)
 				emit("status", "Replacing Ollama.app…")
 				// Use ditto for both extract and copy — cp -r does not preserve HFS+ extended
 				// attributes, resource forks, or code-signing metadata, which macOS rejects as a
@@ -7522,14 +7530,18 @@ rm -rf /tmp/ollama-update-tmp /tmp/Ollama-darwin.zip`
 					return false
 				}
 				emit("status", "Restarting Ollama…")
-				// Prefer LaunchAgent if the plist exists (load re-registers and starts it).
-				// open(1) is a no-op over SSH (needs WindowServer), so fall back to starting
-				// the bundled CLI daemon directly in the background.
+				// Reload the LaunchAgent if a plist exists (it carries OLLAMA_HOST and KeepAlive).
+				// open(1) is a no-op over SSH, so fall back to starting the bundled CLI daemon
+				// with OLLAMA_HOST=0.0.0.0 so remote clients can reach it.
 				_, _ = runSSHCmd(sshClient, `
-if [ -f ~/Library/LaunchAgents/com.ollama.ollama.plist ]; then
-  launchctl load ~/Library/LaunchAgents/com.ollama.ollama.plist
+PLIST=""
+for p in ~/Library/LaunchAgents/com.ollama.plist ~/Library/LaunchAgents/com.ollama.ollama.plist; do
+  [ -f "$p" ] && PLIST="$p" && break
+done
+if [ -n "$PLIST" ]; then
+  launchctl load "$PLIST"
 else
-  nohup /Applications/Ollama.app/Contents/Resources/ollama serve >/tmp/ollama-serve.log 2>&1 &
+  nohup OLLAMA_HOST=0.0.0.0 /Applications/Ollama.app/Contents/Resources/ollama serve >/tmp/ollama-serve.log 2>&1 &
 fi`)
 			} else {
 				emit("status", "CLI install — running Ollama install script…")
