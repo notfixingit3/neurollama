@@ -7522,9 +7522,15 @@ rm -rf /tmp/ollama-update-tmp /tmp/Ollama-darwin.zip`
 					return false
 				}
 				emit("status", "Restarting Ollama…")
-				// load re-registers and starts the LaunchAgent; fall back to open for installs
-				// that have no plist (e.g. Homebrew or manual CLI installs).
-				_, _ = runSSHCmd(sshClient, "launchctl load ~/Library/LaunchAgents/com.ollama.ollama.plist 2>/dev/null || open /Applications/Ollama.app")
+				// Prefer LaunchAgent if the plist exists (load re-registers and starts it).
+				// open(1) is a no-op over SSH (needs WindowServer), so fall back to starting
+				// the bundled CLI daemon directly in the background.
+				_, _ = runSSHCmd(sshClient, `
+if [ -f ~/Library/LaunchAgents/com.ollama.ollama.plist ]; then
+  launchctl load ~/Library/LaunchAgents/com.ollama.ollama.plist
+else
+  nohup /Applications/Ollama.app/Contents/Resources/ollama serve >/tmp/ollama-serve.log 2>&1 &
+fi`)
 			} else {
 				emit("status", "CLI install — running Ollama install script…")
 				if sErr := runSSHCmdStream(sshClient, "curl -fsSL https://ollama.com/install.sh | sh", line); sErr != nil {
