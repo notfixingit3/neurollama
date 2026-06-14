@@ -4,6 +4,14 @@ All notable changes to NEUROLLAMA are documented here.
 
 ---
 
+## [v0.2.25-beta.2] — 2026-06-13
+
+### Fixed
+- **macOS Ollama update: plist rewritten on every update** — the Ollama GUI wrapper (`Contents/MacOS/Ollama`) does not support the `serve` subcommand; the bundled CLI at `Contents/Resources/ollama` does. The plist is now rewritten via `PlistBuddy` after each update to point to the correct binary, which was silently preventing Ollama from starting via launchd after an update.
+- **macOS Ollama update: env vars preserved across updates** — OLLAMA_* vars (e.g. `OLLAMA_NUM_PARALLEL`, `OLLAMA_KEEP_ALIVE`, `OLLAMA_FLASH_ATTENTION`) are snapshotted from the running process before it is stopped and restored into the plist (and `nohup` fallback) after the new app is installed. `OLLAMA_HOST=0.0.0.0` is always enforced so remote nodes remain reachable.
+
+---
+
 ## [v0.2.25-beta.1] — 2026-06-13
 
 ### Changed

@@ -38,7 +38,7 @@ import (
 )
 
 // appVersion is the default for local dev; CI overrides via -ldflags "-X main.appVersion=<tag>"
-var appVersion = "v0.2.25-beta.1"
+var appVersion = "v0.2.25-beta.2"
 
 // releaseType is "dev" by default; CI overrides via -ldflags "-X main.releaseType=pre-release|stable"
 var releaseType = "dev"
@@ -7502,10 +7502,15 @@ func ollamaUpdateSSEHandler(c *gin.Context) {
 					return false
 				}
 				emit("status", "Stopping Ollama…")
-				// Detect the plist — Ollama ships com.ollama.plist on some versions and
-				// com.ollama.ollama.plist on others. Unload whichever exists, then kill any
-				// remaining process not managed by launchd.
+				// Snapshot OLLAMA_* env vars from the running process before stopping —
+				// restored into the plist after the update so no custom settings are lost.
+				// Then detect the plist (name varies by Ollama version), unload it, and
+				// kill any remaining process not managed by launchd.
 				_, _ = runSSHCmd(sshClient, `
+OLLAMA_PID=$(pgrep -x ollama 2>/dev/null | head -1)
+if [ -n "$OLLAMA_PID" ]; then
+  ps ewwp "$OLLAMA_PID" 2>/dev/null | tr ' ' '\n' | grep '^OLLAMA_' > /tmp/ollama-env-snapshot.txt
+fi
 PLIST=""
 for p in ~/Library/LaunchAgents/com.ollama.plist ~/Library/LaunchAgents/com.ollama.ollama.plist; do
   [ -f "$p" ] && PLIST="$p" && break
@@ -7530,18 +7535,40 @@ rm -rf /tmp/ollama-update-tmp /tmp/Ollama-darwin.zip`
 					return false
 				}
 				emit("status", "Restarting Ollama…")
-				// Reload the LaunchAgent if a plist exists (it carries OLLAMA_HOST and KeepAlive).
-				// open(1) is a no-op over SSH, so fall back to starting the bundled CLI daemon
-				// with OLLAMA_HOST=0.0.0.0 so remote clients can reach it.
+				// Rewrite the plist to use the real CLI binary (Contents/Resources/ollama),
+				// not the GUI wrapper (Contents/MacOS/Ollama) which doesn't support 'serve'.
+				// Restore snapshotted OLLAMA_* vars and enforce OLLAMA_HOST=0.0.0.0.
+				// If no plist exists, nohup the daemon directly with the same env vars.
 				_, _ = runSSHCmd(sshClient, `
 PLIST=""
 for p in ~/Library/LaunchAgents/com.ollama.plist ~/Library/LaunchAgents/com.ollama.ollama.plist; do
   [ -f "$p" ] && PLIST="$p" && break
 done
+SAVED_VARS=$(cat /tmp/ollama-env-snapshot.txt 2>/dev/null | xargs)
+rm -f /tmp/ollama-env-snapshot.txt
 if [ -n "$PLIST" ]; then
+  /usr/libexec/PlistBuddy -c "Delete :ProgramArguments" "$PLIST" 2>/dev/null || true
+  /usr/libexec/PlistBuddy -c "Add :ProgramArguments array" "$PLIST"
+  /usr/libexec/PlistBuddy -c "Add :ProgramArguments:0 string /Applications/Ollama.app/Contents/Resources/ollama" "$PLIST"
+  /usr/libexec/PlistBuddy -c "Add :ProgramArguments:1 string serve" "$PLIST"
+  /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables dict" "$PLIST" 2>/dev/null || true
+  for kv in $SAVED_VARS; do
+    KEY="${kv%%=*}"; VAL="${kv#*=}"
+    /usr/libexec/PlistBuddy -c "Set :EnvironmentVariables:${KEY} ${VAL}" "$PLIST" 2>/dev/null || \
+    /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:${KEY} string ${VAL}" "$PLIST" 2>/dev/null || true
+  done
+  /usr/libexec/PlistBuddy -c "Set :EnvironmentVariables:OLLAMA_HOST 0.0.0.0" "$PLIST" 2>/dev/null || \
+  /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:OLLAMA_HOST string 0.0.0.0" "$PLIST"
   launchctl load "$PLIST"
 else
-  nohup OLLAMA_HOST=0.0.0.0 /Applications/Ollama.app/Contents/Resources/ollama serve >/tmp/ollama-serve.log 2>&1 &
+  ENV_ARGS="OLLAMA_HOST=0.0.0.0"
+  for kv in $SAVED_VARS; do
+    case "$kv" in
+      OLLAMA_HOST=*) ;;
+      OLLAMA_*) ENV_ARGS="$ENV_ARGS $kv" ;;
+    esac
+  done
+  nohup env $ENV_ARGS /Applications/Ollama.app/Contents/Resources/ollama serve >/tmp/ollama-serve.log 2>&1 &
 fi`)
 			} else {
 				emit("status", "CLI install — running Ollama install script…")
@@ -7588,7 +7615,10 @@ fi`)
 			_, _ = runSSHCmd(sshClient, sudo("systemctl stop ollama")) // fire-and-forget; installer may have already stopped it
 
 			emit("status", "Restoring custom service file…")
-			restoreCmd := sudo(fmt.Sprintf("cp %s %s && systemctl daemon-reload", svcBackup, svcPath))
+			// Wrap in sh -c so both cp and daemon-reload run under the same sudo
+			// invocation — without this the shell splits on && and daemon-reload
+			// runs as the unprivileged SSH user, failing with exit 1.
+			restoreCmd := sudo(fmt.Sprintf("sh -c 'cp %s %s && systemctl daemon-reload'", svcBackup, svcPath))
 			if rErr := runSSHCmdStream(sshClient, restoreCmd, line); rErr != nil {
 				fail(fmt.Sprintf("Failed to restore custom service file: %v", rErr))
 				return false
