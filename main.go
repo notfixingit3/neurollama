@@ -7502,8 +7502,9 @@ func ollamaUpdateSSEHandler(c *gin.Context) {
 					return false
 				}
 				emit("status", "Stopping Ollama…")
-				// Stop the LaunchAgent and kill any running process; LaunchAgent will restart after we're done
-				_, _ = runSSHCmd(sshClient, "launchctl stop com.ollama.ollama 2>/dev/null; killall -q Ollama ollama 2>/dev/null; sleep 1")
+				// unload unregisters the LaunchAgent (stops + removes from launchd); kill catches
+				// any process not managed by a plist.
+				_, _ = runSSHCmd(sshClient, "launchctl unload ~/Library/LaunchAgents/com.ollama.ollama.plist 2>/dev/null; killall -q Ollama ollama 2>/dev/null; sleep 1")
 				emit("status", "Replacing Ollama.app…")
 				// Use ditto for both extract and copy — cp -r does not preserve HFS+ extended
 				// attributes, resource forks, or code-signing metadata, which macOS rejects as a
@@ -7521,8 +7522,9 @@ rm -rf /tmp/ollama-update-tmp /tmp/Ollama-darwin.zip`
 					return false
 				}
 				emit("status", "Restarting Ollama…")
-				// Prefer LaunchAgent restart; fall back to open for non-LaunchAgent installs
-				_, _ = runSSHCmd(sshClient, "launchctl start com.ollama.ollama 2>/dev/null || open /Applications/Ollama.app")
+				// load re-registers and starts the LaunchAgent; fall back to open for installs
+				// that have no plist (e.g. Homebrew or manual CLI installs).
+				_, _ = runSSHCmd(sshClient, "launchctl load ~/Library/LaunchAgents/com.ollama.ollama.plist 2>/dev/null || open /Applications/Ollama.app")
 			} else {
 				emit("status", "CLI install — running Ollama install script…")
 				if sErr := runSSHCmdStream(sshClient, "curl -fsSL https://ollama.com/install.sh | sh", line); sErr != nil {
