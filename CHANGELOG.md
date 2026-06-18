@@ -4,6 +4,13 @@ All notable changes to NEUROLLAMA are documented here.
 
 ---
 
+## [v0.2.25-beta.4] — 2026-06-13
+
+### Fixed
+- **Benchmark SSE connection drop on thinking models** — `runBenchmarkForPrompt` had a `logFunc` parameter it never used during the token scan loop. For thinking models (e.g. `qwen3.5`, `qwq`) that generate silently for minutes before producing a response, the SSE stream wrote nothing to the browser, causing EventSource to drop the connection with a generic empty-data error ("Failed to complete benchmark runs."). Now emits a progress heartbeat every 5 s (token count + elapsed time) to keep the connection alive.
+
+---
+
 ## [v0.2.25-beta.3] — 2026-06-13
 
 ### Added

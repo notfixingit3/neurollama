@@ -38,7 +38,7 @@ import (
 )
 
 // appVersion is the default for local dev; CI overrides via -ldflags "-X main.appVersion=<tag>"
-var appVersion = "v0.2.25-beta.3"
+var appVersion = "v0.2.25-beta.4"
 
 // releaseType is "dev" by default; CI overrides via -ldflags "-X main.releaseType=pre-release|stable"
 var releaseType = "dev"
@@ -3542,6 +3542,7 @@ func runBenchmarkForPrompt(ctx context.Context, client *OllamaClient, model stri
 	var firstTokenReceived bool
 	var tokenCount int
 	var respHead strings.Builder // capture first 300 chars for greeting/refusal detection
+	var lastHeartbeat time.Time
 
 	scanner := newStreamScanner(stream)
 	for scanner.Scan() {
@@ -3565,6 +3566,13 @@ func runBenchmarkForPrompt(ctx context.Context, client *OllamaClient, model stri
 					respHead.WriteString(chunk.Response)
 				}
 			}
+		}
+		// Send a progress heartbeat every 5 s so the SSE connection stays alive
+		// during slow or thinking-model generation that produces no status events.
+		if logFunc != nil && time.Since(lastHeartbeat) > 5*time.Second {
+			elapsed := time.Since(start).Round(time.Second)
+			logFunc(fmt.Sprintf("  Generating… %d tokens · %s elapsed", tokenCount, elapsed))
+			lastHeartbeat = time.Now()
 		}
 	}
 
