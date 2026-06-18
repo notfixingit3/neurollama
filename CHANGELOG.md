@@ -4,6 +4,13 @@ All notable changes to NEUROLLAMA are documented here.
 
 ---
 
+## [v0.2.25-beta.5] — 2026-06-13
+
+### Fixed
+- **macOS update: probe `com.ollama.serve.plist`** — added as a third candidate plist filename alongside `com.ollama.plist` and `com.ollama.ollama.plist`; all three are used by different Ollama install methods.
+
+---
+
 ## [v0.2.25-beta.4] — 2026-06-13
 
 ### Fixed

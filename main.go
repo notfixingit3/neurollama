@@ -38,7 +38,7 @@ import (
 )
 
 // appVersion is the default for local dev; CI overrides via -ldflags "-X main.appVersion=<tag>"
-var appVersion = "v0.2.25-beta.4"
+var appVersion = "v0.2.25-beta.5"
 
 // releaseType is "dev" by default; CI overrides via -ldflags "-X main.releaseType=pre-release|stable"
 var releaseType = "dev"
@@ -7520,7 +7520,7 @@ if [ -n "$OLLAMA_PID" ]; then
   ps ewwp "$OLLAMA_PID" 2>/dev/null | tr ' ' '\n' | grep '^OLLAMA_' > /tmp/ollama-env-snapshot.txt
 fi
 PLIST=""
-for p in ~/Library/LaunchAgents/com.ollama.plist ~/Library/LaunchAgents/com.ollama.ollama.plist; do
+for p in ~/Library/LaunchAgents/com.ollama.plist ~/Library/LaunchAgents/com.ollama.ollama.plist ~/Library/LaunchAgents/com.ollama.serve.plist; do
   [ -f "$p" ] && PLIST="$p" && break
 done
 [ -n "$PLIST" ] && launchctl unload "$PLIST" 2>/dev/null
@@ -7549,7 +7549,7 @@ rm -rf /tmp/ollama-update-tmp /tmp/Ollama-darwin.zip`
 				// If no plist exists, nohup the daemon directly with the same env vars.
 				_, _ = runSSHCmd(sshClient, `
 PLIST=""
-for p in ~/Library/LaunchAgents/com.ollama.plist ~/Library/LaunchAgents/com.ollama.ollama.plist; do
+for p in ~/Library/LaunchAgents/com.ollama.plist ~/Library/LaunchAgents/com.ollama.ollama.plist ~/Library/LaunchAgents/com.ollama.serve.plist; do
   [ -f "$p" ] && PLIST="$p" && break
 done
 SAVED_VARS=$(cat /tmp/ollama-env-snapshot.txt 2>/dev/null | xargs)
