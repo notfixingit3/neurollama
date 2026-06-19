@@ -4,6 +4,18 @@ All notable changes to NEUROLLAMA are documented here.
 
 ---
 
+## [v0.2.25-beta.6] — 2026-06-19
+
+### Added
+- **Running models on fleet cards** — each node card in the Fleet grid now shows which models are currently loaded in VRAM. Model names are polled via `/api/ps` every 15 s and rendered as small badges (`:latest` suffix stripped). The running cache is also cleared on manual node refresh so the badge updates immediately.
+
+### Fixed
+- **Leaderboards re-render on server switch** — `selectServer()` now calls all leaderboard render functions when the node filter is active, so switching the active node immediately narrows the benchmark results without requiring a manual refresh.
+- **Linux service restore: auto-repair missing `[Unit]` header** — the restore command now checks for a `[Unit]` section and prepends one if absent, fixing a subtle systemd issue where hand-crafted service files without the header caused `Description=` and `After=` to be silently ignored.
+- **macOS nohup fallback when launchctl fails over SSH** — after `launchctl load`, the restart phase checks whether `ollama` actually started; if not (expected over SSH — no GUI/WindowServer session), it falls back to `nohup` with the full env var set and emits a warning. The plist is still correctly written for automatic activation on next GUI login.
+
+---
+
 ## [v0.2.25-beta.5] — 2026-06-13
 
 ### Fixed

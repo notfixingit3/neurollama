@@ -2406,6 +2406,15 @@ async function selectServer(id) {
       renderModelsEmpty('Selected node is offline');
       populateModelDropdowns();
     }
+
+    // Re-render node-filtered leaderboards so they reflect the new active node.
+    if (lbNodeFilter) {
+      fetchBenchmarks();
+      renderLangLeaderboard();
+      renderCodeBenchResults();
+      renderHallucLeaderboard();
+      renderHallucinationHistory();
+    }
   } catch (error) {
     showToast(error.message, 'error');
   }
@@ -7291,6 +7300,13 @@ function renderFleetGrid(nodes) {
 
           <div class="text-[#4c566a]">Models</div>
           <div class="text-[#d8dee9]">${escapeHTML(String(node.model_count ?? '—'))}</div>
+
+          <div class="text-[#4c566a]">Running</div>
+          <div class="text-[#d8dee9] col-span-1 truncate" title="${escapeHTML((node.running_models || []).join(', ') || '—')}">
+            ${node.running_models && node.running_models.length
+              ? node.running_models.map(m => `<span class="inline-block bg-[#3b4252] rounded px-1 mr-0.5 text-[8px] text-[#88c0d0]">${escapeHTML(m.replace(/:latest$/, ''))}</span>`).join('')
+              : '<span class="text-[#4c566a]">—</span>'}
+          </div>
 
           <div class="text-[#4c566a]">Updated</div>
           <div class="text-[#4c566a]">${escapeHTML(seenAgo)}</div>

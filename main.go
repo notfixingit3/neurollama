@@ -38,7 +38,7 @@ import (
 )
 
 // appVersion is the default for local dev; CI overrides via -ldflags "-X main.appVersion=<tag>"
-var appVersion = "v0.2.25-beta.5"
+var appVersion = "v0.2.25-beta.6"
 
 // releaseType is "dev" by default; CI overrides via -ldflags "-X main.releaseType=pre-release|stable"
 var releaseType = "dev"
@@ -2224,6 +2224,9 @@ var (
 
 	nodeModelMu    sync.RWMutex
 	nodeModelCache map[string]modelCacheEntry // keyed by server ID
+
+	nodeRunningMu    sync.RWMutex
+	nodeRunningCache map[string][]string // keyed by server ID → running model names
 )
 
 // ── SSE Node-Status Broadcast Hub ────────────────────────────────────────────
@@ -2529,16 +2532,20 @@ func startTelemetryPoller() {
 func startNodeCachePoller() {
 	nodeStatusCache = make(map[string]nodeCacheEntry)
 	nodeModelCache = make(map[string]modelCacheEntry)
+	nodeRunningCache = make(map[string][]string)
 
 	go func() {
 		// Warm-up before the first ticker fires
 		pollAllNodeStatuses()
 		pollAllNodeModels()
+		pollAllNodeRunning()
 
-		statusTicker := time.NewTicker(5 * time.Second)
-		modelTicker := time.NewTicker(60 * time.Second)
+		statusTicker  := time.NewTicker(5 * time.Second)
+		modelTicker   := time.NewTicker(60 * time.Second)
+		runningTicker := time.NewTicker(15 * time.Second)
 		defer statusTicker.Stop()
 		defer modelTicker.Stop()
+		defer runningTicker.Stop()
 
 		for {
 			select {
@@ -2546,6 +2553,8 @@ func startNodeCachePoller() {
 				pollAllNodeStatuses()
 			case <-modelTicker.C:
 				pollAllNodeModels()
+			case <-runningTicker.C:
+				pollAllNodeRunning()
 			}
 		}
 	}()
@@ -2625,6 +2634,34 @@ func pollOneNodeModels(srv Server) {
 	nodeModelMu.Unlock()
 }
 
+func pollAllNodeRunning() {
+	srvs := GetServers()
+	var wg sync.WaitGroup
+	for _, srv := range srvs {
+		wg.Add(1)
+		go func(s Server) {
+			defer wg.Done()
+			pollOneNodeRunning(s)
+		}(srv)
+	}
+	wg.Wait()
+}
+
+func pollOneNodeRunning(srv Server) {
+	client := NewPollerClient(srv) // 3s timeout
+	active, err := client.ListActiveModels()
+	if err != nil {
+		return
+	}
+	names := make([]string, 0, len(active))
+	for _, m := range active {
+		names = append(names, m.Name)
+	}
+	nodeRunningMu.Lock()
+	nodeRunningCache[srv.ID] = names
+	nodeRunningMu.Unlock()
+}
+
 // invalidateNodeModelCache drops a node's model cache entry and triggers an
 // immediate background re-poll so the next /api/models request hits fresh data.
 func invalidateNodeModelCache(serverID string) {
@@ -2684,14 +2721,15 @@ func telemetryStreamHandler(c *gin.Context) {
 
 // NodeOverviewEntry is one row in the fleet overview — aggregated from cache only.
 type NodeOverviewEntry struct {
-	ID             string `json:"id"`
-	Name           string `json:"name"`
-	URL            string `json:"url"`
-	Status         string `json:"status"`
-	Version        string `json:"version"`
-	LatencyMs      int64  `json:"latency_ms"`
-	ModelCount     int    `json:"model_count"`
-	CacheUpdatedAt int64  `json:"cache_updated_at"` // unix seconds; 0 = not yet polled
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	URL            string   `json:"url"`
+	Status         string   `json:"status"`
+	Version        string   `json:"version"`
+	LatencyMs      int64    `json:"latency_ms"`
+	ModelCount     int      `json:"model_count"`
+	RunningModels  []string `json:"running_models"`
+	CacheUpdatedAt int64    `json:"cache_updated_at"` // unix seconds; 0 = not yet polled
 }
 
 // nodesOverviewHandler returns every node's cached status + model count in one call.
@@ -2723,6 +2761,14 @@ func nodesOverviewHandler(c *gin.Context) {
 	}
 	nodeModelMu.RUnlock()
 
+	nodeRunningMu.RLock()
+	for i, e := range entries {
+		if running, ok := nodeRunningCache[e.ID]; ok {
+			entries[i].RunningModels = running
+		}
+	}
+	nodeRunningMu.RUnlock()
+
 	c.JSON(http.StatusOK, entries)
 }
 
@@ -2745,12 +2791,16 @@ func refreshNodeHandler(c *gin.Context) {
 		return
 	}
 
-	// Drop stale entry then re-poll synchronously (3s timeout via NewPollerClient).
+	// Drop stale entries then re-poll synchronously (3s timeout via NewPollerClient).
 	nodeStatusMu.Lock()
 	delete(nodeStatusCache, id)
 	nodeStatusMu.Unlock()
+	nodeRunningMu.Lock()
+	delete(nodeRunningCache, id)
+	nodeRunningMu.Unlock()
 
 	pollOneNodeStatus(*found)
+	go pollOneNodeRunning(*found)
 
 	nodeStatusMu.RLock()
 	entry := nodeStatusCache[id]
@@ -7568,6 +7618,15 @@ if [ -n "$PLIST" ]; then
   /usr/libexec/PlistBuddy -c "Set :EnvironmentVariables:OLLAMA_HOST 0.0.0.0" "$PLIST" 2>/dev/null || \
   /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:OLLAMA_HOST string 0.0.0.0" "$PLIST"
   launchctl load "$PLIST"
+  sleep 2
+  if ! pgrep -x ollama >/dev/null 2>&1; then
+    ENV_ARGS="OLLAMA_HOST=0.0.0.0"
+    for kv in $SAVED_VARS; do
+      case "$kv" in OLLAMA_HOST=*) ;; OLLAMA_*) ENV_ARGS="$ENV_ARGS $kv" ;; esac
+    done
+    nohup env $ENV_ARGS /Applications/Ollama.app/Contents/Resources/ollama serve >/tmp/ollama-serve.log 2>&1 &
+    echo "⚠ LaunchAgent did not activate over SSH (no GUI session) — started via nohup. The plist is correctly written and will take over on next GUI login."
+  fi
 else
   ENV_ARGS="OLLAMA_HOST=0.0.0.0"
   for kv in $SAVED_VARS; do
@@ -7626,7 +7685,9 @@ fi`)
 			// Wrap in sh -c so both cp and daemon-reload run under the same sudo
 			// invocation — without this the shell splits on && and daemon-reload
 			// runs as the unprivileged SSH user, failing with exit 1.
-			restoreCmd := sudo(fmt.Sprintf("sh -c 'cp %s %s && systemctl daemon-reload'", svcBackup, svcPath))
+			// Also repair missing [Unit] header: some hand-crafted service files omit it
+			// and systemd silently ignores Description/After without a section header.
+			restoreCmd := sudo(fmt.Sprintf(`sh -c 'cp %s %s && grep -q "^\[Unit\]" %s || { tmp=$(mktemp); printf "[Unit]\n" > "$tmp"; cat %s >> "$tmp"; mv "$tmp" %s; } && systemctl daemon-reload'`, svcBackup, svcPath, svcPath, svcPath, svcPath))
 			if rErr := runSSHCmdStream(sshClient, restoreCmd, line); rErr != nil {
 				fail(fmt.Sprintf("Failed to restore custom service file: %v", rErr))
 				return false
