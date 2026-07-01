@@ -1094,6 +1094,13 @@
                 </div>
               </div>
 
+              <!-- System instruction -->
+              <div class="form-control">
+                <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">System Directive (SYSTEM)</span></label>
+                <textarea id="builder-system-input" rows="4" placeholder="Instruction prompt defining custom model behavior..." oninput="generateModelfilePreview()"
+                          class="textarea textarea-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full resize-none"></textarea>
+              </div>
+
               <!-- Temperature slider -->
               <div class="form-control">
                 <div class="flex justify-between items-center mb-1">
@@ -1104,87 +1111,90 @@
                        class="range range-xs range-info bg-[#4c566a]" />
               </div>
 
-              <!-- Context window limit -->
-              <div class="form-control">
-                <label class="label flex items-center gap-1">
-                  <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Context Window Size</span>
-                  <span id="builder-ctx-warn" class="hidden text-[#ebcb8b] text-[9px] font-mono cursor-default" title="">⚠</span>
-                </label>
-                <select id="builder-ctx-select" onchange="generateModelfilePreview(); updateCtxWarning('builder-base-select','builder-ctx-select','builder-ctx-warn')" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
-                  <option value="2048" selected>2K — 2,048</option>
-                  <option value="4096">4K — 4,096</option>
-                  <option value="8192">8K — 8,192</option>
-                  <option value="16384">16K — 16,384</option>
-                  <option value="32768">32K — 32,768</option>
-                  <option value="65536">64K — 65,536</option>
-                  <option value="131072">128K — 131,072</option>
-                  <option value="200000">200K — 200,000</option>
-                  <option value="262144">256K — 262,144</option>
-                  <option value="524288">512K — 524,288</option>
-                  <option value="1000000">1M — 1,000,000</option>
-                  <option value="100000000">100M — 100,000,000</option>
-                </select>
-              </div>
-
-              <!-- Stop token inputs -->
-              <div class="form-control">
-                <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Custom Stop Sequence</span></label>
-                <input type="text" id="builder-stop-input" placeholder='e.g. "<|im_end|>"' oninput="generateModelfilePreview()"
-                       class="input input-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
-              </div>
-
-              <!-- LoRA Adapters dynamic list -->
-              <div class="form-control">
-                <label class="label pb-1 flex justify-between items-center">
-                  <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">LoRA Adapters (ADAPTER)</span>
-                  <button type="button" onclick="addAdapterField()" class="btn btn-ghost text-[#88c0d0] hover:text-[#8fbcbb] p-0 h-auto min-h-0 font-mono text-[9px] uppercase">+ ADD ADAPTER</button>
-                </label>
-                <div id="builder-adapters-container" class="space-y-1.5">
-                  <!-- Dynamic adapter inputs injected here -->
-                </div>
-              </div>
-
-              <!-- Template directive -->
-              <div class="form-control">
-                <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Prompt Template (TEMPLATE)</span></label>
-                <textarea id="builder-template-input" rows="2" placeholder='e.g. "{{ if .System }}<|im_start|>system\n{{ .System }}<|im_end|>\n{{ end }}..."' oninput="generateModelfilePreview()"
-                          class="textarea textarea-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-[10px] focus:border-[#88c0d0] focus:outline-none w-full resize-none leading-normal"></textarea>
-              </div>
-
-              <!-- Merge Recipe Metadata -->
-              <div class="form-control border-t border-[#4c566a]/30 pt-3 mt-1">
-                <label class="label flex items-center gap-1.5 py-0 mb-1 cursor-pointer">
-                  <input type="checkbox" id="builder-merge-enable" onchange="toggleMergeInputs(); generateModelfilePreview()" class="checkbox checkbox-xs checkbox-info" />
-                  <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Include Merge Recipe Metadata</span>
-                </label>
-                <div id="builder-merge-inputs" class="hidden space-y-2 mt-2 pl-3 border-l border-[#4c566a]/40">
-                  <div>
-                    <label class="label py-0.5"><span class="text-[9px] font-mono text-[#4c566a] uppercase">Merge Method</span></label>
-                    <select id="builder-merge-method" onchange="generateModelfilePreview()" class="select select-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-[10px] w-full focus:outline-none text-[#d8dee9]">
-                      <option value="SLERP">SLERP (Spherical Linear Interpolation)</option>
-                      <option value="Linear">Linear Interpolation (Average)</option>
-                      <option value="Passthrough">Passthrough / Frankenmerging</option>
+              <!-- Advanced options details/summary accordion -->
+              <details class="group mt-2 border-t border-[#4c566a]/30 pt-3">
+                <summary class="text-[10px] font-mono text-[#88c0d0] cursor-pointer hover:text-[#8fbcbb] list-none flex items-center gap-1.5 font-bold uppercase tracking-wider select-none">
+                  <i class="fa-solid fa-chevron-right text-[8px] group-open:rotate-90 transition-transform"></i>
+                  Advanced Settings (Context, Adapters, templates, Merges)
+                </summary>
+                
+                <div class="mt-4 flex flex-col gap-4">
+                  <!-- Context window limit -->
+                  <div class="form-control">
+                    <label class="label flex items-center gap-1 pt-0">
+                      <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Context Window Size</span>
+                      <span id="builder-ctx-warn" class="hidden text-[#ebcb8b] text-[9px] font-mono cursor-default" title="">⚠</span>
+                    </label>
+                    <select id="builder-ctx-select" onchange="generateModelfilePreview(); updateCtxWarning('builder-base-select','builder-ctx-select','builder-ctx-warn')" class="select select-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                      <option value="2048" selected>2K — 2,048</option>
+                      <option value="4096">4K — 4,096</option>
+                      <option value="8192">8K — 8,192</option>
+                      <option value="16384">16K — 16,384</option>
+                      <option value="32768">32K — 32,768</option>
+                      <option value="65536">64K — 65,536</option>
+                      <option value="131072">128K — 131,072</option>
+                      <option value="200000">200K — 200,000</option>
+                      <option value="262144">256K — 262,144</option>
+                      <option value="524288">512K — 524,288</option>
+                      <option value="1000000">1M — 1,000,000</option>
+                      <option value="100000000">100M — 100,000,000</option>
                     </select>
                   </div>
-                  <div>
-                    <label class="label py-0.5"><span class="text-[9px] font-mono text-[#4c566a] uppercase">Secondary Model</span></label>
-                    <input type="text" id="builder-merge-model" placeholder="e.g. llama3-base" oninput="generateModelfilePreview()"
-                           class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-[10px] w-full focus:outline-none" />
+
+                  <!-- Stop token inputs -->
+                  <div class="form-control">
+                    <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Custom Stop Sequence</span></label>
+                    <input type="text" id="builder-stop-input" placeholder='e.g. "<|im_end|>"' oninput="generateModelfilePreview()"
+                           class="input input-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
                   </div>
-                  <div>
-                    <label class="label py-0.5"><span class="text-[9px] font-mono text-[#4c566a] uppercase">Merge Ratios (Weights)</span></label>
-                    <input type="text" id="builder-merge-ratio" placeholder="e.g. 0.5, 0.3, 0.2" oninput="generateModelfilePreview()"
-                           class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-[10px] w-full focus:outline-none" />
+
+                  <!-- LoRA Adapters dynamic list -->
+                  <div class="form-control">
+                    <label class="label pb-1 flex justify-between items-center">
+                      <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">LoRA Adapters (ADAPTER)</span>
+                      <button type="button" onclick="addAdapterField()" class="btn btn-ghost text-[#88c0d0] hover:text-[#8fbcbb] p-0 h-auto min-h-0 font-mono text-[9px] uppercase">+ ADD ADAPTER</button>
+                    </label>
+                    <div id="builder-adapters-container" class="space-y-1.5">
+                      <!-- Dynamic adapter inputs injected here -->
+                    </div>
+                  </div>
+
+                  <!-- Template directive -->
+                  <div class="form-control">
+                    <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Prompt Template (TEMPLATE)</span></label>
+                    <textarea id="builder-template-input" rows="2" placeholder='e.g. "{{ if .System }}<|im_start|>system\n{{ .System }}<|im_end|>\n{{ end }}..."' oninput="generateModelfilePreview()"
+                              class="textarea textarea-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-[10px] focus:border-[#88c0d0] focus:outline-none w-full resize-none leading-normal"></textarea>
+                  </div>
+
+                  <!-- Merge Recipe Metadata -->
+                  <div class="form-control border-t border-[#4c566a]/30 pt-3 mt-1">
+                    <label class="label flex items-center gap-1.5 py-0 mb-1 cursor-pointer">
+                      <input type="checkbox" id="builder-merge-enable" onchange="toggleMergeInputs(); generateModelfilePreview()" class="checkbox checkbox-xs checkbox-info" />
+                      <span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">Include Merge Recipe Metadata</span>
+                    </label>
+                    <div id="builder-merge-inputs" class="hidden space-y-2 mt-2 pl-3 border-l border-[#4c566a]/40">
+                      <div>
+                        <label class="label py-0.5"><span class="text-[9px] font-mono text-[#4c566a] uppercase">Merge Method</span></label>
+                        <select id="builder-merge-method" onchange="generateModelfilePreview()" class="select select-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-[10px] w-full focus:outline-none text-[#d8dee9]">
+                          <option value="SLERP">SLERP (Spherical Linear Interpolation)</option>
+                          <option value="Linear">Linear Interpolation (Average)</option>
+                          <option value="Passthrough">Passthrough / Frankenmerging</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label class="label py-0.5"><span class="text-[9px] font-mono text-[#4c566a] uppercase">Secondary Model</span></label>
+                        <input type="text" id="builder-merge-model" placeholder="e.g. llama3-base" oninput="generateModelfilePreview()"
+                               class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-[10px] w-full focus:outline-none" />
+                      </div>
+                      <div>
+                        <label class="label py-0.5"><span class="text-[9px] font-mono text-[#4c566a] uppercase">Merge Ratios (Weights)</span></label>
+                        <input type="text" id="builder-merge-ratio" placeholder="e.g. 0.5, 0.3, 0.2" oninput="generateModelfilePreview()"
+                               class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-[10px] w-full focus:outline-none" />
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
-
-              <!-- System instruction -->
-              <div class="form-control">
-                <label class="label"><span class="label-text font-tech text-[10px] uppercase text-[#88c0d0]">System Directive</span></label>
-                <textarea id="builder-system-input" rows="4" placeholder="Instruction prompt defining custom model behavior..." oninput="generateModelfilePreview()"
-                          class="textarea textarea-sm bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full resize-none"></textarea>
-              </div>
+              </details>
             </div>
           </div>
 

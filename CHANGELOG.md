@@ -4,6 +4,19 @@ All notable changes to NEUROLLAMA are documented here.
 
 ---
 
+## [v0.2.25-beta.7] — 2026-07-01
+
+### Added
+- **Progressive Disclosure UI for Model Builder** — Restructured the Model Builder layout to display core parameters (Name, Base model, System directive, Temperature) on a clean, simple form by default, while grouping expert settings (Context size, Custom stops, LoRA adapters, templates, merges) inside a collapsible Advanced details panel.
+- **VRAM Telemetry on Fleet Cards** — Calculates active node VRAM footprint using loaded model sizes from `/api/ps` scaled against manually configured GPU capacity, rendering a real-time progress bar indicator.
+- **Unload model from VRAM** — Added a quick-action button next to loaded models on Fleet cards that sends an unload command (`POST /api/nodes/:id/unload`) to eject the model from remote GPU memory.
+- **Active Model telemetry endpoint integration** — Expanded `NodeOverviewEntry` with active model telemetry list (`ActiveModels`) and configured memory metrics (`VramGB`).
+
+### Fixed
+- **DaisyUI v5 Component Cleanup** — Removed the deprecated `-bordered` input variant from dynamic adapter inputs in the Model Builder to align with v5 styling guidelines.
+
+---
+
 ## [v0.2.25-beta.6] — 2026-06-19
 
 ### Added

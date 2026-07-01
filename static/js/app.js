@@ -4784,7 +4784,7 @@ function addAdapterField() {
   
   const input = document.createElement('input');
   input.type = 'text';
-  input.className = 'input input-xs input-bordered bg-[#2e3440]/60 border-[#4c566a] font-mono text-[10px] w-full focus:outline-none builder-adapter-input';
+  input.className = 'input input-xs border border-[#4c566a] bg-[#2e3440]/60 font-mono text-[10px] w-full focus:outline-none builder-adapter-input';
   input.placeholder = 'e.g. /path/to/adapter-or-name';
   input.oninput = generateModelfilePreview;
 
@@ -7273,8 +7273,77 @@ function renderFleetGrid(nodes) {
     const seenAgo   = serverLastSeen[node.id] ? timeAgoShort(serverLastSeen[node.id]) : (node.cache_updated_at ? timeAgoShort(node.cache_updated_at * 1000) : '—');
     const isActive  = servers.find(s => s.id === node.id)?.isActive;
 
+    let vramSection = "";
+    let activeModelsList = "";
+    if (isOnline) {
+      // VRAM progress bar calculation
+      let totalVRAMBytes = 0;
+      if (node.active_models && node.active_models.length) {
+        totalVRAMBytes = node.active_models.reduce((acc, m) => acc + (m.size_vram || 0), 0);
+      }
+      const totalVRAMGB = totalVRAMBytes / (1024 * 1024 * 1024);
+      
+      if (node.vram_gb > 0) {
+        const pct = Math.min(100, (totalVRAMGB / node.vram_gb) * 100);
+        vramSection = `
+          <div class="flex flex-col gap-1 text-[9px] font-mono mt-1">
+            <div class="flex justify-between text-[#4c566a]">
+              <span>VRAM Usage</span>
+              <span class="text-[#d8dee9]">${totalVRAMGB.toFixed(1)} / ${node.vram_gb.toFixed(0)} GB (${pct.toFixed(0)}%)</span>
+            </div>
+            <div class="w-full bg-[#3b4252] rounded-full h-1.5 overflow-hidden">
+              <div class="bg-[#88c0d0] h-1.5 rounded-full" style="width: ${pct}%"></div>
+            </div>
+          </div>
+        `;
+      } else {
+        vramSection = `
+          <div class="flex flex-col gap-1 text-[9px] font-mono mt-1">
+            <div class="flex justify-between text-[#4c566a]">
+              <span>VRAM Usage</span>
+              <span class="text-[#d8dee9]">${totalVRAMGB.toFixed(1)} GB loaded</span>
+            </div>
+          </div>
+        `;
+      }
+
+      // Active Models Detailed list with Unload action
+      if (node.active_models && node.active_models.length) {
+        activeModelsList = `
+          <div class="flex flex-col gap-1.5 border-t border-[#4c566a]/20 pt-2 mt-1">
+            <p class="text-[8px] font-tech text-[#88c0d0] uppercase tracking-wider font-bold">Loaded Models</p>
+            <div class="space-y-1">
+              ${node.active_models.map(m => {
+                const modelVramGB = (m.size_vram || 0) / (1024 * 1024 * 1024);
+                const modelShortName = m.name.replace(/:latest$/, '');
+                return `
+                  <div class="flex items-center justify-between bg-[#2e3440]/40 rounded px-1.5 py-1 text-[9px] font-mono border border-[#4c566a]/20">
+                    <span class="text-[#d8dee9] truncate w-24" title="${escapeHTML(m.name)}">${escapeHTML(modelShortName)}</span>
+                    <div class="flex items-center gap-1.5 shrink-0">
+                      <span class="text-[#4c566a]">${modelVramGB.toFixed(1)} GB</span>
+                      <button onclick="unloadNodeModel('${escapeHTML(node.id)}', '${escapeHTML(m.name)}')" 
+                              class="btn btn-ghost btn-xs text-[#bf616a] hover:bg-[#bf616a]/20 p-0 h-4 min-h-0 w-4 rounded flex items-center justify-center" 
+                              title="Unload Model">
+                        <i class="fa-solid fa-power-off text-[8px]"></i>
+                      </button>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+        `;
+      } else {
+        activeModelsList = `
+          <div class="flex flex-col gap-1 border-t border-[#4c566a]/20 pt-2 mt-1 text-[9px] font-mono italic text-[#4c566a] text-center">
+            No models loaded in VRAM
+          </div>
+        `;
+      }
+    }
+
     return `
-      <div class="tech-panel rounded-xl p-3 border ${border} flex flex-col gap-2 transition-all group relative">
+      <div class="tech-panel rounded-xl p-3 border ${border} flex flex-col gap-2 transition-all group relative min-h-[190px]">
         <!-- Status + name row -->
         <div class="flex items-start justify-between gap-2">
           <div class="flex items-center gap-2 min-w-0">
@@ -7301,24 +7370,20 @@ function renderFleetGrid(nodes) {
           <div class="text-[#4c566a]">Models</div>
           <div class="text-[#d8dee9]">${escapeHTML(String(node.model_count ?? '—'))}</div>
 
-          <div class="text-[#4c566a]">Running</div>
-          <div class="text-[#d8dee9] col-span-1 truncate" title="${escapeHTML((node.running_models || []).join(', ') || '—')}">
-            ${node.running_models && node.running_models.length
-              ? node.running_models.map(m => `<span class="inline-block bg-[#3b4252] rounded px-1 mr-0.5 text-[8px] text-[#88c0d0]">${escapeHTML(m.replace(/:latest$/, ''))}</span>`).join('')
-              : '<span class="text-[#4c566a]">—</span>'}
-          </div>
-
           <div class="text-[#4c566a]">Updated</div>
           <div class="text-[#4c566a]">${escapeHTML(seenAgo)}</div>
         </div>
 
+        ${vramSection}
+        ${activeModelsList}
+
         <!-- Action row -->
-        <div class="flex items-center gap-1 pt-1 border-t border-[#4c566a]/20">
+        <div class="flex items-center gap-1 pt-1 border-t border-[#4c566a]/20 mt-auto">
           ${!isActive ? `
             <button onclick="selectServer('${escapeHTML(node.id)}')" class="btn btn-xs btn-outline btn-info flex-1 font-tech text-[9px] h-6 min-h-0">
               SET ACTIVE
             </button>` : `
-            <span class="flex-1 text-[9px] font-mono text-[#88c0d0] text-center">Active node</span>`}
+            <span class="flex-1 text-[9px] font-mono text-[#88c0d0] text-center py-1">Active node</span>`}
           <button onclick="refreshNode('${escapeHTML(node.id)}')" class="btn btn-xs btn-ghost text-[#4c566a] hover:text-[#88c0d0] p-1 h-6 min-h-0" title="Refresh">
             <i class="fa-solid fa-rotate text-[9px]"></i>
           </button>
@@ -7326,6 +7391,31 @@ function renderFleetGrid(nodes) {
       </div>
     `;
   }).join('');
+}
+
+async function unloadNodeModel(nodeId, modelName) {
+  if (!confirm(`Are you sure you want to unload "${modelName}" from VRAM on this node?`)) {
+    return;
+  }
+  
+  try {
+    const resp = await fetch(`/api/nodes/${encodeURIComponent(nodeId)}/unload`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: modelName })
+    });
+    
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.error || 'Failed to unload model');
+    }
+    
+    showToast(`Model "${modelName}" unload request sent`, 'success');
+    // Refresh fleet dashboard immediately
+    fetchFleetOverview();
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
 }
 
 // ── Cross-node model search (Phase 4 — item 16) ───────────────────────────────

@@ -38,7 +38,7 @@ import (
 )
 
 // appVersion is the default for local dev; CI overrides via -ldflags "-X main.appVersion=<tag>"
-var appVersion = "v0.2.25-beta.6"
+var appVersion = "v0.2.25-beta.7"
 
 // releaseType is "dev" by default; CI overrides via -ldflags "-X main.releaseType=pre-release|stable"
 var releaseType = "dev"
@@ -411,6 +411,7 @@ func main() {
 		// Node management
 		api.GET("/nodes/overview", nodesOverviewHandler)
 		api.POST("/nodes/:id/refresh", refreshNodeHandler)
+		api.POST("/nodes/:id/unload", unloadNodeModelHandler)
 
 		// Telemetry & Scheduler endpoints
 		api.GET("/settings", getSettingsHandler)
@@ -740,6 +741,11 @@ func deleteServerHandler(c *gin.Context) {
 	nodeModelMu.Lock()
 	delete(nodeModelCache, id)
 	nodeModelMu.Unlock()
+
+	nodeRunningMu.Lock()
+	delete(nodeRunningCache, id)
+	delete(nodeActiveModelsCache, id)
+	nodeRunningMu.Unlock()
 
 	LogActivity("node", fmt.Sprintf("Node removed: %s", id))
 	c.JSON(http.StatusOK, gin.H{"message": "Server deleted successfully"})
@@ -2225,8 +2231,9 @@ var (
 	nodeModelMu    sync.RWMutex
 	nodeModelCache map[string]modelCacheEntry // keyed by server ID
 
-	nodeRunningMu    sync.RWMutex
-	nodeRunningCache map[string][]string // keyed by server ID → running model names
+	nodeRunningMu         sync.RWMutex
+	nodeRunningCache      map[string][]string // keyed by server ID → running model names
+	nodeActiveModelsCache map[string][]ProcessModel // keyed by server ID → running model details
 )
 
 // ── SSE Node-Status Broadcast Hub ────────────────────────────────────────────
@@ -2533,6 +2540,7 @@ func startNodeCachePoller() {
 	nodeStatusCache = make(map[string]nodeCacheEntry)
 	nodeModelCache = make(map[string]modelCacheEntry)
 	nodeRunningCache = make(map[string][]string)
+	nodeActiveModelsCache = make(map[string][]ProcessModel)
 
 	go func() {
 		// Warm-up before the first ticker fires
@@ -2659,6 +2667,7 @@ func pollOneNodeRunning(srv Server) {
 	}
 	nodeRunningMu.Lock()
 	nodeRunningCache[srv.ID] = names
+	nodeActiveModelsCache[srv.ID] = active
 	nodeRunningMu.Unlock()
 }
 
@@ -2721,15 +2730,17 @@ func telemetryStreamHandler(c *gin.Context) {
 
 // NodeOverviewEntry is one row in the fleet overview — aggregated from cache only.
 type NodeOverviewEntry struct {
-	ID             string   `json:"id"`
-	Name           string   `json:"name"`
-	URL            string   `json:"url"`
-	Status         string   `json:"status"`
-	Version        string   `json:"version"`
-	LatencyMs      int64    `json:"latency_ms"`
-	ModelCount     int      `json:"model_count"`
-	RunningModels  []string `json:"running_models"`
-	CacheUpdatedAt int64    `json:"cache_updated_at"` // unix seconds; 0 = not yet polled
+	ID             string         `json:"id"`
+	Name           string         `json:"name"`
+	URL            string         `json:"url"`
+	Status         string         `json:"status"`
+	Version        string         `json:"version"`
+	LatencyMs      int64          `json:"latency_ms"`
+	ModelCount     int            `json:"model_count"`
+	RunningModels  []string       `json:"running_models"`
+	ActiveModels   []ProcessModel `json:"active_models"`
+	VramGB         float64        `json:"vram_gb"`
+	CacheUpdatedAt int64          `json:"cache_updated_at"` // unix seconds; 0 = not yet polled
 }
 
 // nodesOverviewHandler returns every node's cached status + model count in one call.
@@ -2740,7 +2751,7 @@ func nodesOverviewHandler(c *gin.Context) {
 
 	nodeStatusMu.RLock()
 	for _, srv := range srvs {
-		e := NodeOverviewEntry{ID: srv.ID, Name: srv.Name, URL: srv.URL}
+		e := NodeOverviewEntry{ID: srv.ID, Name: srv.Name, URL: srv.URL, VramGB: srv.VramGB}
 		if se, ok := nodeStatusCache[srv.ID]; ok {
 			e.Status         = se.response.Status
 			e.Version        = se.response.Version
@@ -2765,6 +2776,9 @@ func nodesOverviewHandler(c *gin.Context) {
 	for i, e := range entries {
 		if running, ok := nodeRunningCache[e.ID]; ok {
 			entries[i].RunningModels = running
+		}
+		if active, ok := nodeActiveModelsCache[e.ID]; ok {
+			entries[i].ActiveModels = active
 		}
 	}
 	nodeRunningMu.RUnlock()
@@ -2807,6 +2821,53 @@ func refreshNodeHandler(c *gin.Context) {
 	nodeStatusMu.RUnlock()
 
 	c.JSON(http.StatusOK, entry.response)
+}
+
+// POST /api/nodes/:id/unload
+type UnloadModelRequest struct {
+	Model string `json:"model" binding:"required"`
+}
+
+func unloadNodeModelHandler(c *gin.Context) {
+	id := c.Param("id")
+	var req UnloadModelRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var found *Server
+	for _, s := range GetServers() {
+		if s.ID == id {
+			cp := s
+			found = &cp
+			break
+		}
+	}
+	if found == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
+		return
+	}
+
+	client := NewOllamaClient(*found)
+	if err := client.UnloadModel(req.Model); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to unload model: %v", err)})
+		return
+	}
+
+	// Trigger background re-poll immediately so the cache stays in sync
+	go func() {
+		pollOneNodeRunning(*found)
+		// Get fresh cache entry and broadcast it
+		nodeStatusMu.RLock()
+		if se, ok := nodeStatusCache[found.ID]; ok {
+			broadcastNodeStatus(se.response)
+		}
+		nodeStatusMu.RUnlock()
+	}()
+
+	LogActivity("node", fmt.Sprintf("Unloaded model %s on node %s", req.Model, found.Name))
+	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Model %s unloaded successfully", req.Model)})
 }
 
 // Settings Handlers

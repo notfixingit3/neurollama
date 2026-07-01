@@ -118,7 +118,7 @@
   - `GET /api/rag/collections`, `PUT /api/rag/documents/:id/collection`
   - Collection filter propagated to `GetRAGChunksForModel` (chat RAG + similarity query both respect it)
 
-- [ ] **Memory Telemetry: Real Remote VRAM Monitoring**
+- [x] **Memory Telemetry: Real Remote VRAM Monitoring**
   - Ollama's `/api/ps` exposes loaded model sizes but not total GPU VRAM capacity or utilization. The VRAM progress bars currently scale against the NEUROLLAMA host machine's RAM which is meaningless for remote servers.
   - Options to explore: (a) let users manually enter total VRAM per registered server so bars are meaningful, (b) add an optional companion lightweight agent on the remote host that exposes `nvidia-smi` stats via a tiny HTTP endpoint, (c) poll Ollama's `/api/version` for any future GPU stats endpoint they add.
 
@@ -367,7 +367,7 @@ The existing badges (VIS, EMB, TOOLS, THINK) are sourced from Ollama's `/api/sho
 ## 🔨 Model Builder Improvements
 
 ### Builder UX overhaul
-- [ ] **Progressive disclosure UI** — Restructure the builder so casual users see a simple form (name, base model, system prompt, temperature) by default, with an "Advanced" expander revealing the full Modelfile editor, PARAMETER overrides, TEMPLATE, ADAPTER, and MERGE fields. Expert functionality stays intact — it's just hidden until needed. Goal: a new user should be able to create a custom model in under 60 seconds without reading docs.
+- [x] **Progressive disclosure UI** — Restructure the builder so casual users see a simple form (name, base model, system prompt, temperature) by default, with an "Advanced" expander revealing the full Modelfile editor, PARAMETER overrides, TEMPLATE, ADAPTER, and MERGE fields. Expert functionality stays intact — it's just hidden until needed. Goal: a new user should be able to create a custom model in under 60 seconds without reading docs.
 
 - [ ] **Live Modelfile preview sync** — As the user fills in the simple-form fields, the raw Modelfile in the advanced editor updates in real time (already partially done for system prompt). Editing the raw Modelfile directly should also sync changes back to the form fields where possible (round-trip parse).
 
@@ -405,7 +405,7 @@ A new subsection (tab or modal launcher) offering step-by-step wizards for commo
 The current multi-node registry handles basic server switching, status polling, and NvN benchmarking. This section tracks ideas for evolving it into a true swarm management layer.
 
 ### Fleet visibility
-- [ ] **Fleet dashboard panel** — Dedicated full-page view (beyond the footer pill and popover) showing all registered nodes in a card grid: GPU VRAM used/total, CPU %, active model, Ollama version, latency sparkline over last N polls. Auto-refreshes on a configurable interval.
+- [x] **Fleet dashboard panel** — Dedicated full-page view (beyond the footer pill and popover) showing all registered nodes in a card grid: GPU VRAM used/total, CPU %, active model, Ollama version, latency sparkline over last N polls. Auto-refreshes on a configurable interval.
 
 - [ ] **Per-node model inventory diff** — Side-by-side view of which models are present on each node. Highlight models missing from one or more nodes. One-click pull-to-node to sync a model across the fleet.
 
