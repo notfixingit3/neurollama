@@ -47,3 +47,11 @@ neurollama-bin
 # Local test PDFs (not committed — used for manual testing only)
 test-*.pdf
 
+# OMO scratch / session state
+.omo/
+
+# Claude Code / CGC tooling (track launch.json, ignore everything else)
+.claude/settings.local.json
+.claude/worktrees/
+.cgcignore
+
