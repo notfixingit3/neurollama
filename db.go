@@ -10,17 +10,20 @@ import (
 )
 
 type Server struct {
-	ID             string  `json:"id"`
-	Name           string  `json:"name"`
-	URL            string  `json:"url"`
-	IsActive       bool    `json:"isActive"`
-	VramGB         float64 `json:"vramGb,omitempty"` // manually configured total GPU VRAM (GB)
-	AuthType       string  `json:"authType,omitempty"`
-	AuthToken      string  `json:"authToken,omitempty"`
-	AuthUsername   string  `json:"authUsername,omitempty"`
-	AuthPassword   string  `json:"authPassword,omitempty"`
-	AuthHeaderName string  `json:"authHeaderName,omitempty"`
-	AuthHeaderVal  string  `json:"authHeaderVal,omitempty"`
+	ID               string  `json:"id"`
+	Name             string  `json:"name"`
+	URL              string  `json:"url"`
+	IsActive         bool    `json:"isActive"`
+	VramGB           float64 `json:"vramGb,omitempty"` // manually configured total GPU VRAM (GB)
+	AuthType         string  `json:"authType,omitempty"`
+	AuthToken        string  `json:"authToken,omitempty"`
+	AuthUsername     string  `json:"authUsername,omitempty"`
+	AuthPassword     string  `json:"authPassword,omitempty"`
+	AuthHeaderName   string  `json:"authHeaderName,omitempty"`
+	AuthHeaderVal    string  `json:"authHeaderVal,omitempty"`
+	AgentPort        int     `json:"agentPort,omitempty"`        // neuro-agent port (default 11435)
+	AgentKey         string  `json:"agentKey,omitempty"`         // Bearer token for neuro-agent
+	AgentFingerprint string  `json:"agentFingerprint,omitempty"` // SHA-256 of agent TLS cert DER
 }
 
 type Config struct {
@@ -241,7 +244,7 @@ func MergeAuthFields(existing Server, authType, authToken, authUsername, authPas
 }
 
 // AddServer adds a new server and returns it
-func AddServer(name, url, authType, authToken, authUsername, authPassword, authHeaderName, authHeaderVal string, vramGB float64) (Server, error) {
+func AddServer(name, url, authType, authToken, authUsername, authPassword, authHeaderName, authHeaderVal string, vramGB float64, agentPort int, agentKey, agentFingerprint string) (Server, error) {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -251,17 +254,20 @@ func AddServer(name, url, authType, authToken, authUsername, authPassword, authH
 	}
 
 	newServer := Server{
-		ID:             generateID(),
-		Name:           name,
-		URL:            url,
-		IsActive:       len(servers) == 0, // make active if it's the first server
-		VramGB:         vramGB,
-		AuthType:       authType,
-		AuthToken:      authToken,
-		AuthUsername:   authUsername,
-		AuthPassword:   authPassword,
-		AuthHeaderName: authHeaderName,
-		AuthHeaderVal:  authHeaderVal,
+		ID:               generateID(),
+		Name:             name,
+		URL:              url,
+		IsActive:         len(servers) == 0,
+		VramGB:           vramGB,
+		AuthType:         authType,
+		AuthToken:        authToken,
+		AuthUsername:     authUsername,
+		AuthPassword:     authPassword,
+		AuthHeaderName:   authHeaderName,
+		AuthHeaderVal:    authHeaderVal,
+		AgentPort:        agentPort,
+		AgentKey:         agentKey,
+		AgentFingerprint: agentFingerprint,
 	}
 
 	servers = append(servers, newServer)
@@ -273,7 +279,7 @@ func AddServer(name, url, authType, authToken, authUsername, authPassword, authH
 }
 
 // EditServer updates an existing server's details
-func EditServer(id, name, url, authType, authToken, authUsername, authPassword, authHeaderName, authHeaderVal string, vramGB float64) (Server, error) {
+func EditServer(id, name, url, authType, authToken, authUsername, authPassword, authHeaderName, authHeaderVal string, vramGB float64, agentPort int, agentKey, agentFingerprint string) (Server, error) {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -286,15 +292,18 @@ func EditServer(id, name, url, authType, authToken, authUsername, authPassword, 
 		if s.ID == id {
 			authType, authToken, authUsername, authPassword, authHeaderName, authHeaderVal = MergeAuthFields(s, authType, authToken, authUsername, authPassword, authHeaderName, authHeaderVal)
 
-			servers[i].Name = name
-			servers[i].URL = url
-			servers[i].VramGB = vramGB
-			servers[i].AuthType = authType
-			servers[i].AuthToken = authToken
-			servers[i].AuthUsername = authUsername
-			servers[i].AuthPassword = authPassword
-			servers[i].AuthHeaderName = authHeaderName
-			servers[i].AuthHeaderVal = authHeaderVal
+			servers[i].Name             = name
+			servers[i].URL              = url
+			servers[i].VramGB           = vramGB
+			servers[i].AuthType         = authType
+			servers[i].AuthToken        = authToken
+			servers[i].AuthUsername     = authUsername
+			servers[i].AuthPassword     = authPassword
+			servers[i].AuthHeaderName   = authHeaderName
+			servers[i].AuthHeaderVal    = authHeaderVal
+			servers[i].AgentPort        = agentPort
+			servers[i].AgentKey         = agentKey
+			servers[i].AgentFingerprint = agentFingerprint
 			if err := SaveConfigInternal(); err != nil {
 				return Server{}, err
 			}

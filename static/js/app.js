@@ -2544,17 +2544,21 @@ async function deleteServer(id) {
 
 // Modals control
 function getServerFormPayload(prefix) {
-  const vramRaw = document.getElementById(`${prefix}-server-vram`)?.value;
+  const vramRaw      = document.getElementById(`${prefix}-server-vram`)?.value;
+  const agentPortRaw = document.getElementById(`${prefix}-server-agent-port`)?.value;
   return {
-    name: document.getElementById(`${prefix}-server-name`).value.trim(),
-    url: document.getElementById(`${prefix}-server-url`).value.trim(),
-    vramGb: vramRaw ? parseFloat(vramRaw) : 0,
-    authType: document.getElementById(`${prefix}-server-auth-type`).value,
-    authToken: document.getElementById(`${prefix}-server-auth-token`).value,
-    authUsername: document.getElementById(`${prefix}-server-auth-username`).value,
-    authPassword: document.getElementById(`${prefix}-server-auth-password`).value,
-    authHeaderName: document.getElementById(`${prefix}-server-auth-header-name`).value,
-    authHeaderVal: document.getElementById(`${prefix}-server-auth-header-val`).value
+    name:             document.getElementById(`${prefix}-server-name`).value.trim(),
+    url:              document.getElementById(`${prefix}-server-url`).value.trim(),
+    vramGb:           vramRaw ? parseFloat(vramRaw) : 0,
+    authType:         document.getElementById(`${prefix}-server-auth-type`).value,
+    authToken:        document.getElementById(`${prefix}-server-auth-token`).value,
+    authUsername:     document.getElementById(`${prefix}-server-auth-username`).value,
+    authPassword:     document.getElementById(`${prefix}-server-auth-password`).value,
+    authHeaderName:   document.getElementById(`${prefix}-server-auth-header-name`).value,
+    authHeaderVal:    document.getElementById(`${prefix}-server-auth-header-val`).value,
+    agentPort:        agentPortRaw ? parseInt(agentPortRaw, 10) : 0,
+    agentKey:         document.getElementById(`${prefix}-server-agent-key`)?.value || '',
+    agentFingerprint: document.getElementById(`${prefix}-server-agent-fingerprint`)?.value || '',
   };
 }
 
@@ -2583,6 +2587,28 @@ async function testNodeConnection(prefix) {
     showToast(`Node online in ${data.latency || 0}ms${version}`, 'success');
   } catch (error) {
     showToast(`Node test failed: ${error.message}`, 'error');
+  }
+}
+
+async function testAgentConnection(prefix) {
+  const id = prefix === 'edit' ? document.getElementById('edit-server-id').value : '';
+  if (!id) {
+    showToast('Save the node first, then test the agent', 'warning');
+    return;
+  }
+  const keyEl = document.getElementById(`${prefix}-server-agent-key`);
+  if (keyEl && keyEl.value) {
+    showToast('Save changes first so the agent key is stored, then test', 'warning');
+    return;
+  }
+  try {
+    showToast('Testing neuro-agent connection...', 'info');
+    const resp = await fetch(`/api/nodes/${encodeURIComponent(id)}/agent-test`, { method: 'POST' });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'Agent test failed');
+    showToast(`Agent OK — ${data.hostname} (${data.os}/${data.arch}) v${data.agent_version}`, 'success');
+  } catch (e) {
+    showToast(`Agent test failed: ${e.message}`, 'error');
   }
 }
 
@@ -2636,7 +2662,18 @@ function openEditServerModal(id) {
   
   const headerValEl = document.getElementById('edit-server-auth-header-val');
   if (headerValEl) headerValEl.value = '';
-  
+
+  const agentPortEl = document.getElementById('edit-server-agent-port');
+  if (agentPortEl) agentPortEl.value = srv.agentPort > 0 ? srv.agentPort : '';
+  const agentKeyEl = document.getElementById('edit-server-agent-key');
+  if (agentKeyEl) agentKeyEl.value = '';
+  const agentFpEl = document.getElementById('edit-server-agent-fingerprint');
+  if (agentFpEl) agentFpEl.value = srv.agentFingerprint || '';
+
+  // Auto-open agent accordion if the node already has an agent configured
+  const agentDetails = document.getElementById('edit-agent-details');
+  if (agentDetails) agentDetails.open = !!(srv.agentKey || srv.agentFingerprint);
+
   toggleAuthFields('edit');
   document.getElementById('edit-server-modal').showModal();
 }
@@ -7276,35 +7313,88 @@ function renderFleetGrid(nodes) {
     let vramSection = "";
     let activeModelsList = "";
     if (isOnline) {
-      // VRAM progress bar calculation
-      let totalVRAMBytes = 0;
-      if (node.active_models && node.active_models.length) {
-        totalVRAMBytes = node.active_models.reduce((acc, m) => acc + (m.size_vram || 0), 0);
+      const agent = node.agent_metrics;
+
+      // ── CPU + RAM bars from neuro-agent ───────────────────────────────────
+      let agentSection = '';
+      if (agent) {
+        const cpuPct = Math.min(100, agent.cpu.usage_percent || 0);
+        const cpuColor = cpuPct > 85 ? '#bf616a' : cpuPct > 60 ? '#ebcb8b' : '#a3be8c';
+        const ramUsedGB  = agent.memory.used_bytes / (1024 ** 3);
+        const ramTotalGB = agent.memory.total_bytes / (1024 ** 3);
+        const ramPct     = ramTotalGB > 0 ? Math.min(100, (ramUsedGB / ramTotalGB) * 100) : 0;
+        const ramColor   = ramPct > 85 ? '#bf616a' : ramPct > 60 ? '#ebcb8b' : '#a3be8c';
+        agentSection = `
+          <div class="flex flex-col gap-1.5 text-[9px] font-mono mt-1 border-t border-[#4c566a]/20 pt-2">
+            <div class="flex flex-col gap-0.5">
+              <div class="flex justify-between text-[#4c566a]">
+                <span>CPU <span class="text-[#4c566a]/70">${escapeHTML(agent.cpu.model.replace(/\(.*?\)/g,'').trim())}</span></span>
+                <span style="color:${cpuColor}">${cpuPct.toFixed(0)}%</span>
+              </div>
+              <div class="w-full bg-[#3b4252] rounded-full h-1 overflow-hidden">
+                <div class="h-1 rounded-full transition-all" style="width:${cpuPct}%;background:${cpuColor}"></div>
+              </div>
+            </div>
+            <div class="flex flex-col gap-0.5">
+              <div class="flex justify-between text-[#4c566a]">
+                <span>RAM</span>
+                <span style="color:${ramColor}">${ramUsedGB.toFixed(1)} / ${ramTotalGB.toFixed(1)} GB</span>
+              </div>
+              <div class="w-full bg-[#3b4252] rounded-full h-1 overflow-hidden">
+                <div class="h-1 rounded-full transition-all" style="width:${ramPct}%;background:${ramColor}"></div>
+              </div>
+            </div>
+          </div>`;
       }
-      const totalVRAMGB = totalVRAMBytes / (1024 * 1024 * 1024);
-      
-      if (node.vram_gb > 0) {
-        const pct = Math.min(100, (totalVRAMGB / node.vram_gb) * 100);
-        vramSection = `
-          <div class="flex flex-col gap-1 text-[9px] font-mono mt-1">
-            <div class="flex justify-between text-[#4c566a]">
-              <span>VRAM Usage</span>
-              <span class="text-[#d8dee9]">${totalVRAMGB.toFixed(1)} / ${node.vram_gb.toFixed(0)} GB (${pct.toFixed(0)}%)</span>
-            </div>
-            <div class="w-full bg-[#3b4252] rounded-full h-1.5 overflow-hidden">
-              <div class="bg-[#88c0d0] h-1.5 rounded-full" style="width: ${pct}%"></div>
-            </div>
-          </div>
-        `;
+
+      // ── VRAM bar: prefer agent discrete GPU data, fall back to Ollama /api/ps ─
+      const agentGPUs = agent ? (agent.gpus || []).filter(g => !g.integrated && g.vram_total_bytes > 0) : [];
+      let ollamaVRAMBytes = 0;
+      if (node.active_models && node.active_models.length) {
+        ollamaVRAMBytes = node.active_models.reduce((acc, m) => acc + (m.size_vram || 0), 0);
+      }
+
+      if (agentGPUs.length > 0) {
+        // Real per-GPU VRAM from neuro-agent
+        vramSection = agentSection + agentGPUs.map(gpu => {
+          const usedGB  = gpu.vram_used_bytes / (1024 ** 3);
+          const totalGB = gpu.vram_total_bytes / (1024 ** 3);
+          const pct     = Math.min(100, (usedGB / totalGB) * 100);
+          const color   = pct > 85 ? '#bf616a' : pct > 60 ? '#ebcb8b' : '#88c0d0';
+          return `
+            <div class="flex flex-col gap-0.5 text-[9px] font-mono mt-1">
+              <div class="flex justify-between text-[#4c566a]">
+                <span>VRAM <span class="text-[#4c566a]/70">${escapeHTML(gpu.name.replace(/\(.*?\)/g,'').trim())}</span></span>
+                <span style="color:${color}">${usedGB.toFixed(1)} / ${totalGB.toFixed(1)} GB (${pct.toFixed(0)}%)</span>
+              </div>
+              <div class="w-full bg-[#3b4252] rounded-full h-1 overflow-hidden">
+                <div class="h-1 rounded-full transition-all" style="width:${pct}%;background:${color}"></div>
+              </div>
+            </div>`;
+        }).join('');
       } else {
-        vramSection = `
-          <div class="flex flex-col gap-1 text-[9px] font-mono mt-1">
-            <div class="flex justify-between text-[#4c566a]">
-              <span>VRAM Usage</span>
-              <span class="text-[#d8dee9]">${totalVRAMGB.toFixed(1)} GB loaded</span>
-            </div>
-          </div>
-        `;
+        // Fallback: Ollama /api/ps loaded bytes + optional manual VramGB
+        vramSection = agentSection;
+        const totalVRAMGB = ollamaVRAMBytes / (1024 ** 3);
+        if (node.vram_gb > 0) {
+          const pct = Math.min(100, (totalVRAMGB / node.vram_gb) * 100);
+          const color = pct > 85 ? '#bf616a' : pct > 60 ? '#ebcb8b' : '#88c0d0';
+          vramSection += `
+            <div class="flex flex-col gap-0.5 text-[9px] font-mono mt-1">
+              <div class="flex justify-between text-[#4c566a]">
+                <span>VRAM</span>
+                <span style="color:${color}">${totalVRAMGB.toFixed(1)} / ${node.vram_gb.toFixed(0)} GB (${pct.toFixed(0)}%)</span>
+              </div>
+              <div class="w-full bg-[#3b4252] rounded-full h-1 overflow-hidden">
+                <div class="h-1 rounded-full transition-all" style="width:${pct}%;background:${color}"></div>
+              </div>
+            </div>`;
+        } else if (totalVRAMGB > 0) {
+          vramSection += `
+            <div class="flex justify-between text-[9px] font-mono mt-1 text-[#4c566a]">
+              <span>VRAM</span><span class="text-[#d8dee9]">${totalVRAMGB.toFixed(1)} GB loaded</span>
+            </div>`;
+        }
       }
 
       // Active Models Detailed list with Unload action

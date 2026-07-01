@@ -4,8 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/csv"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -214,27 +218,33 @@ type ServerStatusResponse struct {
 }
 
 type AddServerRequest struct {
-	Name           string  `json:"name" binding:"required"`
-	URL            string  `json:"url" binding:"required"`
-	VramGB         float64 `json:"vramGb"`
-	AuthType       string  `json:"authType"`
-	AuthToken      string  `json:"authToken"`
-	AuthUsername   string  `json:"authUsername"`
-	AuthPassword   string  `json:"authPassword"`
-	AuthHeaderName string  `json:"authHeaderName"`
-	AuthHeaderVal  string  `json:"authHeaderVal"`
+	Name             string  `json:"name" binding:"required"`
+	URL              string  `json:"url" binding:"required"`
+	VramGB           float64 `json:"vramGb"`
+	AuthType         string  `json:"authType"`
+	AuthToken        string  `json:"authToken"`
+	AuthUsername     string  `json:"authUsername"`
+	AuthPassword     string  `json:"authPassword"`
+	AuthHeaderName   string  `json:"authHeaderName"`
+	AuthHeaderVal    string  `json:"authHeaderVal"`
+	AgentPort        int     `json:"agentPort"`
+	AgentKey         string  `json:"agentKey"`
+	AgentFingerprint string  `json:"agentFingerprint"`
 }
 
 type EditServerRequest struct {
-	Name           string  `json:"name" binding:"required"`
-	URL            string  `json:"url" binding:"required"`
-	VramGB         float64 `json:"vramGb"`
-	AuthType       string  `json:"authType"`
-	AuthToken      string  `json:"authToken"`
-	AuthUsername   string  `json:"authUsername"`
-	AuthPassword   string  `json:"authPassword"`
-	AuthHeaderName string  `json:"authHeaderName"`
-	AuthHeaderVal  string  `json:"authHeaderVal"`
+	Name             string  `json:"name" binding:"required"`
+	URL              string  `json:"url" binding:"required"`
+	VramGB           float64 `json:"vramGb"`
+	AuthType         string  `json:"authType"`
+	AuthToken        string  `json:"authToken"`
+	AuthUsername     string  `json:"authUsername"`
+	AuthPassword     string  `json:"authPassword"`
+	AuthHeaderName   string  `json:"authHeaderName"`
+	AuthHeaderVal    string  `json:"authHeaderVal"`
+	AgentPort        int     `json:"agentPort"`
+	AgentKey         string  `json:"agentKey"`
+	AgentFingerprint string  `json:"agentFingerprint"`
 }
 
 type BatchDeleteRequest struct {
@@ -412,6 +422,7 @@ func main() {
 		api.GET("/nodes/overview", nodesOverviewHandler)
 		api.POST("/nodes/:id/refresh", refreshNodeHandler)
 		api.POST("/nodes/:id/unload", unloadNodeModelHandler)
+		api.POST("/nodes/:id/agent-test", testNodeAgentHandler)
 
 		// Telemetry & Scheduler endpoints
 		api.GET("/settings", getSettingsHandler)
@@ -577,6 +588,7 @@ func addServerHandler(c *gin.Context) {
 		req.AuthUsername, req.AuthPassword,
 		req.AuthHeaderName, req.AuthHeaderVal,
 		req.VramGB,
+		req.AgentPort, req.AgentKey, req.AgentFingerprint,
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -708,6 +720,7 @@ func editServerHandler(c *gin.Context) {
 		req.AuthUsername, req.AuthPassword,
 		req.AuthHeaderName, req.AuthHeaderVal,
 		req.VramGB,
+		req.AgentPort, req.AgentKey, req.AgentFingerprint,
 	)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
@@ -746,6 +759,10 @@ func deleteServerHandler(c *gin.Context) {
 	delete(nodeRunningCache, id)
 	delete(nodeActiveModelsCache, id)
 	nodeRunningMu.Unlock()
+
+	nodeAgentMu.Lock()
+	delete(nodeAgentCache, id)
+	nodeAgentMu.Unlock()
 
 	LogActivity("node", fmt.Sprintf("Node removed: %s", id))
 	c.JSON(http.StatusOK, gin.H{"message": "Server deleted successfully"})
@@ -2232,8 +2249,11 @@ var (
 	nodeModelCache map[string]modelCacheEntry // keyed by server ID
 
 	nodeRunningMu         sync.RWMutex
-	nodeRunningCache      map[string][]string // keyed by server ID → running model names
+	nodeRunningCache      map[string][]string   // keyed by server ID → running model names
 	nodeActiveModelsCache map[string][]ProcessModel // keyed by server ID → running model details
+
+	nodeAgentMu    sync.RWMutex
+	nodeAgentCache map[string]*AgentMetricsResult // keyed by server ID → nil if agent not configured/reachable
 )
 
 // ── SSE Node-Status Broadcast Hub ────────────────────────────────────────────
@@ -2537,23 +2557,27 @@ func startTelemetryPoller() {
 // startNodeCachePoller initialises the status and model caches, pre-warms them
 // immediately, then keeps them fresh on background tickers.
 func startNodeCachePoller() {
-	nodeStatusCache = make(map[string]nodeCacheEntry)
-	nodeModelCache = make(map[string]modelCacheEntry)
+	nodeStatusCache  = make(map[string]nodeCacheEntry)
+	nodeModelCache   = make(map[string]modelCacheEntry)
 	nodeRunningCache = make(map[string][]string)
 	nodeActiveModelsCache = make(map[string][]ProcessModel)
+	nodeAgentCache   = make(map[string]*AgentMetricsResult)
 
 	go func() {
 		// Warm-up before the first ticker fires
 		pollAllNodeStatuses()
 		pollAllNodeModels()
 		pollAllNodeRunning()
+		pollAllNodeAgents()
 
 		statusTicker  := time.NewTicker(5 * time.Second)
 		modelTicker   := time.NewTicker(60 * time.Second)
 		runningTicker := time.NewTicker(15 * time.Second)
+		agentTicker   := time.NewTicker(30 * time.Second)
 		defer statusTicker.Stop()
 		defer modelTicker.Stop()
 		defer runningTicker.Stop()
+		defer agentTicker.Stop()
 
 		for {
 			select {
@@ -2563,6 +2587,8 @@ func startNodeCachePoller() {
 				pollAllNodeModels()
 			case <-runningTicker.C:
 				pollAllNodeRunning()
+			case <-agentTicker.C:
+				pollAllNodeAgents()
 			}
 		}
 	}()
@@ -2671,6 +2697,127 @@ func pollOneNodeRunning(srv Server) {
 	nodeRunningMu.Unlock()
 }
 
+// ── neuro-agent types ─────────────────────────────────────────────────────────
+
+type AgentMetricsResult struct {
+	Hostname      string         `json:"hostname"`
+	OS            string         `json:"os"`
+	Arch          string         `json:"arch"`
+	UptimeSeconds uint64         `json:"uptime_seconds"`
+	CPU           AgentCPUInfo   `json:"cpu"`
+	Memory        AgentMemInfo   `json:"memory"`
+	GPUs          []AgentGPUInfo `json:"gpus"`
+	AgentVersion  string         `json:"agent_version"`
+}
+
+type AgentCPUInfo struct {
+	Model        string  `json:"model"`
+	Cores        int     `json:"cores"`
+	UsagePercent float64 `json:"usage_percent"`
+}
+
+type AgentMemInfo struct {
+	TotalBytes     uint64 `json:"total_bytes"`
+	UsedBytes      uint64 `json:"used_bytes"`
+	AvailableBytes uint64 `json:"available_bytes"`
+}
+
+type AgentGPUInfo struct {
+	Index          int    `json:"index"`
+	Vendor         string `json:"vendor"`
+	Name           string `json:"name"`
+	VRAMTotalBytes int64  `json:"vram_total_bytes"`
+	VRAMUsedBytes  int64  `json:"vram_used_bytes"`
+	VRAMFreeBytes  int64  `json:"vram_free_bytes"`
+	Integrated     bool   `json:"integrated"`
+}
+
+func pollAllNodeAgents() {
+	srvs := GetServers()
+	var wg sync.WaitGroup
+	for _, srv := range srvs {
+		if srv.AgentKey == "" {
+			continue
+		}
+		wg.Add(1)
+		go func(s Server) {
+			defer wg.Done()
+			pollOneNodeAgent(s)
+		}(srv)
+	}
+	wg.Wait()
+}
+
+func pollOneNodeAgent(srv Server) {
+	m, err := fetchAgentMetrics(srv)
+	nodeAgentMu.Lock()
+	if err != nil {
+		delete(nodeAgentCache, srv.ID)
+	} else {
+		nodeAgentCache[srv.ID] = m
+	}
+	nodeAgentMu.Unlock()
+}
+
+// fetchAgentMetrics calls the neuro-agent /metrics endpoint on the given server.
+// Uses TLS with cert fingerprint pinning when AgentFingerprint is set.
+func fetchAgentMetrics(srv Server) (*AgentMetricsResult, error) {
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		return nil, err
+	}
+	port := srv.AgentPort
+	if port == 0 {
+		port = 11435
+	}
+	agentURL := fmt.Sprintf("https://%s:%d/metrics", u.Hostname(), port)
+
+	tlsCfg := &tls.Config{
+		InsecureSkipVerify: true, // fingerprint pinning below replaces chain trust
+	}
+	if srv.AgentFingerprint != "" {
+		wantFP := strings.ToLower(srv.AgentFingerprint)
+		tlsCfg.VerifyPeerCertificate = func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+			if len(rawCerts) == 0 {
+				return fmt.Errorf("no certificate presented")
+			}
+			h := sha256.Sum256(rawCerts[0])
+			got := hex.EncodeToString(h[:])
+			if got != wantFP {
+				return fmt.Errorf("TLS fingerprint mismatch: got %s", got)
+			}
+			return nil
+		}
+	}
+
+	client := &http.Client{
+		Timeout:   5 * time.Second,
+		Transport: &http.Transport{TLSClientConfig: tlsCfg},
+	}
+
+	req, err := http.NewRequest(http.MethodGet, agentURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+srv.AgentKey)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("agent returned %d", resp.StatusCode)
+	}
+
+	var m AgentMetricsResult
+	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
 // invalidateNodeModelCache drops a node's model cache entry and triggers an
 // immediate background re-poll so the next /api/models request hits fresh data.
 func invalidateNodeModelCache(serverID string) {
@@ -2730,17 +2877,18 @@ func telemetryStreamHandler(c *gin.Context) {
 
 // NodeOverviewEntry is one row in the fleet overview — aggregated from cache only.
 type NodeOverviewEntry struct {
-	ID             string         `json:"id"`
-	Name           string         `json:"name"`
-	URL            string         `json:"url"`
-	Status         string         `json:"status"`
-	Version        string         `json:"version"`
-	LatencyMs      int64          `json:"latency_ms"`
-	ModelCount     int            `json:"model_count"`
-	RunningModels  []string       `json:"running_models"`
-	ActiveModels   []ProcessModel `json:"active_models"`
-	VramGB         float64        `json:"vram_gb"`
-	CacheUpdatedAt int64          `json:"cache_updated_at"` // unix seconds; 0 = not yet polled
+	ID             string               `json:"id"`
+	Name           string               `json:"name"`
+	URL            string               `json:"url"`
+	Status         string               `json:"status"`
+	Version        string               `json:"version"`
+	LatencyMs      int64                `json:"latency_ms"`
+	ModelCount     int                  `json:"model_count"`
+	RunningModels  []string             `json:"running_models"`
+	ActiveModels   []ProcessModel       `json:"active_models"`
+	VramGB         float64              `json:"vram_gb"`
+	AgentMetrics   *AgentMetricsResult  `json:"agent_metrics,omitempty"`
+	CacheUpdatedAt int64                `json:"cache_updated_at"` // unix seconds; 0 = not yet polled
 }
 
 // nodesOverviewHandler returns every node's cached status + model count in one call.
@@ -2783,6 +2931,14 @@ func nodesOverviewHandler(c *gin.Context) {
 	}
 	nodeRunningMu.RUnlock()
 
+	nodeAgentMu.RLock()
+	for i, e := range entries {
+		if m, ok := nodeAgentCache[e.ID]; ok {
+			entries[i].AgentMetrics = m
+		}
+	}
+	nodeAgentMu.RUnlock()
+
 	c.JSON(http.StatusOK, entries)
 }
 
@@ -2813,8 +2969,13 @@ func refreshNodeHandler(c *gin.Context) {
 	delete(nodeRunningCache, id)
 	nodeRunningMu.Unlock()
 
+	nodeAgentMu.Lock()
+	delete(nodeAgentCache, id)
+	nodeAgentMu.Unlock()
+
 	pollOneNodeStatus(*found)
 	go pollOneNodeRunning(*found)
+	go pollOneNodeAgent(*found)
 
 	nodeStatusMu.RLock()
 	entry := nodeStatusCache[id]
@@ -2868,6 +3029,39 @@ func unloadNodeModelHandler(c *gin.Context) {
 
 	LogActivity("node", fmt.Sprintf("Unloaded model %s on node %s", req.Model, found.Name))
 	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Model %s unloaded successfully", req.Model)})
+}
+
+// POST /api/nodes/:id/agent-test — checks connectivity and auth against a node's neuro-agent.
+func testNodeAgentHandler(c *gin.Context) {
+	id := c.Param("id")
+	var found *Server
+	for _, s := range GetServers() {
+		if s.ID == id {
+			cp := s
+			found = &cp
+			break
+		}
+	}
+	if found == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
+		return
+	}
+	if found.AgentKey == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no agent key configured for this node"})
+		return
+	}
+	m, err := fetchAgentMetrics(*found)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"status":        "ok",
+		"hostname":      m.Hostname,
+		"agent_version": m.AgentVersion,
+		"os":            m.OS,
+		"arch":          m.Arch,
+	})
 }
 
 // Settings Handlers
