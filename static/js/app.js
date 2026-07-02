@@ -7501,14 +7501,13 @@ function renderFleetGrid(nodes) {
 }
 
 function openAgentDeployForNode(nodeId) {
-  switchWorkspace('system');
-  switchSystemSubtab('settings');
-  setTimeout(() => {
+  switchWorkspace('fleet');
+  requestAnimationFrame(() => requestAnimationFrame(() => {
     const sel = document.getElementById('agent-deploy-node');
     if (sel) sel.value = nodeId;
-    const panel = document.getElementById('agent-deploy-node')?.closest('.tech-panel, [class*="panel"]');
-    if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, 120);
+    const btn = document.getElementById('agent-deploy-btn');
+    if (btn) btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }));
 }
 
 async function unloadNodeModel(nodeId, modelName) {
