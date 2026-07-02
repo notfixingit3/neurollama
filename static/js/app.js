@@ -1,5 +1,6 @@
 // State Management
 let servers = [];
+let expectedAgentVersion = null;
 let models = [];
 let modelCtxLengths   = {}; // model_name → trained context length (int)
 let modelCapabilities = {}; // model_name → string[] from /api/show e.g. ["completion","tools","vision","thinking"]
@@ -638,6 +639,7 @@ async function init() {
   // Non-blocking: fire and forget — page renders immediately, server cards and
   // status dots fill in once the (now-instant) cache read completes.
   fetchServers();
+  fetch('/healthz').then(r => r.json()).then(d => { if (d.agent_version) expectedAgentVersion = d.agent_version; }).catch(() => {});
   // Initialize catalog view (does not need server data)
   renderCatalog();
   // Restore failure badge from localStorage on load
@@ -7468,10 +7470,14 @@ function renderFleetGrid(nodes) {
           <div class="text-[#4c566a]">Models</div>
           <div class="text-[#d8dee9]">${escapeHTML(String(node.model_count ?? '—'))}</div>
 
-          ${node.agent_metrics ? `
-          <div class="text-[#4c566a]">Agent</div>
-          <div class="text-[#88c0d0] truncate font-mono">${escapeHTML(node.agent_metrics.agent_version || '—')}</div>
-          ` : ''}
+          ${node.agent_metrics ? (() => {
+            const av = node.agent_metrics.agent_version || '';
+            const outdated = expectedAgentVersion && av && av !== expectedAgentVersion;
+            const vColor = outdated ? 'text-[#ebcb8b]' : 'text-[#88c0d0]';
+            const badge = outdated ? ` <span class="text-[#ebcb8b] text-[8px]" title="Expected ${escapeHTML(expectedAgentVersion)}">▲</span>` : '';
+            return `<div class="text-[#4c566a]">Agent</div>
+          <div class="${vColor} truncate font-mono">${escapeHTML(av || '—')}${badge}</div>`;
+          })() : ''}
 
           <div class="text-[#4c566a]">Updated</div>
           <div class="text-[#4c566a]">${escapeHTML(seenAgo)}</div>
@@ -7487,10 +7493,15 @@ function renderFleetGrid(nodes) {
               SET ACTIVE
             </button>` : `
             <span class="flex-1 text-[9px] font-mono text-[#88c0d0] text-center py-1">Active node</span>`}
-          ${isOnline ? `
-          <button onclick="openAgentDeployForNode('${escapeHTML(node.id)}')" class="btn btn-xs btn-ghost text-[#4c566a] hover:text-[#ebcb8b] p-1 h-6 min-h-0" title="${node.agent_metrics ? 'Update agent' : 'Deploy agent'}">
+          ${isOnline ? (() => {
+            const av = node.agent_metrics?.agent_version;
+            const agentOutdated = expectedAgentVersion && av && av !== expectedAgentVersion;
+            const btnColor = agentOutdated ? 'text-[#ebcb8b] hover:text-[#d08770]' : 'text-[#4c566a] hover:text-[#ebcb8b]';
+            const tipText = agentOutdated ? `Update agent (${av} → ${expectedAgentVersion})` : (node.agent_metrics ? 'Update agent' : 'Deploy agent');
+            return `<button onclick="openAgentDeployForNode('${escapeHTML(node.id)}')" class="btn btn-xs btn-ghost ${btnColor} p-1 h-6 min-h-0" title="${escapeHTML(tipText)}">
             <i class="fa-solid fa-satellite-dish text-[9px]"></i>
-          </button>` : ''}
+          </button>`;
+          })() : ''}
           <button onclick="refreshNode('${escapeHTML(node.id)}')" class="btn btn-xs btn-ghost text-[#4c566a] hover:text-[#88c0d0] p-1 h-6 min-h-0" title="Refresh">
             <i class="fa-solid fa-rotate text-[9px]"></i>
           </button>

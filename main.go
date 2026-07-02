@@ -44,6 +44,9 @@ import (
 // appVersion is the default for local dev; CI overrides via -ldflags "-X main.appVersion=<tag>"
 var appVersion = "v0.2.25-beta.9"
 
+// agentVersion is the canonical neuro-agent version this build expects on fleet nodes
+var agentVersion = "v0.1.1"
+
 // releaseType is "dev" by default; CI overrides via -ldflags "-X main.releaseType=pre-release|stable"
 var releaseType = "dev"
 
@@ -368,7 +371,7 @@ func main() {
 
 	// Health check — used by Docker HEALTHCHECK and load balancers
 	r.GET("/healthz", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok", "version": appVersion})
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "version": appVersion, "agent_version": agentVersion})
 	})
 
 	// HTML routes
