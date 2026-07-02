@@ -7468,6 +7468,11 @@ function renderFleetGrid(nodes) {
           <div class="text-[#4c566a]">Models</div>
           <div class="text-[#d8dee9]">${escapeHTML(String(node.model_count ?? '—'))}</div>
 
+          ${node.agent_metrics ? `
+          <div class="text-[#4c566a]">Agent</div>
+          <div class="text-[#88c0d0] truncate font-mono">${escapeHTML(node.agent_metrics.agent_version || '—')}</div>
+          ` : ''}
+
           <div class="text-[#4c566a]">Updated</div>
           <div class="text-[#4c566a]">${escapeHTML(seenAgo)}</div>
         </div>
@@ -7482,6 +7487,10 @@ function renderFleetGrid(nodes) {
               SET ACTIVE
             </button>` : `
             <span class="flex-1 text-[9px] font-mono text-[#88c0d0] text-center py-1">Active node</span>`}
+          ${isOnline ? `
+          <button onclick="openAgentDeployForNode('${escapeHTML(node.id)}')" class="btn btn-xs btn-ghost text-[#4c566a] hover:text-[#ebcb8b] p-1 h-6 min-h-0" title="${node.agent_metrics ? 'Update agent' : 'Deploy agent'}">
+            <i class="fa-solid fa-satellite-dish text-[9px]"></i>
+          </button>` : ''}
           <button onclick="refreshNode('${escapeHTML(node.id)}')" class="btn btn-xs btn-ghost text-[#4c566a] hover:text-[#88c0d0] p-1 h-6 min-h-0" title="Refresh">
             <i class="fa-solid fa-rotate text-[9px]"></i>
           </button>
@@ -7489,6 +7498,17 @@ function renderFleetGrid(nodes) {
       </div>
     `;
   }).join('');
+}
+
+function openAgentDeployForNode(nodeId) {
+  switchWorkspace('system');
+  switchSystemSubtab('settings');
+  setTimeout(() => {
+    const sel = document.getElementById('agent-deploy-node');
+    if (sel) sel.value = nodeId;
+    const panel = document.getElementById('agent-deploy-node')?.closest('.tech-panel, [class*="panel"]');
+    if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 120);
 }
 
 async function unloadNodeModel(nodeId, modelName) {

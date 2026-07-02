@@ -16,7 +16,7 @@ import (
 
 const defaultPort = 11435
 
-var agentVersion = "v0.1.0"
+var agentVersion = "v0.1.1"
 
 var apiKey string
 
