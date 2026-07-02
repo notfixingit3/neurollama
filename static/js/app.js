@@ -7505,6 +7505,27 @@ function openAgentDeployForNode(nodeId) {
   requestAnimationFrame(() => requestAnimationFrame(() => {
     const sel = document.getElementById('agent-deploy-node');
     if (sel) sel.value = nodeId;
+
+    // Pre-fill SSH fields from stored deploy info (saved on last deploy)
+    const srv = servers.find(s => s.id === nodeId);
+    if (srv) {
+      const userEl = document.getElementById('agent-deploy-ssh-user');
+      if (userEl && srv.agentSSHUser) userEl.value = srv.agentSSHUser;
+
+      const portEl = document.getElementById('agent-deploy-ssh-port');
+      if (portEl && srv.agentSSHPort) portEl.value = srv.agentSSHPort;
+
+      if (srv.agentSSHKeyID) {
+        // Switch to key auth and select the stored key
+        toggleAgentDeployAuth('key');
+        document.querySelectorAll('input[name="agent-deploy-auth"]').forEach(r => {
+          r.checked = r.value === 'key';
+        });
+        const keyEl = document.getElementById('agent-deploy-key-id');
+        if (keyEl) { keyEl.value = srv.agentSSHKeyID; onAgentDeployKeyChange(); }
+      }
+    }
+
     const btn = document.getElementById('agent-deploy-btn');
     if (btn) btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }));
@@ -8435,7 +8456,7 @@ async function startAgentDeploy() {
 
 async function applyAgentCredentials() {
   if (!_agentDeployCreds) return;
-  const { server_id, api_key, fingerprint, port } = _agentDeployCreds;
+  const { server_id, api_key, fingerprint, port, ssh_user, ssh_key_id, ssh_port } = _agentDeployCreds;
   const srv = servers.find(s => s.id === server_id);
   if (!srv) { showToast('Server not found', 'error'); return; }
 
@@ -8450,6 +8471,9 @@ async function applyAgentCredentials() {
     agentPort: port || 11435,
     agentKey: api_key,
     agentFingerprint: fingerprint,
+    agentSSHUser: ssh_user || '',
+    agentSSHKeyID: ssh_key_id || '',
+    agentSSHPort: ssh_port || 22,
   };
 
   try {

@@ -24,6 +24,9 @@ type Server struct {
 	AgentPort        int     `json:"agentPort,omitempty"`        // neuro-agent port (default 11435)
 	AgentKey         string  `json:"agentKey,omitempty"`         // Bearer token for neuro-agent
 	AgentFingerprint string  `json:"agentFingerprint,omitempty"` // SHA-256 of agent TLS cert DER
+	AgentSSHUser     string  `json:"agentSSHUser,omitempty"`     // SSH user used for last agent deploy
+	AgentSSHPort     int     `json:"agentSSHPort,omitempty"`     // SSH port used for last agent deploy
+	AgentSSHKeyID    string  `json:"agentSSHKeyID,omitempty"`    // SSH key ID used for last agent deploy
 }
 
 type Config struct {
@@ -279,7 +282,7 @@ func AddServer(name, url, authType, authToken, authUsername, authPassword, authH
 }
 
 // EditServer updates an existing server's details
-func EditServer(id, name, url, authType, authToken, authUsername, authPassword, authHeaderName, authHeaderVal string, vramGB float64, agentPort int, agentKey, agentFingerprint string) (Server, error) {
+func EditServer(id, name, url, authType, authToken, authUsername, authPassword, authHeaderName, authHeaderVal string, vramGB float64, agentPort int, agentKey, agentFingerprint, agentSSHUser, agentSSHKeyID string, agentSSHPort int) (Server, error) {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -307,6 +310,15 @@ func EditServer(id, name, url, authType, authToken, authUsername, authPassword, 
 			}
 			if agentFingerprint != "" {
 				servers[i].AgentFingerprint = agentFingerprint
+			}
+			if agentSSHUser != "" {
+				servers[i].AgentSSHUser = agentSSHUser
+			}
+			if agentSSHKeyID != "" {
+				servers[i].AgentSSHKeyID = agentSSHKeyID
+			}
+			if agentSSHPort > 0 {
+				servers[i].AgentSSHPort = agentSSHPort
 			}
 			if err := SaveConfigInternal(); err != nil {
 				return Server{}, err

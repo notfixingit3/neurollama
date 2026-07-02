@@ -245,6 +245,9 @@ type EditServerRequest struct {
 	AgentPort        int     `json:"agentPort"`
 	AgentKey         string  `json:"agentKey"`
 	AgentFingerprint string  `json:"agentFingerprint"`
+	AgentSSHUser     string  `json:"agentSSHUser"`
+	AgentSSHPort     int     `json:"agentSSHPort"`
+	AgentSSHKeyID    string  `json:"agentSSHKeyID"`
 }
 
 type BatchDeleteRequest struct {
@@ -722,6 +725,7 @@ func editServerHandler(c *gin.Context) {
 		req.AuthHeaderName, req.AuthHeaderVal,
 		req.VramGB,
 		req.AgentPort, req.AgentKey, req.AgentFingerprint,
+		req.AgentSSHUser, req.AgentSSHKeyID, req.AgentSSHPort,
 	)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
@@ -7805,10 +7809,13 @@ WantedBy=multi-user.target
 
 		// Emit credentials as structured event so the UI can pre-fill the node modal
 		credJSON, _ := json.Marshal(map[string]interface{}{
-			"server_id":   nodeID,
-			"api_key":     info.APIKey,
-			"fingerprint": info.Fingerprint,
-			"port":        info.Port,
+			"server_id":    nodeID,
+			"api_key":      info.APIKey,
+			"fingerprint":  info.Fingerprint,
+			"port":         info.Port,
+			"ssh_user":     req.SSHUser,
+			"ssh_key_id":   req.SSHKeyID,
+			"ssh_port":     req.SSHPort,
 		})
 		emit("agent-credentials", string(credJSON))
 		emit("done", "success")
