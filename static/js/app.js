@@ -9356,7 +9356,7 @@ function startBatchBenchmark() {
     showToast('A benchmark is already running', 'warning');
     return;
   }
-  const queue = getCompatibleBenchmarkModels(); // ignores untested filter — run all
+  const queue = getCompatibleBenchmarkModels({ applyUntestedFilter: true });
   if (queue.length === 0) {
     showToast('No compatible models for this benchmark type', 'warning');
     return;
