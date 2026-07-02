@@ -5,6 +5,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func collectGPUs() []GPUInfo {
@@ -112,8 +114,9 @@ func intelCard(idx int, d string) GPUInfo {
 	used  := readSysfsInt64(filepath.Join(d, "mem_info_vram_used"))
 
 	// xe driver on most kernels doesn't expose mem_info_vram_total in sysfs.
-	// Priority for total: xpu-smi → /proc/iomem (no tools, accurate) → lspci BAR.
-	// Priority for used: xpu-smi → intel_gpu_top -J (sums drm-total-local0).
+	// i915 driver (often used for Arc on older kernels) also doesn't expose it.
+	// Priority for total: xpu-smi → /proc/iomem xe regions → lspci BAR → PCI device ID table.
+	// Priority for used: xpu-smi → intel_gpu_top -J (sums drm-total-local*).
 	if total == 0 {
 		if xpuTotal, xpuUsed, ok := xpuSmiMemory(idx); ok {
 			total = xpuTotal
@@ -123,6 +126,10 @@ func intelCard(idx int, d string) GPUInfo {
 				total = iomemTotal
 			} else if barTotal := lspciBarSize(d); barTotal > 0 {
 				total = barTotal
+			} else if knownTotal := intelKnownVRAMBytes(d); knownTotal > 0 {
+				// Fallback for i915-driven Arc cards with small/disabled BARs:
+				// read PCI device ID and look up in a table of known VRAM sizes.
+				total = knownTotal
 			}
 			if gpuUsed := intelGPUTopUsed(); gpuUsed > 0 {
 				used = gpuUsed
@@ -222,17 +229,19 @@ func lspciName(devicePath string) string {
 
 // intelGPUTopUsed sums per-client LMEM (local memory = VRAM on Arc) usage
 // reported by intel_gpu_top -J. Returns 0 if the tool is unavailable or the
-// output cannot be parsed. The -s 200 sample window is the minimum stable value.
+// output cannot be parsed.
+//
+// Note: older versions of intel_gpu_top do not support the -n (count) flag, so
+// we use a context timeout and collect whatever JSON samples arrive in 2.5 s.
 func intelGPUTopUsed() int64 {
-	out, err := exec.Command("intel_gpu_top", "-J", "-s", "200", "-n", "1").Output()
-	if err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 2500*time.Millisecond)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "intel_gpu_top", "-J", "-s", "200")
+	out, _ := cmd.Output() // error expected on context cancel; ignore
+	if len(out) == 0 {
 		return 0
 	}
 
-	// The output is an array of JSON snapshots; we only need the last one.
-	// Each snapshot may contain a "clients" array with per-client memory fields:
-	//   "drm-total-local0": { "value": 1234, "unit": "MiB" }
-	// We parse loosely to avoid depending on the exact schema.
 	type memField struct {
 		Value float64 `json:"value"`
 		Unit  string  `json:"unit"`
@@ -244,34 +253,21 @@ func intelGPUTopUsed() int64 {
 		Clients []client `json:"clients"`
 	}
 
-	// intel_gpu_top -J may emit multiple JSON objects separated by newlines or
-	// as an array. Try array first, then fall back to last line.
+	// intel_gpu_top -J emits one JSON object per sample, one per line.
+	// Scan from the end to find the last fully-parseable line.
 	raw := bytes.TrimSpace(out)
-	var snapshots []snapshot
-	if err := json.Unmarshal(raw, &snapshots); err != nil {
-		// Try single object
-		var single snapshot
-		if err2 := json.Unmarshal(raw, &single); err2 != nil {
-			// Try last non-empty line as single object
-			lines := bytes.Split(raw, []byte("\n"))
-			for i := len(lines) - 1; i >= 0; i-- {
-				if len(bytes.TrimSpace(lines[i])) == 0 {
-					continue
-				}
-				if err3 := json.Unmarshal(lines[i], &single); err3 == nil {
-					snapshots = []snapshot{single}
-				}
-				break
-			}
-		} else {
-			snapshots = []snapshot{single}
+	var snap snapshot
+	lines := bytes.Split(raw, []byte("\n"))
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := bytes.TrimSpace(lines[i])
+		if len(line) == 0 {
+			continue
 		}
+		if json.Unmarshal(line, &snap) == nil {
+			break
+		}
+		snap = snapshot{} // reset on bad parse, keep scanning
 	}
-
-	if len(snapshots) == 0 {
-		return 0
-	}
-	snap := snapshots[len(snapshots)-1]
 
 	var totalKiB float64
 	for _, c := range snap.Clients {
@@ -295,6 +291,36 @@ func intelGPUTopUsed() int64 {
 		return 0
 	}
 	return int64(totalKiB * 1024)
+}
+
+// intelKnownVRAMBytes reads the PCI device ID from sysfs and returns the
+// physical VRAM capacity for known Intel discrete GPU SKUs.
+// This handles Arc cards running under the i915 driver with Resizable BAR
+// disabled — in that configuration neither xe sysfs nor /proc/iomem expose
+// the full VRAM, and lspci only shows a small aperture BAR (≤ 256 MB).
+func intelKnownVRAMBytes(devicePath string) int64 {
+	const GiB = 1024 * 1024 * 1024
+	// PCI device ID → VRAM bytes for Intel discrete GPU SKUs.
+	// Arc A-series: consumer desktop / workstation cards.
+	// Arc Pro: workstation add-in cards (A40 and A50 share device ID 0x56b1).
+	known := map[uint64]int64{
+		0x56a5: 6 * GiB,  // Arc A380 (6 GB GDDR6)
+		0x56a6: 4 * GiB,  // Arc A310 (4 GB GDDR6)
+		0x5692: 8 * GiB,  // Arc A580 (8 GB GDDR6)
+		0x5691: 8 * GiB,  // Arc A750 (8 GB GDDR6)
+		0x5690: 16 * GiB, // Arc A770 (16 GB GDDR6)
+		0x5694: 4 * GiB,  // Arc A370M (4 GB)
+		0x5693: 4 * GiB,  // Arc A530M (4 GB)
+		0x5695: 4 * GiB,  // Arc A350M (4 GB)
+		0x56b0: 4 * GiB,  // Arc Pro A30M (4 GB)
+		// 0x56b1 covers both A40 (6 GB) and A50 (8 GB) — ambiguous, skip
+	}
+	devFile := filepath.Join(devicePath, "device")
+	devID := readSysfsHex(devFile)
+	if devID == 0 {
+		return 0
+	}
+	return known[devID]
 }
 
 // intelIOmemVRAM reads /proc/iomem to find the physical VRAM size claimed by
