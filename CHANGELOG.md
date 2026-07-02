@@ -4,6 +4,13 @@ All notable changes to NEUROLLAMA are documented here.
 
 ---
 
+## [v0.2.25-beta.11] — 2026-07-02
+
+### Fixed
+- **Benchmark "Test All" with Untested filter** — batch queue was built ignoring the untested filter, so tested model names were injected into the model select as non-existent options. The select value silently stayed empty and every batch step bailed immediately with "Please select a model". Queue now always matches what's visible in the dropdown.
+
+---
+
 ## [v0.2.25-beta.10] — 2026-07-02
 
 ### Changed
