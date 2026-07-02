@@ -1316,8 +1316,8 @@ async function clearPreferences() {
   }
 }
 
-function wipeAllLocalStorage() {
-  if (!confirm('Clear ALL NEUROLLAMA local data from this browser? This cannot be undone.')) return;
+async function wipeAllLocalStorage() {
+  if (!await showConfirm('Clear ALL NEUROLLAMA local data from this browser? This cannot be undone.', 'Wipe Local Data')) return;
   // Clear DB-backed preferences
   fetch('/api/preferences', { method: 'DELETE' }).catch(() => {});
   prefs = {};
@@ -1330,7 +1330,7 @@ function wipeAllLocalStorage() {
 }
 
 async function clearAllChats() {
-  if (!confirm('Delete ALL chat history? This cannot be undone.')) return;
+  if (!await showConfirm('Delete ALL chat history? This cannot be undone.', 'Delete All Chats')) return;
   try {
     const res = await fetch('/api/chats', { method: 'DELETE' });
     if (!res.ok) throw new Error((await res.json()).error || res.statusText);
@@ -1343,7 +1343,7 @@ async function clearAllChats() {
 }
 
 async function clearAllBenchmarks() {
-  if (!confirm('Delete ALL benchmark results? This cannot be undone.')) return;
+  if (!await showConfirm('Delete ALL benchmark results? This cannot be undone.', 'Delete All Benchmarks')) return;
   try {
     const res = await fetch('/api/benchmarks', { method: 'DELETE' });
     if (!res.ok) throw new Error((await res.json()).error || res.statusText);
@@ -1369,7 +1369,7 @@ async function uploadRestore() {
     return;
   }
   const file = input.files[0];
-  if (!confirm(`Restore from "${file.name}"?\n\nThe application must be restarted to apply the restore. Current data will be replaced.`)) return;
+  if (!await showConfirm(`Restore from "${file.name}"?\n\nThe application must be restarted to apply the restore. Current data will be replaced.`)) return;
 
   const formData = new FormData();
   formData.append('file', file);
@@ -1809,6 +1809,33 @@ function populateModelDropdowns() {
 }
 
 // --- TOAST SYSTEM ---
+function showConfirm(message, title = 'Confirm') {
+  return new Promise(resolve => {
+    const modal  = document.getElementById('confirm-modal');
+    const titleEl = document.getElementById('confirm-modal-title');
+    const msgEl  = document.getElementById('confirm-modal-message');
+    const okBtn  = document.getElementById('confirm-modal-ok');
+    const cancelBtn = document.getElementById('confirm-modal-cancel');
+    if (!modal) { resolve(window.confirm(message)); return; }
+    titleEl.textContent = title;
+    msgEl.textContent   = message;
+    const done = (result) => {
+      modal.close();
+      okBtn.removeEventListener('click', onOk);
+      cancelBtn.removeEventListener('click', onCancel);
+      modal.removeEventListener('close', onClose);
+      resolve(result);
+    };
+    const onOk     = () => done(true);
+    const onCancel = () => done(false);
+    const onClose  = () => done(false);
+    okBtn.addEventListener('click', onOk);
+    cancelBtn.addEventListener('click', onCancel);
+    modal.addEventListener('close', onClose, { once: true });
+    modal.showModal();
+  });
+}
+
 function showToast(message, type = 'info') {
   const container = document.getElementById('toast-container');
   const toast = document.createElement('div');
@@ -2510,7 +2537,7 @@ async function deleteServer(id) {
   const srv = servers.find(s => s.id === id);
   if (!srv) return;
   
-  if (!confirm(`Are you sure you want to remove node '${srv.name}'?`)) return;
+  if (!await showConfirm(`Are you sure you want to remove node '${srv.name}'?`)) return;
 
   try {
     const response = await fetch(`/api/servers/${id}`, { method: 'DELETE' });
@@ -3633,7 +3660,7 @@ async function cloneModelPrompt(source) {
 
 // Single delete
 async function deleteSingleModel(name) {
-  if (!confirm(`Are you sure you want to delete model '${name}'?`)) return;
+  if (!await showConfirm(`Are you sure you want to delete model '${name}'?`)) return;
 
   try {
     const response = await fetch('/api/models/delete', {
@@ -3668,7 +3695,7 @@ async function handleBatchDelete() {
   const namesToDelete = Array.from(selectedModels);
   if (namesToDelete.length === 0) return;
 
-  if (!confirm(`Are you sure you want to delete the ${namesToDelete.length} selected models?`)) return;
+  if (!await showConfirm(`Are you sure you want to delete the ${namesToDelete.length} selected models?`)) return;
 
   try {
     showToast(`Starting batch delete of ${namesToDelete.length} models...`, 'info');
@@ -5215,7 +5242,7 @@ async function footerUnloadModel() {
   const msg = names.length === 1
     ? `Evict "${names[0]}" from VRAM?`
     : `Evict all ${names.length} loaded models from VRAM?`;
-  if (!confirm(msg)) return;
+  if (!await showConfirm(msg)) return;
   for (const name of names) {
     await unloadModel(name);
   }
@@ -5695,7 +5722,7 @@ async function switchChatSession(id) {
 async function deleteChatSession(id, event) {
   if (event) event.stopPropagation();
 
-  if (!confirm('Are you sure you want to delete this chat session?')) return;
+  if (!await showConfirm('Are you sure you want to delete this chat session?')) return;
 
   try {
     const response = await fetch(`/api/chats/${id}`, { method: 'DELETE' });
@@ -5832,7 +5859,7 @@ async function deleteActivePreset() {
   const preset = presets.find(p => p.id == presetId);
   if (!preset) return;
 
-  if (!confirm(`Are you sure you want to delete preset '${preset.name}'?`)) return;
+  if (!await showConfirm(`Are you sure you want to delete preset '${preset.name}'?`)) return;
 
   try {
     const response = await fetch(`/api/presets/${presetId}`, { method: 'DELETE' });
@@ -6576,7 +6603,7 @@ Instructions:
 3. Output the polished text followed by a brief summary of changes.`
 };
 
-function applyPromptTemplate() {
+async function applyPromptTemplate() {
   const select = document.getElementById('chat-template-select');
   if (!select) return;
   const val = select.value;
@@ -6590,7 +6617,7 @@ function applyPromptTemplate() {
 
   const currentVal = textarea.value.trim();
   if (currentVal.length > 0) {
-    if (confirm("Would you like to overwrite the current input? (Click Cancel to append instead)")) {
+    if (await showConfirm("Would you like to overwrite the current input? (Click Cancel to append instead)", "Apply Template")) {
       textarea.value = templateText;
     } else {
       textarea.value = currentVal + "\n\n" + templateText;
@@ -7543,7 +7570,7 @@ function openAgentDeployForNode(nodeId) {
 }
 
 async function unloadNodeModel(nodeId, modelName) {
-  if (!confirm(`Are you sure you want to unload "${modelName}" from VRAM on this node?`)) {
+  if (!await showConfirm(`Are you sure you want to unload "${modelName}" from VRAM on this node?`)) {
     return;
   }
   
@@ -8629,7 +8656,7 @@ async function submitAddSSHKey(e) {
 
 async function deleteSSHKey(id) {
   const key = (sshKeys || []).find(k => k.id === id);
-  if (!confirm(`Delete SSH key "${key?.label || id}"? This cannot be undone.`)) return;
+  if (!await showConfirm(`Delete SSH key "${key?.label || id}"? This cannot be undone.`)) return;
   try {
     const res = await fetch(`/api/ssh-keys/${id}`, { method: 'DELETE' });
     if (!res.ok) throw new Error((await res.json()).error);
@@ -9913,7 +9940,7 @@ async function saveBenchmarkScore() {
 }
 
 async function deleteBenchmark(id) {
-  if (!confirm('Are you sure you want to delete this benchmark record?')) return;
+  if (!await showConfirm('Are you sure you want to delete this benchmark record?')) return;
   
   try {
     const response = await fetch(`/api/benchmarks/${id}`, {
@@ -10824,7 +10851,7 @@ async function loadOptimizerHistory() {
 }
 
 async function deleteOptimizerRun(id) {
-  if (!confirm('Are you sure you want to delete this optimizer run record?')) return;
+  if (!await showConfirm('Are you sure you want to delete this optimizer run record?')) return;
   
   try {
     const response = await fetch(`/api/optimizer/runs/${id}`, {
@@ -10894,7 +10921,7 @@ async function handleRAGUpload(file) {
   // Duplicate detection: warn if same filename already indexed
   const dupDoc = (await fetch('/api/rag/documents').then(r => r.json()).catch(() => [])).find(d => d.name === file.name);
   if (dupDoc) {
-    if (!confirm(`"${file.name}" is already indexed (${dupDoc.chunk_count} chunks, collection: ${dupDoc.collection || 'Default'}).\n\nProceed? This will create a second copy — to replace, delete the existing document first.`)) {
+    if (!await showConfirm(`"${file.name}" is already indexed (${dupDoc.chunk_count} chunks, collection: ${dupDoc.collection || 'Default'}).\n\nProceed? This will create a second copy — to replace, delete the existing document first.`)) {
       if (progressDiv) progressDiv.classList.add('hidden');
       return;
     }
@@ -11052,7 +11079,7 @@ async function loadRAGDocuments() {
 }
 
 async function deleteRAGDocument(id, name) {
-  if (!confirm(`Are you sure you want to delete and un-index document "${name}"? This cannot be undone.`)) {
+  if (!await showConfirm(`Are you sure you want to delete and un-index document "${name}"? This cannot be undone.`)) {
     return;
   }
   
@@ -11958,7 +11985,7 @@ function showCodeBenchDetail(id) {
 }
 
 async function deleteCodeBenchRun(id) {
-  if (!confirm('Delete this code benchmark run?')) return;
+  if (!await showConfirm('Delete this code benchmark run?')) return;
   try {
     const res = await fetch(`/api/benchmarks/code/${id}`, { method: 'DELETE' });
     if (!res.ok) throw new Error((await res.json()).error);
@@ -12272,7 +12299,7 @@ function showHallucinationDetail(id) {
 }
 
 async function deleteHallucinationRun(id) {
-  if (!confirm('Delete this hallucination run?')) return;
+  if (!await showConfirm('Delete this hallucination run?')) return;
   try {
     const res = await fetch(`/api/benchmarks/hallucination/${id}`, { method: 'DELETE' });
     if (!res.ok) throw new Error((await res.json()).error);
