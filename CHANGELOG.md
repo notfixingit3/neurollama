@@ -4,6 +4,13 @@ All notable changes to NEUROLLAMA are documented here.
 
 ---
 
+## [v0.2.25-beta.10] — 2026-07-02
+
+### Changed
+- **Themed confirmation dialogs** — replaced all 19 native browser `confirm()` calls with a reusable async `showConfirm()` modal matching the Nord UI (dark bg, cyan title, red CONFIRM, ghost CANCEL). Eliminates OS-level chrome interruptions.
+
+---
+
 ## [v0.2.25-beta.9] — 2026-07-01
 
 ### Added
