@@ -4,6 +4,33 @@ All notable changes to NEUROLLAMA are documented here.
 
 ---
 
+## [v0.2.25-beta.9] — 2026-07-01
+
+### Added
+- **neuro-agent v0.1.1** — lightweight HTTPS metrics agent (`/health`, `/metrics`) deployed to fleet nodes via SSH. Self-signed ECDSA P256 cert (TLS 1.3), Bearer token auth, cert fingerprint pinning. Config stored in `~/.config/neuro-agent/`; managed by systemd (Linux) or launchd (macOS).
+- **Fleet card agent version display** — nodes with a connected agent show their running `neuro-agent` version in the fleet card stats grid.
+- **Agent outdated indicator** — when a node's agent version differs from the version NEUROLLAMA expects (`/healthz` now returns `agent_version`), the version label turns amber with an up-arrow badge and the satellite dish button highlights with a tooltip showing the version delta.
+- **SSH credential storage per node** — SSH user, port, and key ID used during agent deploy are persisted on the server record. The satellite dish "Update agent" button pre-fills those credentials automatically so re-deploys require only a password.
+- **Satellite dish update button on fleet cards** — quick-action button on each online node that opens the agent deploy panel scrolled into view with node and SSH fields pre-populated.
+
+### Fixed
+- **Intel Arc GPU `integrated` flag** — discrete Arc/DG1/DG2 cards were incorrectly marked as integrated when VRAM was undetectable (e.g. ReBAR disabled). Fixed with `isIntelDiscreteGPU()` name-based check.
+- **Intel Arc A380 VRAM detection** — cards using the `i915` driver (no sysfs `mem_info_vram_total`, no xe/xpu-smi support) now fall back to a PCI device ID lookup table. `0x56a5` (Arc A380) resolves to 6 GB.
+- **`intel_gpu_top` compatibility** — older installed versions don't support `-n 1`. Switched to `exec.CommandContext` with a 2.5 s timeout; last valid JSON object is extracted from the streamed output by scanning backwards.
+- **Satellite dish button workspace navigation** — button was navigating to the System workspace instead of Fleet. Fixed to use `switchWorkspace('fleet')` with double `requestAnimationFrame` to ensure the DOM is laid out before scrolling.
+
+---
+
+## [v0.2.25-beta.8] — 2026-07-01
+
+### Added
+- **neuro-agent v0.1.0** — new sub-project (`neuro-agent/`) providing a standalone HTTPS metrics agent for fleet nodes. Exposes CPU, memory, disk, GPU (NVIDIA via `nvidia-smi`, AMD via ROCm sysfs, Intel via `intel_gpu_top` + sysfs + lspci BAR), Ollama version, loaded models, and OS/arch. Single binary, zero dependencies.
+- **Fleet node agent integration** — NEUROLLAMA polls each node's `neuro-agent` on its configured port, merging hardware telemetry into fleet card display (CPU/GPU stats, VRAM bars, hostname, OS/arch).
+- **SSH agent deploy** — Fleet workspace "Deploy Agent" panel SSHes into a node, uploads the compiled `neuro-agent` binary, installs it as a systemd service (Linux) or launchd agent (macOS), and reads back the API key + TLS fingerprint automatically.
+- **Node detail modal** — clicking a fleet card opens a modal with full hardware details including per-GPU VRAM breakdown.
+
+---
+
 ## [v0.2.25-beta.7] — 2026-07-01
 
 ### Added
