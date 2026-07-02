@@ -2085,6 +2085,7 @@ async function fetchServers() {
     servers.forEach(s => { serverLastSeen[s.id] = now; });
     renderServers();
     populateOllamaUpdateNodeSelect();
+    populateAgentDeployNodeSelect();
 
     const active = servers.find(s => s.isActive);
     updateActiveServerUI(active);
@@ -7348,7 +7349,9 @@ function renderFleetGrid(nodes) {
       }
 
       // ── VRAM bar: prefer agent discrete GPU data, fall back to Ollama /api/ps ─
-      const agentGPUs = agent ? (agent.gpus || []).filter(g => !g.integrated && g.vram_total_bytes > 0) : [];
+      // Include discrete GPUs even if VRAM is unknown (0) — better to show the
+      // card name than silently hide it (VFIO passthrough hosts can't read BAR).
+      const agentGPUs = agent ? (agent.gpus || []).filter(g => !g.integrated) : [];
       let ollamaVRAMBytes = 0;
       if (node.active_models && node.active_models.length) {
         ollamaVRAMBytes = node.active_models.reduce((acc, m) => acc + (m.size_vram || 0), 0);
@@ -7357,19 +7360,24 @@ function renderFleetGrid(nodes) {
       if (agentGPUs.length > 0) {
         // Real per-GPU VRAM from neuro-agent
         vramSection = agentSection + agentGPUs.map(gpu => {
+          const hasVRAM = gpu.vram_total_bytes > 0;
           const usedGB  = gpu.vram_used_bytes / (1024 ** 3);
           const totalGB = gpu.vram_total_bytes / (1024 ** 3);
-          const pct     = Math.min(100, (usedGB / totalGB) * 100);
+          const pct     = hasVRAM ? Math.min(100, (usedGB / totalGB) * 100) : 0;
           const color   = pct > 85 ? '#bf616a' : pct > 60 ? '#ebcb8b' : '#88c0d0';
+          const label   = hasVRAM
+            ? `${usedGB.toFixed(1)} / ${totalGB.toFixed(1)} GB (${pct.toFixed(0)}%)`
+            : `<span class="text-[#4c566a]">N/A</span>`;
           return `
             <div class="flex flex-col gap-0.5 text-[9px] font-mono mt-1">
               <div class="flex justify-between text-[#4c566a]">
                 <span>VRAM <span class="text-[#4c566a]/70">${escapeHTML(gpu.name.replace(/\(.*?\)/g,'').trim())}</span></span>
-                <span style="color:${color}">${usedGB.toFixed(1)} / ${totalGB.toFixed(1)} GB (${pct.toFixed(0)}%)</span>
+                <span style="color:${hasVRAM ? color : 'inherit'}">${label}</span>
               </div>
+              ${hasVRAM ? `
               <div class="w-full bg-[#3b4252] rounded-full h-1 overflow-hidden">
                 <div class="h-1 rounded-full transition-all" style="width:${pct}%;background:${color}"></div>
-              </div>
+              </div>` : ''}
             </div>`;
         }).join('');
       } else {
@@ -8249,6 +8257,196 @@ async function startOllamaUpdate() {
   }
 }
 
+// --- AGENT DEPLOY ---
+
+let _agentDeployCreds = null; // last successful deploy credentials
+
+function populateAgentDeployNodeSelect() {
+  const sel = document.getElementById('agent-deploy-node');
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">— select node —</option>';
+  servers.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = `${s.name} (${s.url})`;
+    sel.appendChild(opt);
+  });
+  if (prev) sel.value = prev;
+}
+
+function toggleAgentDeployAuth(mode) {
+  const passRow = document.getElementById('agent-deploy-pass-row');
+  if (!passRow) return;
+  passRow.classList.toggle('hidden', mode === 'key');
+}
+
+function populateAgentDeployKeySelect() {
+  const sel = document.getElementById('agent-deploy-key-id');
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">— use agent / ~/.ssh/ keys —</option>';
+  (sshKeys || []).forEach(k => {
+    const opt = document.createElement('option');
+    opt.value = k.id;
+    opt.textContent = `${k.label} (${k.username})`;
+    sel.appendChild(opt);
+  });
+  if (prev) sel.value = prev;
+}
+
+function onAgentDeployKeyChange() {
+  const sel = document.getElementById('agent-deploy-key-id');
+  const userInput = document.getElementById('agent-deploy-ssh-user');
+  if (!sel || !userInput) return;
+  const key = (sshKeys || []).find(k => k.id === sel.value);
+  if (key && !userInput.value) userInput.value = key.username;
+}
+
+async function startAgentDeploy() {
+  const nodeId    = document.getElementById('agent-deploy-node')?.value;
+  const sshUser   = document.getElementById('agent-deploy-ssh-user')?.value?.trim();
+  const sshPort   = parseInt(document.getElementById('agent-deploy-ssh-port')?.value || '22', 10);
+  const sshPass   = document.getElementById('agent-deploy-ssh-pass')?.value || '';
+  const sudoPass  = document.getElementById('agent-deploy-sudo-pass')?.value || '';
+  const agentPort = parseInt(document.getElementById('agent-deploy-port')?.value || '11435', 10);
+  const useKey    = document.querySelector('input[name="agent-deploy-auth"]:checked')?.value === 'key';
+
+  if (!nodeId)  { showToast('Select a node first', 'warning'); return; }
+  if (!sshUser) { showToast('SSH user is required', 'warning'); return; }
+
+  const btn    = document.getElementById('agent-deploy-btn');
+  const status = document.getElementById('agent-deploy-status');
+  const output = document.getElementById('agent-deploy-output');
+  const creds  = document.getElementById('agent-deploy-creds');
+
+  if (btn) btn.disabled = true;
+  if (status) status.textContent = 'Connecting…';
+  if (creds) creds.classList.add('hidden');
+  _agentDeployCreds = null;
+  output.innerHTML = '';
+
+  const appendLine = (text, cls = '') => {
+    const div = document.createElement('div');
+    div.className = cls;
+    div.textContent = text;
+    output.appendChild(div);
+    output.scrollTop = output.scrollHeight;
+  };
+
+  try {
+    const resp = await fetch(`/api/nodes/${nodeId}/agent-deploy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ssh_user: sshUser, ssh_password: sshPass, sudo_password: sudoPass,
+        use_ssh_key: useKey, ssh_port: sshPort, agent_port: agentPort,
+        ssh_key_id: document.getElementById('agent-deploy-key-id')?.value || ''
+      })
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: resp.statusText }));
+      appendLine(`Error: ${err.error || resp.statusText}`, 'text-[#bf616a]');
+      if (status) status.textContent = 'Failed';
+      return;
+    }
+
+    const reader  = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+
+      let event = '';
+      for (const ln of lines) {
+        if (ln.startsWith('event:')) { event = ln.slice(6).trim(); continue; }
+        if (!ln.startsWith('data:')) continue;
+        const data = ln.slice(5).trim();
+        switch (event) {
+          case 'status':
+            appendLine('▶ ' + data, 'text-[#88c0d0]');
+            if (status) status.textContent = data.length > 40 ? data.slice(0, 40) + '…' : data;
+            break;
+          case 'output':
+            if (data) appendLine('  ' + data, 'text-[#d8dee9]/70');
+            break;
+          case 'error':
+            appendLine('✖ ' + data, 'text-[#bf616a] font-bold');
+            if (status) status.textContent = 'Failed';
+            break;
+          case 'agent-credentials': {
+            let c; try { c = JSON.parse(data); } catch { break; }
+            _agentDeployCreds = c;
+            document.getElementById('agent-deploy-creds-key').textContent  = c.api_key     || '';
+            document.getElementById('agent-deploy-creds-fp').textContent   = c.fingerprint || '';
+            document.getElementById('agent-deploy-creds-port').textContent = c.port        || '';
+            if (creds) {
+              creds.classList.remove('hidden');
+              creds.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+            showToast('Agent credentials ready — click "Apply to Node Settings"', 'success');
+            break;
+          }
+          case 'done':
+            if (data === 'success') {
+              appendLine('✔ Agent deployed successfully!', 'text-[#a3be8c] font-bold');
+              if (status) status.textContent = 'Done ✔';
+              showToast('NEURO-AGENT deployed successfully', 'success');
+            } else {
+              if (status) status.textContent = 'Failed ✖';
+            }
+            break;
+        }
+        event = '';
+      }
+    }
+  } catch (e) {
+    appendLine(`Error: ${e.message}`, 'text-[#bf616a]');
+    if (status) status.textContent = 'Error';
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function applyAgentCredentials() {
+  if (!_agentDeployCreds) return;
+  const { server_id, api_key, fingerprint, port } = _agentDeployCreds;
+  const srv = servers.find(s => s.id === server_id);
+  if (!srv) { showToast('Server not found', 'error'); return; }
+
+  // Build a minimal payload that only updates agent fields; all other
+  // fields carry the existing server values so nothing else changes.
+  const payload = {
+    name: srv.name, url: srv.url,
+    authType: srv.authType || 'none',
+    authToken: '', authUsername: srv.authUsername || '',
+    authPassword: '', authHeaderName: srv.authHeaderName || '',
+    authHeaderVal: '', vramGb: srv.vramGb || 0,
+    agentPort: port || 11435,
+    agentKey: api_key,
+    agentFingerprint: fingerprint,
+  };
+
+  try {
+    const resp = await fetch(`/api/servers/${server_id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) throw new Error((await resp.json().catch(()=>({}))).error || resp.statusText);
+    showToast(`Agent credentials saved to ${srv.name}`, 'success');
+    await fetchServers();
+  } catch (e) {
+    showToast(`Failed to save credentials: ${e.message}`, 'error');
+  }
+}
+
 // --- SSH KEY STORE ---
 
 let sshKeys = []; // cached list (metadata only)
@@ -8260,6 +8458,7 @@ async function fetchSSHKeys() {
     sshKeys = await res.json();
     renderSSHKeys();
     populateOllamaUpdateKeySelect();
+    populateAgentDeployKeySelect();
   } catch (e) {
     if (list) list.innerHTML = `<span class="text-[#bf616a]">Failed to load SSH keys: ${escapeHTML(e.message)}</span>`;
   }

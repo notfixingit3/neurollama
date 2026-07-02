@@ -302,8 +302,12 @@ func EditServer(id, name, url, authType, authToken, authUsername, authPassword, 
 			servers[i].AuthHeaderName   = authHeaderName
 			servers[i].AuthHeaderVal    = authHeaderVal
 			servers[i].AgentPort        = agentPort
-			servers[i].AgentKey         = agentKey
-			servers[i].AgentFingerprint = agentFingerprint
+			if agentKey != "" {
+				servers[i].AgentKey = agentKey
+			}
+			if agentFingerprint != "" {
+				servers[i].AgentFingerprint = agentFingerprint
+			}
 			if err := SaveConfigInternal(); err != nil {
 				return Server{}, err
 			}

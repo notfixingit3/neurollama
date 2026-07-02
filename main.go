@@ -42,7 +42,7 @@ import (
 )
 
 // appVersion is the default for local dev; CI overrides via -ldflags "-X main.appVersion=<tag>"
-var appVersion = "v0.2.25-beta.7"
+var appVersion = "v0.2.25-beta.9"
 
 // releaseType is "dev" by default; CI overrides via -ldflags "-X main.releaseType=pre-release|stable"
 var releaseType = "dev"
@@ -423,6 +423,7 @@ func main() {
 		api.POST("/nodes/:id/refresh", refreshNodeHandler)
 		api.POST("/nodes/:id/unload", unloadNodeModelHandler)
 		api.POST("/nodes/:id/agent-test", testNodeAgentHandler)
+		api.POST("/nodes/:id/agent-deploy", agentDeploySSEHandler)
 
 		// Telemetry & Scheduler endpoints
 		api.GET("/settings", getSettingsHandler)
@@ -7501,6 +7502,373 @@ type OllamaUpdateRequest struct {
 	UseSSHKey   bool   `json:"use_ssh_key"`
 	SSHPort     int    `json:"ssh_port"`
 	SSHKeyID    string `json:"ssh_key_id"` // stored DB key; takes priority over agent/files
+}
+
+// ── neuro-agent SSH deploy ────────────────────────────────────────────────────
+
+type AgentDeployRequest struct {
+	SSHUser     string `json:"ssh_user"`
+	SSHPassword string `json:"ssh_password"`
+	SudoPass    string `json:"sudo_password"`
+	UseSSHKey   bool   `json:"use_ssh_key"`
+	SSHPort     int    `json:"ssh_port"`
+	SSHKeyID    string `json:"ssh_key_id"`
+	AgentPort   int    `json:"agent_port"` // defaults to 11435
+}
+
+func agentDeploySSEHandler(c *gin.Context) {
+	nodeID := c.Param("id")
+	var req AgentDeployRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	if req.SSHUser == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ssh_user is required"})
+		return
+	}
+	if req.AgentPort == 0 {
+		req.AgentPort = 11435
+	}
+
+	var targetSrv *Server
+	for _, s := range GetServers() {
+		s := s
+		if s.ID == nodeID {
+			targetSrv = &s
+			break
+		}
+	}
+	if targetSrv == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
+		return
+	}
+
+	parsedURL, err := url.Parse(targetSrv.URL)
+	if err != nil || parsedURL.Hostname() == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot parse hostname from server URL"})
+		return
+	}
+	host := parsedURL.Hostname()
+	sshPort := 22
+	if req.SSHPort > 0 {
+		sshPort = req.SSHPort
+	}
+
+	authMethods := buildSSHAuthMethods(req.SSHKeyID, req.SSHPassword, req.UseSSHKey)
+	if len(authMethods) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no SSH auth method available"})
+		return
+	}
+
+	sshCfg := &gossh.ClientConfig{
+		User:            req.SSHUser,
+		Auth:            authMethods,
+		HostKeyCallback: gossh.InsecureIgnoreHostKey(), // #nosec G106
+		Timeout:         15 * time.Second,
+	}
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Transfer-Encoding", "chunked")
+
+	c.Stream(func(w io.Writer) bool {
+		emit := func(event, msg string) { c.SSEvent(event, msg); c.Writer.Flush() }
+		line := func(msg string) { emit("output", msg) }
+		fail := func(msg string) { emit("error", msg); emit("done", "failed") }
+		sudo := func(cmd string) string {
+			if req.SudoPass != "" {
+				return fmt.Sprintf("echo %s | sudo -S sh -c %s", shellEscapeSingle(req.SudoPass), shellEscapeSingle(cmd))
+			}
+			return "sudo sh -c " + shellEscapeSingle(cmd)
+		}
+
+		// ── Connect ──────────────────────────────────────────────────────────
+		emit("status", fmt.Sprintf("Connecting to %s@%s:%d…", req.SSHUser, host, sshPort))
+		sshClient, connErr := gossh.Dial("tcp", fmt.Sprintf("%s:%d", host, sshPort), sshCfg)
+		if connErr != nil {
+			fail(fmt.Sprintf("SSH connection failed: %v", connErr))
+			return false
+		}
+		defer sshClient.Close()
+
+		// ── Detect OS / arch ─────────────────────────────────────────────────
+		osStr, _   := runSSHCmd(sshClient, "uname -s")
+		archRaw, _ := runSSHCmd(sshClient, "uname -m")
+		osStr = strings.ToLower(strings.TrimSpace(osStr))
+		var goarch string
+		switch strings.TrimSpace(archRaw) {
+		case "x86_64":
+			goarch = "amd64"
+		case "aarch64", "arm64":
+			goarch = "arm64"
+		default:
+			fail(fmt.Sprintf("unsupported arch: %s", archRaw))
+			return false
+		}
+		var goos string
+		switch {
+		case strings.Contains(osStr, "linux"):
+			goos = "linux"
+		case strings.Contains(osStr, "darwin"):
+			goos = "darwin"
+		default:
+			fail(fmt.Sprintf("unsupported OS: %s", osStr))
+			return false
+		}
+		line(fmt.Sprintf("✔ Detected %s/%s", goos, goarch))
+
+		// ── Cross-compile ─────────────────────────────────────────────────────
+		binPath := filepath.Join(os.TempDir(), fmt.Sprintf("neuro-agent-%s-%s", goos, goarch))
+		line(fmt.Sprintf("Building neuro-agent for %s/%s…", goos, goarch))
+		buildCmd := exec.Command("go", "build", "-o", binPath, "./neuro-agent/")
+		buildCmd.Env = append(os.Environ(),
+			"GOOS="+goos,
+			"GOARCH="+goarch,
+			"CGO_ENABLED=0",
+		)
+		if out, buildErr := buildCmd.CombinedOutput(); buildErr != nil {
+			fail(fmt.Sprintf("build failed: %s", strings.TrimSpace(string(out))))
+			return false
+		}
+		defer os.Remove(binPath)
+		line("✔ Binary built")
+
+		// ── Upload binary via SSH stdin pipe ──────────────────────────────────
+		line("Uploading binary…")
+		binData, readErr := os.ReadFile(binPath) // #nosec G304 -- path built from os.TempDir() + fixed filename
+		if readErr != nil {
+			fail(fmt.Sprintf("cannot read binary: %v", readErr))
+			return false
+		}
+		sess, sessErr := sshClient.NewSession()
+		if sessErr != nil {
+			fail(fmt.Sprintf("SSH session: %v", sessErr))
+			return false
+		}
+		sess.Stdin = bytes.NewReader(binData)
+		if uploadErr := sess.Run("cat > /tmp/neuro-agent && chmod +x /tmp/neuro-agent"); uploadErr != nil {
+			sess.Close()
+			fail(fmt.Sprintf("upload failed: %v", uploadErr))
+			return false
+		}
+		sess.Close()
+		line(fmt.Sprintf("✔ Uploaded (%d KB)", len(binData)/1024))
+
+		// ── Install binary ────────────────────────────────────────────────────
+		installCmd := sudo("mv /tmp/neuro-agent /usr/local/bin/neuro-agent && chmod 755 /usr/local/bin/neuro-agent")
+		if _, installErr := runSSHCmd(sshClient, installCmd); installErr != nil {
+			fail(fmt.Sprintf("install failed: %v", installErr))
+			return false
+		}
+		line("✔ Installed to /usr/local/bin/neuro-agent")
+
+		// ── Install + start service ───────────────────────────────────────────
+		portStr := strconv.Itoa(req.AgentPort)
+		switch goos {
+		case "linux":
+			unitContent := fmt.Sprintf(`[Unit]
+Description=NEUROLLAMA Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%s
+ExecStart=/usr/local/bin/neuro-agent --port %s
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+`, req.SSHUser, portStr)
+			unitB64 := base64.StdEncoding.EncodeToString([]byte(unitContent))
+			writeUnit := sudo(fmt.Sprintf("echo %s | base64 -d > /etc/systemd/system/neuro-agent.service", unitB64))
+			if _, unitErr := runSSHCmd(sshClient, writeUnit); unitErr != nil {
+				fail(fmt.Sprintf("service file write failed: %v", unitErr))
+				return false
+			}
+			enableCmd := sudo("systemctl daemon-reload && systemctl enable neuro-agent && systemctl restart neuro-agent")
+			if out, startErr := runSSHCmd(sshClient, enableCmd); startErr != nil {
+				fail(fmt.Sprintf("service start failed: %s", out))
+				return false
+			}
+			line("✔ systemd service enabled and started")
+
+		case "darwin":
+			// Get the real HOME so we can embed it in the plist and use full paths.
+			homeDir, homeErr := runSSHCmd(sshClient, "echo $HOME")
+			if homeErr != nil || strings.TrimSpace(homeDir) == "" {
+				fail("cannot determine HOME directory on remote host")
+				return false
+			}
+			homeDir = strings.TrimSpace(homeDir)
+
+			// Strip Gatekeeper quarantine so launchd can execute the unsigned binary.
+			_, _ = runSSHCmd(sshClient, "xattr -d com.apple.quarantine /usr/local/bin/neuro-agent 2>/dev/null")
+
+			plistLabel   := "com.neurollama.agent"
+			plistFullDir := homeDir + "/Library/LaunchAgents"
+			plistPath    := plistFullDir + "/" + plistLabel + ".plist"
+			plistContent := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>%s</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/neuro-agent</string>
+    <string>--port</string><string>%s</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key><string>%s</string>
+    <key>PATH</key><string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/neuro-agent.log</string>
+  <key>StandardErrorPath</key><string>/tmp/neuro-agent.log</string>
+</dict>
+</plist>
+`, plistLabel, portStr, homeDir)
+			plistB64  := base64.StdEncoding.EncodeToString([]byte(plistContent))
+			writePlist := fmt.Sprintf("mkdir -p %s && echo %s | base64 -d > %s",
+				plistFullDir, plistB64, plistPath)
+			if _, plistErr := runSSHCmd(sshClient, writePlist); plistErr != nil {
+				fail(fmt.Sprintf("plist write failed: %v", plistErr))
+				return false
+			}
+			// Try bootstrap/bootout (modern, requires active GUI session).
+			uid, _ := runSSHCmd(sshClient, "id -u")
+			uid = strings.TrimSpace(uid)
+			domain := "gui/" + uid
+			_, _ = runSSHCmd(sshClient, fmt.Sprintf(
+				"launchctl bootout %s %s 2>/dev/null; launchctl bootstrap %s %s 2>/dev/null",
+				domain, plistPath, domain, plistPath))
+
+			// Wait briefly then check if launchd actually started the process.
+			time.Sleep(2 * time.Second)
+			launchctlOut, _ := runSSHCmd(sshClient, fmt.Sprintf("launchctl list %s 2>/dev/null", plistLabel))
+			agentRunning := strings.Contains(launchctlOut, `"PID"`)
+
+			if !agentRunning {
+				// launchd bootstrap didn't start the process (SSH session may not have
+				// access to the GUI domain). Run the agent directly in the background;
+				// the LaunchAgent plist still provides persistence at next login.
+				line("⚠ LaunchAgent not started via launchd — running agent directly…")
+				_, _ = runSSHCmd(sshClient, fmt.Sprintf(
+					"pkill neuro-agent 2>/dev/null; nohup /usr/local/bin/neuro-agent --port %s >>/tmp/neuro-agent.log 2>&1 &",
+					portStr))
+			}
+			line("✔ LaunchAgent installed; agent running")
+		}
+
+		// ── Wait for agent to initialise its config ───────────────────────────
+		line("Waiting for agent to initialise…")
+		var agentInfoJSON string
+		cfgPath := "~/.config/neuro-agent/info.json"
+		for i := 0; i < 15; i++ {
+			time.Sleep(time.Second)
+			if out, err := runSSHCmd(sshClient, "cat "+cfgPath+" 2>/dev/null"); err == nil && strings.Contains(out, "api_key") {
+				agentInfoJSON = out
+				break
+			}
+		}
+		if agentInfoJSON == "" {
+			logTail, _ := runSSHCmd(sshClient, "tail -20 /tmp/neuro-agent.log 2>/dev/null")
+			if strings.TrimSpace(logTail) != "" {
+				for _, l := range strings.Split(strings.TrimSpace(logTail), "\n") {
+					line("  " + l)
+				}
+			}
+			fail("agent started but info.json not found — see log lines above")
+			return false
+		}
+
+		// ── Parse and emit credentials ────────────────────────────────────────
+		var info struct {
+			APIKey      string `json:"api_key"`
+			Fingerprint string `json:"fingerprint"`
+			Port        int    `json:"port"`
+		}
+		if jsonErr := json.Unmarshal([]byte(agentInfoJSON), &info); jsonErr != nil {
+			fail(fmt.Sprintf("cannot parse agent info: %v", jsonErr))
+			return false
+		}
+
+		line("✔ Agent running")
+		line(fmt.Sprintf("  API Key:         %s", info.APIKey))
+		line(fmt.Sprintf("  TLS Fingerprint: %s", info.Fingerprint))
+		line(fmt.Sprintf("  Port:            %d", info.Port))
+
+		// Emit credentials as structured event so the UI can pre-fill the node modal
+		credJSON, _ := json.Marshal(map[string]interface{}{
+			"server_id":   nodeID,
+			"api_key":     info.APIKey,
+			"fingerprint": info.Fingerprint,
+			"port":        info.Port,
+		})
+		emit("agent-credentials", string(credJSON))
+		emit("done", "success")
+		return false
+	})
+}
+
+// buildSSHAuthMethods assembles SSH auth methods in priority order (stored key,
+// agent, ~/.ssh/ files, DB keys, password). Shared by deploy and update flows.
+func buildSSHAuthMethods(keyID, password string, useKey bool) []gossh.AuthMethod {
+	var methods []gossh.AuthMethod
+
+	if keyID != "" {
+		if pem, err := GetSSHKeyPEMByID(keyID); err == nil {
+			if signer, err := gossh.ParsePrivateKey(pem); err == nil {
+				methods = append(methods, gossh.PublicKeys(signer))
+			}
+		}
+	}
+
+	if useKey || password == "" {
+		if sock := os.Getenv("SSH_AUTH_SOCK"); sock != "" {
+			if conn, err := net.Dial("unix", sock); err == nil { // #nosec G704
+				methods = append(methods, gossh.PublicKeysCallback(sshagent.NewClient(conn).Signers))
+			}
+		}
+		home, _ := os.UserHomeDir()
+		for _, kf := range []string{
+			filepath.Join(home, ".ssh", "id_ed25519"),
+			filepath.Join(home, ".ssh", "id_ecdsa"),
+			filepath.Join(home, ".ssh", "id_rsa"),
+		} {
+			if raw, err := os.ReadFile(kf); err == nil { // #nosec G304
+				if signer, err := gossh.ParsePrivateKey(raw); err == nil {
+					methods = append(methods, gossh.PublicKeys(signer))
+				}
+			}
+		}
+		if keyID == "" {
+			if pems, err := GetSSHKeyPEMs(); err == nil {
+				for _, pem := range pems {
+					if signer, err := gossh.ParsePrivateKey(pem); err == nil {
+						methods = append(methods, gossh.PublicKeys(signer))
+					}
+				}
+			}
+		}
+	}
+
+	if password != "" {
+		methods = append(methods, gossh.Password(password))
+		methods = append(methods, gossh.KeyboardInteractive(func(_, _ string, questions []string, _ []bool) ([]string, error) {
+			ans := make([]string, len(questions))
+			for i := range ans {
+				ans[i] = password
+			}
+			return ans, nil
+		}))
+	}
+	return methods
 }
 
 // shellEscapeSingle wraps s in single quotes, escaping any embedded single quotes.

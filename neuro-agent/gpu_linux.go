@@ -5,6 +5,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -110,15 +111,27 @@ func intelCard(idx int, d string) GPUInfo {
 	total := readSysfsInt64(filepath.Join(d, "mem_info_vram_total"))
 	used  := readSysfsInt64(filepath.Join(d, "mem_info_vram_used"))
 
-	// If sysfs has no VRAM data (i915 integrated), try xpu-smi for Arc cards.
+	// xe driver on most kernels doesn't expose mem_info_vram_total in sysfs.
+	// Priority for total: xpu-smi → /proc/iomem (no tools, accurate) → lspci BAR.
+	// Priority for used: xpu-smi → intel_gpu_top -J (sums drm-total-local0).
 	if total == 0 {
 		if xpuTotal, xpuUsed, ok := xpuSmiMemory(idx); ok {
 			total = xpuTotal
 			used  = xpuUsed
+		} else {
+			if iomemTotal := intelIOmemVRAM(d); iomemTotal > 0 {
+				total = iomemTotal
+			} else if barTotal := lspciBarSize(d); barTotal > 0 {
+				total = barTotal
+			}
+			if gpuUsed := intelGPUTopUsed(); gpuUsed > 0 {
+				used = gpuUsed
+			}
 		}
 	}
 
-	integrated := total == 0
+	// Arc / DG1 / DG2 are discrete even when VRAM is undetectable (e.g. VFIO passthrough).
+	integrated := !isIntelDiscreteGPU(name) && total == 0
 	return GPUInfo{
 		Index:          idx,
 		Vendor:         "intel",
@@ -128,6 +141,17 @@ func intelCard(idx int, d string) GPUInfo {
 		VRAMFreeBytes:  total - used,
 		Integrated:     integrated,
 	}
+}
+
+// isIntelDiscreteGPU returns true for Intel discrete GPU product names.
+// Used to avoid misclassifying passthrough/VFIO cards with undetectable VRAM as integrated.
+func isIntelDiscreteGPU(name string) bool {
+	lower := strings.ToLower(name)
+	return strings.Contains(lower, "arc") ||
+		strings.Contains(lower, " dg1") ||
+		strings.Contains(lower, " dg2") ||
+		strings.Contains(lower, "iris xe max") ||
+		strings.Contains(lower, "iris pro")
 }
 
 // xpuSmiMemory tries to read VRAM for a device index from xpu-smi.
@@ -194,6 +218,185 @@ func lspciName(devicePath string) string {
 		}
 	}
 	return ""
+}
+
+// intelGPUTopUsed sums per-client LMEM (local memory = VRAM on Arc) usage
+// reported by intel_gpu_top -J. Returns 0 if the tool is unavailable or the
+// output cannot be parsed. The -s 200 sample window is the minimum stable value.
+func intelGPUTopUsed() int64 {
+	out, err := exec.Command("intel_gpu_top", "-J", "-s", "200", "-n", "1").Output()
+	if err != nil {
+		return 0
+	}
+
+	// The output is an array of JSON snapshots; we only need the last one.
+	// Each snapshot may contain a "clients" array with per-client memory fields:
+	//   "drm-total-local0": { "value": 1234, "unit": "MiB" }
+	// We parse loosely to avoid depending on the exact schema.
+	type memField struct {
+		Value float64 `json:"value"`
+		Unit  string  `json:"unit"`
+	}
+	type client struct {
+		Memory map[string]memField `json:"memory"`
+	}
+	type snapshot struct {
+		Clients []client `json:"clients"`
+	}
+
+	// intel_gpu_top -J may emit multiple JSON objects separated by newlines or
+	// as an array. Try array first, then fall back to last line.
+	raw := bytes.TrimSpace(out)
+	var snapshots []snapshot
+	if err := json.Unmarshal(raw, &snapshots); err != nil {
+		// Try single object
+		var single snapshot
+		if err2 := json.Unmarshal(raw, &single); err2 != nil {
+			// Try last non-empty line as single object
+			lines := bytes.Split(raw, []byte("\n"))
+			for i := len(lines) - 1; i >= 0; i-- {
+				if len(bytes.TrimSpace(lines[i])) == 0 {
+					continue
+				}
+				if err3 := json.Unmarshal(lines[i], &single); err3 == nil {
+					snapshots = []snapshot{single}
+				}
+				break
+			}
+		} else {
+			snapshots = []snapshot{single}
+		}
+	}
+
+	if len(snapshots) == 0 {
+		return 0
+	}
+	snap := snapshots[len(snapshots)-1]
+
+	var totalKiB float64
+	for _, c := range snap.Clients {
+		for key, f := range c.Memory {
+			if !strings.Contains(key, "local") {
+				continue
+			}
+			val := f.Value
+			switch strings.ToLower(f.Unit) {
+			case "mib", "mb":
+				val *= 1024
+			case "gib", "gb":
+				val *= 1024 * 1024
+			case "bytes", "b":
+				val /= 1024
+			}
+			totalKiB += val
+		}
+	}
+	if totalKiB <= 0 {
+		return 0
+	}
+	return int64(totalKiB * 1024)
+}
+
+// intelIOmemVRAM reads /proc/iomem to find the physical VRAM size claimed by
+// the xe driver for a given drm device. This is more accurate than the PCI BAR
+// size, which rounds up to the next power of 2 (e.g. 8 GiB BAR for a 6 GiB
+// Arc A380). The xe driver labels its region as "xe [vram region N]" or
+// "xe [lmem region N]" and only claims the bytes actually backed by DRAM.
+func intelIOmemVRAM(devicePath string) int64 {
+	real, err := filepath.EvalSymlinks(devicePath)
+	if err != nil {
+		return 0
+	}
+	pciAddr := strings.ToLower(filepath.Base(real))
+
+	data, err := os.ReadFile("/proc/iomem")
+	if err != nil {
+		return 0
+	}
+
+	devIndent := -1
+	for _, line := range strings.Split(string(data), "\n") {
+		if line == "" {
+			continue
+		}
+		indent := len(line) - len(strings.TrimLeft(line, " "))
+
+		// Leaving the device's scope
+		if devIndent >= 0 && indent <= devIndent {
+			devIndent = -1
+		}
+
+		// Found our PCI device line (may appear more than once; keep the last)
+		if strings.Contains(strings.ToLower(line), pciAddr) &&
+			!strings.Contains(strings.ToLower(line), "xe [") {
+			devIndent = indent
+			continue
+		}
+
+		// Child lines within our device: look for xe VRAM region labels
+		if devIndent >= 0 && indent > devIndent {
+			lower := strings.ToLower(line)
+			if strings.Contains(lower, "xe [") || strings.Contains(lower, "i915 [") {
+				parts := strings.SplitN(strings.TrimSpace(line), " : ", 2)
+				addrs := strings.SplitN(parts[0], "-", 2)
+				if len(addrs) == 2 {
+					start, e1 := strconv.ParseUint(addrs[0], 16, 64)
+					end,   e2 := strconv.ParseUint(addrs[1], 16, 64)
+					const minVRAM = 512 * 1024 * 1024
+					size := end - start + 1
+					if e1 == nil && e2 == nil && size >= minVRAM {
+						return int64(size)
+					}
+				}
+			}
+		}
+	}
+	return 0
+}
+
+// lspciBarSize reads the largest prefetchable PCI BAR for a drm device via
+// "lspci -v". For discrete GPUs this corresponds to the VRAM aperture size.
+// Returns 0 if lspci is unavailable or the BAR cannot be determined.
+func lspciBarSize(devicePath string) int64 {
+	real, err := filepath.EvalSymlinks(devicePath)
+	if err != nil {
+		return 0
+	}
+	pci := filepath.Base(real)
+	out, err := exec.Command("lspci", "-v", "-s", pci).Output()
+	if err != nil {
+		return 0
+	}
+	var largest int64
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.Contains(line, "prefetchable") || !strings.Contains(line, "size=") {
+			continue
+		}
+		idx := strings.LastIndex(line, "size=")
+		if idx < 0 {
+			continue
+		}
+		sizeStr := strings.TrimSuffix(line[idx+5:], "]")
+		var bytes int64
+		switch {
+		case strings.HasSuffix(sizeStr, "G"):
+			v, _ := strconv.ParseInt(strings.TrimSuffix(sizeStr, "G"), 10, 64)
+			bytes = v * 1024 * 1024 * 1024
+		case strings.HasSuffix(sizeStr, "M"):
+			v, _ := strconv.ParseInt(strings.TrimSuffix(sizeStr, "M"), 10, 64)
+			bytes = v * 1024 * 1024
+		case strings.HasSuffix(sizeStr, "K"):
+			v, _ := strconv.ParseInt(strings.TrimSuffix(sizeStr, "K"), 10, 64)
+			bytes = v * 1024
+		}
+		// Only count BARs >= 512 MiB — smaller BARs are control registers, not VRAM.
+		if bytes >= 512*1024*1024 && bytes > largest {
+			largest = bytes
+		}
+	}
+	return largest
 }
 
 // splitLspci splits lspci -mm output (fields are space-separated or quoted).

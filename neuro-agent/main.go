@@ -43,6 +43,16 @@ func main() {
 	keyFile  := filepath.Join(dir, "key.pem")
 	fp := ensureCert(certFile, keyFile)
 
+	// Write info.json so automated deploy can read key + fingerprint back
+	type agentInfo struct {
+		APIKey      string `json:"api_key"`
+		Fingerprint string `json:"fingerprint"`
+		Port        int    `json:"port"`
+	}
+	if infoData, err := json.Marshal(agentInfo{APIKey: apiKey, Fingerprint: fp, Port: *port}); err == nil {
+		os.WriteFile(filepath.Join(dir, "info.json"), infoData, 0600)
+	}
+
 	fmt.Printf("neuro-agent %s\n", agentVersion)
 	fmt.Printf("Listening:       https://0.0.0.0:%d\n", *port)
 	fmt.Printf("API Key:         %s\n", apiKey)

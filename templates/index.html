@@ -2739,6 +2739,129 @@
             </div>
           </div>
 
+          <!-- Deploy NEURO-AGENT -->
+          <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col">
+            <div class="mb-3 pb-2 border-b border-[#4c566a]/40">
+              <h2 class="text-sm font-tech font-bold uppercase tracking-wider text-[#88c0d0]">
+                <i class="fa-solid fa-satellite-dish mr-2"></i>Deploy NEURO-AGENT
+              </h2>
+              <p class="text-[10px] text-[#4c566a] mt-1">
+                Cross-compile and install the <code class="text-[#a3be8c]">neuro-agent</code> binary on a remote node via SSH.
+                Automatically registers as a systemd service (Linux) or LaunchAgent (macOS) and returns the API key and TLS fingerprint to pre-fill node settings.
+              </p>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <!-- Left: form -->
+              <div class="space-y-3">
+                <!-- Node selector -->
+                <div class="form-control">
+                  <label class="label py-1"><span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">Node</span></label>
+                  <select id="agent-deploy-node" class="select select-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                    <option value="">— select node —</option>
+                  </select>
+                </div>
+
+                <!-- Stored key selector -->
+                <div class="form-control">
+                  <label class="label py-1"><span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">SSH Key <span class="normal-case text-[#4c566a]">(optional — overrides agent/files)</span></span></label>
+                  <select id="agent-deploy-key-id" onchange="onAgentDeployKeyChange()"
+                          class="select select-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full">
+                    <option value="">— use agent / ~/.ssh/ keys —</option>
+                  </select>
+                </div>
+
+                <!-- SSH User + Port row -->
+                <div class="flex gap-2">
+                  <div class="form-control flex-1">
+                    <label class="label py-1"><span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">SSH User</span></label>
+                    <input id="agent-deploy-ssh-user" type="text" placeholder="e.g. ubuntu" autocomplete="off"
+                           class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                  </div>
+                  <div class="form-control w-24">
+                    <label class="label py-1"><span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">SSH Port</span></label>
+                    <input id="agent-deploy-ssh-port" type="number" placeholder="22" value="22" min="1" max="65535"
+                           class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                  </div>
+                </div>
+
+                <!-- Auth method toggle -->
+                <div class="flex items-center gap-3">
+                  <span class="text-[10px] font-mono text-[#4c566a] uppercase">Auth</span>
+                  <label class="flex items-center gap-1.5 cursor-pointer">
+                    <input type="radio" name="agent-deploy-auth" value="password" checked
+                           onchange="toggleAgentDeployAuth('password')" class="radio radio-xs radio-info" />
+                    <span class="text-[10px] font-mono text-[#d8dee9]">Password</span>
+                  </label>
+                  <label class="flex items-center gap-1.5 cursor-pointer">
+                    <input type="radio" name="agent-deploy-auth" value="key"
+                           onchange="toggleAgentDeployAuth('key')" class="radio radio-xs radio-info" />
+                    <span class="text-[10px] font-mono text-[#d8dee9]">SSH Key <span class="text-[#4c566a]">(~/.ssh/)</span></span>
+                  </label>
+                </div>
+
+                <!-- SSH Password (hidden when using key) -->
+                <div id="agent-deploy-pass-row" class="form-control">
+                  <label class="label py-1"><span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">SSH Password</span></label>
+                  <input id="agent-deploy-ssh-pass" type="password" placeholder="SSH password" autocomplete="new-password"
+                         class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                </div>
+
+                <!-- Sudo Password -->
+                <div class="form-control">
+                  <label class="label py-1"><span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">Sudo Password <span class="text-[#4c566a] normal-case">(if required)</span></span></label>
+                  <input id="agent-deploy-sudo-pass" type="password" placeholder="sudo password" autocomplete="new-password"
+                         class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-full" />
+                </div>
+
+                <!-- Agent port -->
+                <div class="form-control">
+                  <label class="label py-1"><span class="label-text text-[10px] font-mono text-[#4c566a] uppercase">Agent Port <span class="text-[#4c566a] normal-case">(default 11435)</span></span></label>
+                  <input id="agent-deploy-port" type="number" placeholder="11435" value="11435" min="1" max="65535"
+                         class="input input-xs bg-[#2e3440]/60 border-[#4c566a] font-mono text-xs focus:border-[#88c0d0] focus:outline-none w-24" />
+                </div>
+
+                <!-- Action -->
+                <div class="flex items-center gap-2 pt-1">
+                  <button id="agent-deploy-btn" onclick="startAgentDeploy()"
+                          class="btn btn-xs btn-info font-tech uppercase tracking-wide px-4">
+                    <i class="fa-solid fa-satellite-dish mr-1.5"></i>Deploy Agent
+                  </button>
+                  <span id="agent-deploy-status" class="text-[10px] font-mono text-[#4c566a]"></span>
+                </div>
+
+                <!-- Credentials result (shown after successful deploy) -->
+                <div id="agent-deploy-creds" class="hidden mt-2 p-3 rounded-lg bg-[#161820] border border-[#a3be8c]/40 space-y-1.5">
+                  <div class="text-[9px] font-mono text-[#a3be8c] uppercase tracking-wide mb-1">Agent credentials — copy to node settings</div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-[9px] font-mono text-[#4c566a] uppercase w-20 shrink-0">API Key</span>
+                    <code id="agent-deploy-creds-key" class="text-[10px] font-mono text-[#d8dee9] break-all flex-1"></code>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-[9px] font-mono text-[#4c566a] uppercase w-20 shrink-0">Fingerprint</span>
+                    <code id="agent-deploy-creds-fp" class="text-[10px] font-mono text-[#d8dee9] break-all flex-1"></code>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-[9px] font-mono text-[#4c566a] uppercase w-20 shrink-0">Port</span>
+                    <code id="agent-deploy-creds-port" class="text-[10px] font-mono text-[#d8dee9]"></code>
+                  </div>
+                  <button onclick="applyAgentCredentials()" class="btn btn-xs btn-success font-tech uppercase tracking-wide mt-2 w-full">
+                    <i class="fa-solid fa-floppy-disk mr-1.5"></i>Apply to Node Settings
+                  </button>
+                </div>
+              </div>
+
+              <!-- Right: output terminal -->
+              <div class="flex flex-col">
+                <span class="text-[9px] font-mono text-[#4c566a] uppercase mb-1">Output</span>
+                <div id="agent-deploy-output"
+                     class="flex-1 min-h-[220px] bg-[#161820] border border-[#4c566a]/40 rounded-lg p-2 text-[10px] font-mono text-[#e5e9f0] space-y-0.5 overflow-y-auto scrollbar-thin">
+                  <div class="text-[#4c566a] italic">Deploy an agent to see output here.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Update Ollama -->
           <div class="tech-panel tech-header-accent rounded-xl p-4 flex flex-col">
             <div class="mb-3 pb-2 border-b border-[#4c566a]/40">
