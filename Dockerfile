@@ -11,10 +11,10 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 # Copy source code files
-COPY db.go db_sqlite.go main.go ollama.go ./
+COPY . .
 
 # Build statically linked binary
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o neurollama-bin main.go db.go db_sqlite.go ollama.go
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o neurollama-bin .
 
 # Stage 2: Runtime image
 FROM alpine:latest

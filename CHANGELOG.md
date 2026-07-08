@@ -4,6 +4,13 @@ All notable changes to NEUROLLAMA are documented here.
 
 ---
 
+## [v0.2.25-beta.14] — 2026-07-07
+
+### Fixed
+- **Docker Image Build Compilation** — corrected a critical issue in [Dockerfile](file:///Users/house/Documents/gitlab/ollama-manager/Dockerfile) where source files were explicitly listed instead of compiled as a directory package (`.`), which previously broke the Docker build after splitting `main.go`. Added `.dockerignore` to exclude bloated dev assets from the build context.
+
+---
+
 ## [v0.2.25-beta.13] — 2026-07-07
 
 ### Added

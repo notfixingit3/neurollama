@@ -1,0 +1,11 @@
+.git
+.DS_Store
+data/
+neurollama
+tailwindcss
+*.db
+*.key
+*.pem
+*.log
+test-*.pdf
+/neuro-agent/bin/
