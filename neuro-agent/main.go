@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -22,8 +23,36 @@ var agentVersion = "v0.1.1"
 var apiKey string
 
 func main() {
-	port := flag.Int("port", defaultPort, "Port to listen on")
+	// Try parsing NEURO_AGENT_PORT env var first
+	envPort := os.Getenv("NEURO_AGENT_PORT")
+	defaultP := defaultPort
+	if envPort != "" {
+		if p, err := strconv.Atoi(envPort); err == nil && p > 0 && p < 65536 {
+			defaultP = p
+		}
+	}
+
+	port := flag.Int("port", defaultP, "Port to listen on")
+	versionFlag := flag.Bool("version", false, "Print version and exit")
+
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: neuro-agent [options]\n\n")
+		fmt.Fprintf(os.Stderr, "neuro-agent is a lightweight, zero-dependency metrics daemon for Neurollama nodes.\n")
+		fmt.Fprintf(os.Stderr, "It gathers CPU, VRAM, RAM, disk, and GPU telemetry and exposes them securely over TLS.\n\n")
+		fmt.Fprintf(os.Stderr, "Options:\n")
+		flag.PrintDefaults()
+		fmt.Fprintf(os.Stderr, "\nEnvironment Variables:\n")
+		fmt.Fprintf(os.Stderr, "  NEURO_AGENT_PORT     Override port to listen on (defaults to %d)\n", defaultPort)
+		fmt.Fprintf(os.Stderr, "  NEURO_AGENT_KEY      Provide custom static Bearer API Key\n")
+		fmt.Fprintf(os.Stderr, "  NEURO_AGENT_CONFIG   Path to config directory (defaults to ~/.config/neuro-agent/)\n")
+	}
+
 	flag.Parse()
+
+	if *versionFlag {
+		fmt.Printf("neuro-agent version %s\n", agentVersion)
+		os.Exit(0)
+	}
 
 	dir := configDir()
 	if err := os.MkdirAll(dir, 0700); err != nil {

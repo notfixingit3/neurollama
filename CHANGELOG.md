@@ -4,6 +4,13 @@ All notable changes to NEUROLLAMA are documented here.
 
 ---
 
+## [v0.2.25-beta.15] — 2026-07-07
+
+### Added
+- **neuro-agent CLI extensions** — added a structured `--help` printout and a dedicated `--version` flag to the metrics daemon. Added configuration fallback support for the `NEURO_AGENT_PORT` environment variable.
+
+---
+
 ## [v0.2.25-beta.14] — 2026-07-07
 
 ### Fixed

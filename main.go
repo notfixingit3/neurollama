@@ -28,7 +28,7 @@ import (
 )
 
 // appVersion is the default for local dev; CI overrides via -ldflags "-X main.appVersion=<tag>"
-var appVersion = "v0.2.25-beta.14"
+var appVersion = "v0.2.25-beta.15"
 
 // agentVersion is the canonical neuro-agent version this build expects on fleet nodes
 var agentVersion = "v0.1.1"
