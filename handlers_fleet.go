@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -294,11 +295,12 @@ func agentDeploySSEHandler(c *gin.Context) {
 
 		// ── Connect ──────────────────────────────────────────────────────────
 		emit("status", fmt.Sprintf("Connecting to %s@%s:%d…", req.SSHUser, host, sshPort))
-		sshClient, connErr := gossh.Dial("tcp", fmt.Sprintf("%s:%d", host, sshPort), sshCfg)
+		rawClient, connErr := gossh.Dial("tcp", fmt.Sprintf("%s:%d", host, sshPort), sshCfg)
 		if connErr != nil {
 			fail(fmt.Sprintf("SSH connection failed: %v", connErr))
 			return false
 		}
+		sshClient := &sshClientWrapper{client: rawClient, ctx: c.Request.Context()}
 		defer sshClient.Close()
 
 		// ── Detect OS / arch ─────────────────────────────────────────────────
@@ -665,11 +667,12 @@ func ollamaUpdateSSEHandler(c *gin.Context) {
 
 		// ── Connect ───────────────────────────────────────────────────────────
 		emit("status", fmt.Sprintf("Connecting to %s@%s:%d…", req.SSHUser, host, sshPort))
-		sshClient, connErr := gossh.Dial("tcp", fmt.Sprintf("%s:%d", host, sshPort), sshCfg)
+		rawClient, connErr := gossh.Dial("tcp", fmt.Sprintf("%s:%d", host, sshPort), sshCfg)
 		if connErr != nil {
 			fail(fmt.Sprintf("SSH connection failed: %v", connErr))
 			return false
 		}
+		sshClient := &sshClientWrapper{client: rawClient, ctx: c.Request.Context()}
 		defer sshClient.Close()
 		emit("status", "SSH connected.")
 
@@ -986,19 +989,47 @@ func shellEscapeSingle(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// runSSHCmd runs a single command over SSH and returns trimmed combined output.
-func runSSHCmd(client *gossh.Client, cmd string) (string, error) {
+type sshClientWrapper struct {
+	client *gossh.Client
+	ctx    context.Context
+}
+
+func (w *sshClientWrapper) NewSession() (*gossh.Session, error) {
+	return w.client.NewSession()
+}
+
+func (w *sshClientWrapper) Close() error {
+	return w.client.Close()
+}
+
+// runSSHCmd runs a single command over SSH and returns trimmed combined output, supporting context cancellation.
+func runSSHCmd(client *sshClientWrapper, cmd string) (string, error) {
 	sess, err := client.NewSession()
 	if err != nil {
 		return "", err
 	}
 	defer sess.Close()
+
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-client.ctx.Done():
+			_ = sess.Signal(gossh.SIGINT)
+			_ = sess.Close()
+		case <-done:
+		}
+	}()
+
 	out, err := sess.CombinedOutput(cmd)
+	if client.ctx.Err() != nil {
+		return "", client.ctx.Err()
+	}
 	return strings.TrimSpace(string(out)), err
 }
 
-// runSSHCmdStream runs a command over SSH, streaming each output line to emit.
-func runSSHCmdStream(client *gossh.Client, cmd string, emit func(string)) error {
+// runSSHCmdStream runs a command over SSH, streaming each output line to emit, supporting context cancellation.
+func runSSHCmdStream(client *sshClientWrapper, cmd string, emit func(string)) error {
 	sess, err := client.NewSession()
 	if err != nil {
 		return err
@@ -1011,6 +1042,17 @@ func runSSHCmdStream(client *gossh.Client, cmd string, emit func(string)) error 
 	if err := sess.Start(cmd); err != nil {
 		return err
 	}
+
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-client.ctx.Done():
+			_ = sess.Signal(gossh.SIGINT)
+			_ = sess.Close()
+		case <-done:
+		}
+	}()
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -1025,12 +1067,15 @@ func runSSHCmdStream(client *gossh.Client, cmd string, emit func(string)) error 
 	go scan(stderrPipe)
 	wg.Wait()
 
+	if client.ctx.Err() != nil {
+		return client.ctx.Err()
+	}
 	return sess.Wait()
 }
 
 // sshCheckStr returns (detail string, passed bool) after running a command; if
 // the command exits without error the first line of output is used as detail.
-func sshCheckStr(client *gossh.Client, cmd, passDetail, failDetail string) (string, bool) {
+func sshCheckStr(client *sshClientWrapper, cmd, passDetail, failDetail string) (string, bool) {
 	out, err := runSSHCmd(client, cmd)
 	if err != nil {
 		if failDetail != "" {
@@ -1042,4 +1087,227 @@ func sshCheckStr(client *gossh.Client, cmd, passDetail, failDetail string) (stri
 		return passDetail, true
 	}
 	return out, true
+}
+
+// GET /api/fleet/bootstrap
+func bootstrapAgentHandler(c *gin.Context) {
+	host := c.Request.Host
+	if host == "" {
+		host = "localhost:8811"
+	}
+
+	scheme := "http"
+	if c.Request.TLS != nil {
+		scheme = "https"
+	}
+
+	script := fmt.Sprintf(`#!/bin/bash
+set -e
+
+# Detect OS and architecture
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m)
+
+if [ "$ARCH" = "x86_64" ]; then
+    ARCH="amd64"
+elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+    ARCH="arm64"
+else
+    echo "Unsupported architecture: $ARCH"
+    exit 1
+fi
+
+if [ "$OS" != "linux" ] && [ "$OS" != "darwin" ]; then
+    echo "Unsupported OS: $OS"
+    exit 1
+fi
+
+echo "Installing neuro-agent for $OS/$ARCH..."
+sudo mkdir -p /usr/local/bin
+
+# Download binary
+echo "Downloading agent binary..."
+sudo curl -k -o /usr/local/bin/neuro-agent -fL "%s://%s/api/fleet/download-agent/$OS/$ARCH"
+sudo chmod 755 /usr/local/bin/neuro-agent
+
+# Start agent to generate config & credentials
+echo "Starting neuro-agent temporarily to generate API keys..."
+sudo /usr/local/bin/neuro-agent --port 11435 &
+AGENT_PID=$!
+sleep 2
+sudo kill $AGENT_PID || true
+
+# Read credentials
+INFO_FILE="$HOME/.config/neuro-agent/info.json"
+if [ "$OS" = "linux" ] && [ "$USER" = "root" ]; then
+    INFO_FILE="/root/.config/neuro-agent/info.json"
+fi
+
+if [ ! -f "$INFO_FILE" ]; then
+    INFO_FILE="/usr/local/etc/neuro-agent/info.json"
+fi
+
+# Fallback check if it was run as root
+if [ ! -f "$INFO_FILE" ] && [ -f "/root/.config/neuro-agent/info.json" ]; then
+    INFO_FILE="/root/.config/neuro-agent/info.json"
+fi
+
+if [ ! -f "$INFO_FILE" ]; then
+    echo "Error: neuro-agent credentials could not be initialized."
+    exit 1
+fi
+
+API_KEY=$(grep -o '"api_key":"[^"]*' "$INFO_FILE" | grep -o '[^"]*$')
+FINGERPRINT=$(grep -o '"fingerprint":"[^"]*' "$INFO_FILE" | grep -o '[^"]*$')
+
+# Install Service Daemon
+if [ "$OS" = "linux" ]; then
+    echo "Installing systemd service..."
+    SERVICE_FILE="[Unit]
+Description=NeuroAgent Service
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/neuro-agent --port 11435
+Restart=always
+User=root
+
+[Install]
+WantedBy=multi-user.target"
+    echo "$SERVICE_FILE" | sudo tee /etc/systemd/system/neuro-agent.service > /dev/null
+    sudo systemctl daemon-reload
+    sudo systemctl enable neuro-agent
+    sudo systemctl restart neuro-agent
+    echo "✔ Service enabled and started via systemd"
+elif [ "$OS" = "darwin" ]; then
+    echo "Installing launchd plist..."
+    PLIST_FILE="<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
+<plist version=\"1.0\">
+<dict>
+  <key>Label</key>
+  <string>com.neurollama.agent</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/neuro-agent</string>
+    <string>--port</string>
+    <string>11435</string>
+  </array>
+  <key>KeepAlive</key>
+  <true/>
+  <key>RunAtLoad</key>
+  <true/>
+</dict>
+</plist>"
+    echo "$PLIST_FILE" | sudo tee /Library/LaunchDaemons/com.neurollama.agent.plist > /dev/null
+    sudo launchctl load -w /Library/LaunchDaemons/com.neurollama.agent.plist 2>/dev/null || true
+    echo "✔ Service enabled and started via launchd"
+fi
+
+# Detect Local VRAM
+VRAM="0"
+if command -v nvidia-smi &> /dev/null; then
+    VRAM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | awk '{sum+=$1} END {print sum/1024}')
+fi
+
+# Register back with central Neurollama server
+IP_ADDR=$(hostname -I | awk '{print $1}' 2>/dev/null || ip route get 1 | awk '{print $NF;exit}' 2>/dev/null || echo "")
+if [ -z "$IP_ADDR" ]; then
+    IP_ADDR="localhost"
+fi
+
+echo "Registering agent back to controller..."
+curl -k -X POST "%s://%s/api/fleet/register-agent" \
+  -H "Content-Type: application/json" \
+  -d "{\"url\":\"http://$IP_ADDR:11434\",\"agent_port\":11435,\"agent_key\":\"$API_KEY\",\"agent_fingerprint\":\"$FINGERPRINT\",\"vram_gb\":$VRAM}"
+
+echo ""
+echo "✔ Node pull installation complete and registered successfully!"
+`, scheme, host, scheme, host)
+
+	c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte(script))
+}
+
+// GET /api/fleet/download-agent/:os/:arch
+func downloadAgentBinaryHandler(c *gin.Context) {
+	goos := c.Param("os")
+	goarch := c.Param("arch")
+
+	if goos != "linux" && goos != "darwin" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unsupported OS"})
+		return
+	}
+	if goarch != "amd64" && goarch != "arm64" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unsupported arch"})
+		return
+	}
+
+	binName := fmt.Sprintf("neuro-agent-%s-%s", goos, goarch)
+	binPath := filepath.Join(os.TempDir(), binName)
+
+	cmd := exec.Command("go", "build", "-o", binPath, "./neuro-agent/")
+	cmd.Env = append(os.Environ(), "GOOS="+goos, "GOARCH="+goarch)
+
+	if out, err := cmd.CombinedOutput(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to compile agent: %v (details: %s)", err, string(out))})
+		return
+	}
+	defer os.Remove(binPath)
+
+	c.Header("Content-Description", "File Transfer")
+	c.Header("Content-Transfer-Encoding", "binary")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", binName))
+	c.Header("Content-Type", "application/octet-stream")
+	c.File(binPath)
+}
+
+// POST /api/fleet/register-agent
+func registerAgentHandler(c *gin.Context) {
+	var req struct {
+		Name             string  `json:"name"`
+		URL              string  `json:"url"`
+		AgentPort        int     `json:"agent_port"`
+		AgentKey         string  `json:"agent_key"`
+		AgentFingerprint string  `json:"agent_fingerprint"`
+		VramGB           float64 `json:"vram_gb"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if req.URL == "" {
+		clientIP := c.ClientIP()
+		req.URL = fmt.Sprintf("http://%s:11434", clientIP)
+	}
+	if req.AgentPort == 0 {
+		req.AgentPort = 11435
+	}
+	if req.Name == "" {
+		u, err := url.Parse(req.URL)
+		if err == nil && u.Hostname() != "" {
+			req.Name = u.Hostname()
+		} else {
+			req.Name = "agent-node"
+		}
+	}
+
+	newSrv, err := AddServer(
+		req.Name, req.URL,
+		"", "", "", "", "", "",
+		req.VramGB,
+		req.AgentPort, req.AgentKey, req.AgentFingerprint,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	pollOneNodeStatus(newSrv)
+
+	LogActivity("node", fmt.Sprintf("Node registered via Pull Agent check-in: %s (%s)", req.Name, req.URL))
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "Node registered successfully via pull bootstrap",
+		"server":  newSrv,
+	})
 }

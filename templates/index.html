@@ -2825,9 +2825,26 @@
                 <div class="flex items-center gap-2 pt-1">
                   <button id="agent-deploy-btn" onclick="startAgentDeploy()"
                           class="btn btn-xs btn-info font-tech uppercase tracking-wide px-4">
-                    <i class="fa-solid fa-satellite-dish mr-1.5"></i>Deploy Agent
+                    <i class="fa-solid fa-satellite-dish mr-1.5"></i>Deploy Agent (Push)
+                  </button>
+                  <button id="agent-pull-btn" onclick="showPullBootstrapCmd()"
+                          class="btn btn-xs btn-ghost border border-[#4c566a] hover:border-[#88c0d0] font-tech uppercase tracking-wide px-4 text-[#d8dee9]">
+                    <i class="fa-solid fa-download mr-1.5"></i>Manual Join (Pull)
                   </button>
                   <span id="agent-deploy-status" class="text-[10px] font-mono text-[#4c566a]"></span>
+                </div>
+
+                <!-- Pull Bootstrap result (shown after click) -->
+                <div id="agent-pull-instructions" class="hidden mt-2 p-3 rounded-lg bg-[#161820] border border-[#81a1c1]/40 space-y-2">
+                  <div class="text-[9px] font-mono text-[#81a1c1] uppercase tracking-wide">Manual Join (Pull bootstrap script)</div>
+                  <p class="text-[10px] text-[#d8dee9] leading-relaxed">
+                    Copy and run this command on the remote node to install and register the agent automatically without needing SSH:
+                  </p>
+                  <div class="flex gap-2">
+                    <input id="agent-pull-cmd" type="text" readonly
+                           class="input input-xs bg-[#2e3440] border-[#4c566a] font-mono text-[10px] focus:outline-none text-[#88c0d0] flex-1" />
+                    <button onclick="copyPullCmd()" class="btn btn-xs btn-info font-tech uppercase">Copy</button>
+                  </div>
                 </div>
 
                 <!-- Credentials result (shown after successful deploy) -->

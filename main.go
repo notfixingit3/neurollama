@@ -17,16 +17,18 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
 // appVersion is the default for local dev; CI overrides via -ldflags "-X main.appVersion=<tag>"
-var appVersion = "v0.2.25-beta.12"
+var appVersion = "v0.2.25-beta.13"
 
 // agentVersion is the canonical neuro-agent version this build expects on fleet nodes
 var agentVersion = "v0.1.1"
@@ -253,6 +255,11 @@ func main() {
 		api.POST("/nodes/:id/agent-test", testNodeAgentHandler)
 		api.POST("/nodes/:id/agent-deploy", agentDeploySSEHandler)
 
+		// Pull Bootstrap Agent Ingestion
+		api.GET("/fleet/bootstrap", bootstrapAgentHandler)
+		api.GET("/fleet/download-agent/:os/:arch", downloadAgentBinaryHandler)
+		api.POST("/fleet/register-agent", registerAgentHandler)
+
 		// Telemetry & Scheduler endpoints
 		api.GET("/settings", getSettingsHandler)
 		api.PUT("/settings", updateSettingHandler)
@@ -352,9 +359,41 @@ func main() {
 	addr := fmt.Sprintf(":%d", port)
 
 	log.Printf("NEUROLLAMA %s starting on http://localhost%s", appVersion, addr)
-	if err := r.Run(addr); err != nil {
-		log.Fatalf("Server failed to run: %v", err)
+
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           r,
+		ReadHeaderTimeout: 5 * time.Second,
 	}
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed to run: %v", err)
+		}
+	}()
+
+	// Wait for interrupt signal to gracefully shut down the server
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
+	<-quit
+
+	log.Println("Shutting down server gracefully...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("Server forced to shutdown: %v", err)
+	}
+
+	if DB != nil {
+		log.Println("Closing database connection...")
+		if err := DB.Close(); err != nil {
+			log.Printf("Error closing database: %v", err)
+		}
+	}
+
+	log.Println("Server exited cleanly.")
 }
 
 func resolvePort(flagPort int) (int, error) {

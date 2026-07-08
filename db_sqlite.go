@@ -415,6 +415,9 @@ func migrate() error {
 		   INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.id, old.content);
 		   INSERT INTO messages_fts(rowid, content) VALUES(new.id, new.content);
 		 END;`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_rag_chunks_document_id ON rag_chunks(document_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_rag_documents_model ON rag_documents(embedding_model);`,
 	}
 
 	for _, q := range queries {
@@ -1289,6 +1292,16 @@ func SaveRAGDocument(name string, embeddingModel string, collection string, chun
 	if collection == "" {
 		collection = "Default"
 	}
+
+	// Verify collection embedding model homogeneity
+	existingModel, err := GetCollectionEmbeddingModel(collection)
+	if err != nil {
+		return 0, fmt.Errorf("failed to check collection model compatibility: %w", err)
+	}
+	if existingModel != "" && existingModel != embeddingModel {
+		return 0, fmt.Errorf("collection '%s' already contains documents indexed with '%s'. You cannot add documents using '%s'. Please select a different collection.", collection, existingModel, embeddingModel)
+	}
+
 	tx, err := DB.Begin()
 	if err != nil {
 		return 0, err
@@ -2104,4 +2117,18 @@ func migrateJSONEmbeddingsToBinary() error {
 	}
 
 	return tx.Commit()
+}
+
+// GetCollectionEmbeddingModel returns the embedding model used by existing documents in this collection.
+// If the collection is empty, it returns an empty string.
+func GetCollectionEmbeddingModel(collection string) (string, error) {
+	if collection == "" {
+		collection = "Default"
+	}
+	var model string
+	err := DB.QueryRow("SELECT embedding_model FROM rag_documents WHERE COALESCE(collection,'Default') = ? LIMIT 1", collection).Scan(&model)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return model, err
 }

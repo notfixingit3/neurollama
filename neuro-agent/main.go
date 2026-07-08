@@ -1,8 +1,8 @@
 package main
 
 import (
-	"crypto/tls"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const defaultPort = 11435
@@ -69,6 +70,7 @@ func main() {
 		TLSConfig: &tls.Config{
 			MinVersion: tls.VersionTLS13,
 		},
+		ReadHeaderTimeout: 5 * time.Second,
 	}
 
 	log.Fatal(srv.ListenAndServeTLS(certFile, keyFile))

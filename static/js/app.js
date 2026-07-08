@@ -8381,6 +8381,26 @@ function onAgentDeployKeyChange() {
   if (key && !userInput.value) userInput.value = key.username;
 }
 
+function showPullBootstrapCmd() {
+  const host = window.location.host;
+  const protocol = window.location.protocol;
+  const cmd = `curl -sSL -k ${protocol}//${host}/api/fleet/bootstrap | bash`;
+  const input = document.getElementById('agent-pull-cmd');
+  if (input) input.value = cmd;
+  const inst = document.getElementById('agent-pull-instructions');
+  if (inst) inst.classList.remove('hidden');
+  const creds = document.getElementById('agent-deploy-creds');
+  if (creds) creds.classList.add('hidden');
+}
+
+function copyPullCmd() {
+  const input = document.getElementById('agent-pull-cmd');
+  if (!input) return;
+  input.select();
+  document.execCommand('copy');
+  showToast('Bootstrap command copied to clipboard!', 'success');
+}
+
 async function startAgentDeploy() {
   const nodeId    = document.getElementById('agent-deploy-node')?.value;
   const sshUser   = document.getElementById('agent-deploy-ssh-user')?.value?.trim();
@@ -8397,10 +8417,12 @@ async function startAgentDeploy() {
   const status = document.getElementById('agent-deploy-status');
   const output = document.getElementById('agent-deploy-output');
   const creds  = document.getElementById('agent-deploy-creds');
+  const pullInst = document.getElementById('agent-pull-instructions');
 
   if (btn) btn.disabled = true;
   if (status) status.textContent = 'Connecting…';
   if (creds) creds.classList.add('hidden');
+  if (pullInst) pullInst.classList.add('hidden');
   _agentDeployCreds = null;
   output.innerHTML = '';
 

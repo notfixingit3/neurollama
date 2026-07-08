@@ -4,6 +4,20 @@ All notable changes to NEUROLLAMA are documented here.
 
 ---
 
+## [v0.2.25-beta.13] — 2026-07-07
+
+### Added
+- **Database Foreign Key Indexing** — added automatic index creation on `messages(chat_id)`, `rag_chunks(document_id)`, and `rag_documents(embedding_model)` during DB migrations. Eliminates SQLite full-table scans during chat load and vector similarity searches.
+- **Graceful Shutdown Interception** — added SIGINT/SIGTERM handlers to main Go process, closing database handles and releasing lock structures cleanly.
+- **Ingestion-Time Model Validation** — added database-level validation to block uploading mismatched embedding models to existing collections.
+- **Pull Bootstrap Agent Ingestion** — added `/api/fleet/bootstrap` dynamic setup script, `/api/fleet/download-agent/:os/:arch` on-the-fly compiler, and `/api/fleet/register-agent` check-in handler. Supported both Push (SSH) and Pull (Manual Join) options in the fleet UI.
+- **Go Unit Test Suite** — introduced standard Go tests (`db_sqlite_test.go`) validating embedding serialization with isolated in-memory unit tests.
+
+### Fixed
+- **Dependency Security Vulnerabilities** — resolved 6 active vulnerabilities in `quic-go` and `golang.org/x/crypto/ssh` by upgrading to safe library versions. Fixed `gosec` server Slowloris potential vectors (G112) by defining a `ReadHeaderTimeout` on all `http.Server` config structs.
+
+---
+
 ## [v0.2.25-beta.12] — 2026-07-07
 
 ### Added
