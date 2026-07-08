@@ -106,7 +106,6 @@ func NewOllamaClient(srv Server) *OllamaClient {
 	return &OllamaClient{
 		BaseURL: srv.URL,
 		HTTPClient: &http.Client{
-			Timeout:   10 * time.Second,
 			Transport: transport,
 		},
 	}
@@ -135,9 +134,13 @@ func NewPollerClient(srv Server) *OllamaClient {
 }
 
 // CheckStatus verifies connection to Ollama and returns version and latency
-func (c *OllamaClient) CheckStatus() (string, time.Duration, error) {
+func (c *OllamaClient) CheckStatus(ctx context.Context) (string, time.Duration, error) {
 	start := time.Now()
-	resp, err := c.HTTPClient.Get(fmt.Sprintf("%s/api/version", c.BaseURL))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/version", c.BaseURL), nil)
+	if err != nil {
+		return "", 0, err
+	}
+	resp, err := c.HTTPClient.Do(req)
 	latency := time.Since(start)
 	if err != nil {
 		return "", 0, err
@@ -157,8 +160,12 @@ func (c *OllamaClient) CheckStatus() (string, time.Duration, error) {
 }
 
 // ListModels fetches available models via /api/tags
-func (c *OllamaClient) ListModels() ([]OllamaModel, error) {
-	resp, err := c.HTTPClient.Get(fmt.Sprintf("%s/api/tags", c.BaseURL))
+func (c *OllamaClient) ListModels(ctx context.Context) ([]OllamaModel, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/tags", c.BaseURL), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to Ollama: %w", err)
 	}
@@ -181,17 +188,19 @@ func (c *OllamaClient) ListModels() ([]OllamaModel, error) {
 }
 
 // GetModelDetails fetches info about a specific model via /api/show
-func (c *OllamaClient) GetModelDetails(name string) (*ShowResponse, error) {
+func (c *OllamaClient) GetModelDetails(ctx context.Context, name string) (*ShowResponse, error) {
 	reqBody, err := json.Marshal(map[string]string{"name": name})
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := c.HTTPClient.Post(
-		fmt.Sprintf("%s/api/show", c.BaseURL),
-		"application/json",
-		bytes.NewBuffer(reqBody),
-	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/api/show", c.BaseURL), bytes.NewBuffer(reqBody))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to Ollama: %w", err)
 	}
@@ -212,13 +221,14 @@ func (c *OllamaClient) GetModelDetails(name string) (*ShowResponse, error) {
 }
 
 // DeleteModel removes a model via /api/delete
-func (c *OllamaClient) DeleteModel(name string) error {
+func (c *OllamaClient) DeleteModel(ctx context.Context, name string) error {
 	reqBody, err := json.Marshal(map[string]string{"name": name})
 	if err != nil {
 		return err
 	}
 
-	req, err := http.NewRequest(
+	req, err := http.NewRequestWithContext(
+		ctx,
 		http.MethodDelete,
 		fmt.Sprintf("%s/api/delete", c.BaseURL),
 		bytes.NewBuffer(reqBody),
@@ -243,7 +253,7 @@ func (c *OllamaClient) DeleteModel(name string) error {
 }
 
 // CopyModel duplicates a model via /api/copy
-func (c *OllamaClient) CopyModel(source, destination string) error {
+func (c *OllamaClient) CopyModel(ctx context.Context, source, destination string) error {
 	reqBody, err := json.Marshal(map[string]string{
 		"source":      source,
 		"destination": destination,
@@ -252,11 +262,13 @@ func (c *OllamaClient) CopyModel(source, destination string) error {
 		return err
 	}
 
-	resp, err := c.HTTPClient.Post(
-		fmt.Sprintf("%s/api/copy", c.BaseURL),
-		"application/json",
-		bytes.NewBuffer(reqBody),
-	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/api/copy", c.BaseURL), bytes.NewBuffer(reqBody))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to connect to Ollama: %w", err)
 	}
@@ -396,8 +408,12 @@ type CreateRequest struct {
 }
 
 // ListActiveModels fetches running models via /api/ps
-func (c *OllamaClient) ListActiveModels() ([]ProcessModel, error) {
-	resp, err := c.HTTPClient.Get(fmt.Sprintf("%s/api/ps", c.BaseURL))
+func (c *OllamaClient) ListActiveModels(ctx context.Context) ([]ProcessModel, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/ps", c.BaseURL), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to Ollama: %w", err)
 	}
@@ -416,7 +432,7 @@ func (c *OllamaClient) ListActiveModels() ([]ProcessModel, error) {
 }
 
 // UnloadModel forces Ollama to unload a model from memory (VRAM)
-func (c *OllamaClient) UnloadModel(name string) error {
+func (c *OllamaClient) UnloadModel(ctx context.Context, name string) error {
 	reqBody, err := json.Marshal(map[string]interface{}{
 		"model":      name,
 		"messages":   []ChatMessage{},
@@ -426,11 +442,13 @@ func (c *OllamaClient) UnloadModel(name string) error {
 		return err
 	}
 
-	resp, err := c.HTTPClient.Post(
-		fmt.Sprintf("%s/api/chat", c.BaseURL),
-		"application/json",
-		bytes.NewBuffer(reqBody),
-	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/api/chat", c.BaseURL), bytes.NewBuffer(reqBody))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to contact Ollama for unload: %w", err)
 	}
@@ -533,7 +551,7 @@ func (c *OllamaClient) StreamCreate(ctx context.Context, createReq CreateRequest
 
 // GetEmbeddings retrieves vector representations of texts using active Ollama server, trying /api/embed first then /api/embeddings.
 // Uses a 5-minute timeout so cold model loads (which can take 30s+) don't cause spurious failures.
-func (c *OllamaClient) GetEmbeddings(model string, inputs []string) ([][]float64, error) {
+func (c *OllamaClient) GetEmbeddings(ctx context.Context, model string, inputs []string) ([][]float64, error) {
 	reqBody, err := json.Marshal(map[string]interface{}{
 		"model": model,
 		"input": inputs,
@@ -547,11 +565,13 @@ func (c *OllamaClient) GetEmbeddings(model string, inputs []string) ([][]float64
 		Timeout:   5 * time.Minute,
 	}
 
-	resp, err := longClient.Post(
-		fmt.Sprintf("%s/api/embed", c.BaseURL),
-		"application/json",
-		bytes.NewBuffer(reqBody),
-	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/api/embed", c.BaseURL), bytes.NewBuffer(reqBody))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := longClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to Ollama: %w", err)
 	}
@@ -578,11 +598,13 @@ func (c *OllamaClient) GetEmbeddings(model string, inputs []string) ([][]float64
 			return nil, err
 		}
 
-		respOld, err := longClient.Post(
-			fmt.Sprintf("%s/api/embeddings", c.BaseURL),
-			"application/json",
-			bytes.NewBuffer(reqBodyOld),
-		)
+		reqOld, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/api/embeddings", c.BaseURL), bytes.NewBuffer(reqBodyOld))
+		if err != nil {
+			return nil, err
+		}
+		reqOld.Header.Set("Content-Type", "application/json")
+
+		respOld, err := longClient.Do(reqOld)
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect to Ollama fallback: %w", err)
 		}

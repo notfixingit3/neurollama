@@ -5,10 +5,12 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"database/sql"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -476,6 +478,19 @@ func migrate() error {
 			if _, err := DB.Exec(alter.query); err != nil {
 				return fmt.Errorf("failed to add column %s: %w", alter.column, err)
 			}
+		}
+	}
+
+	// Migrate existing JSON text embeddings to binary BLOBs
+	var binaryMigrationDone string
+	_ = DB.QueryRow(`SELECT value FROM settings WHERE key = 'binary_embeddings_migration_done'`).Scan(&binaryMigrationDone)
+	if binaryMigrationDone != "1" {
+		log.Println("Migrating existing RAG text-JSON embeddings to binary float32 BLOB vectors...")
+		if err := migrateJSONEmbeddingsToBinary(); err != nil {
+			log.Printf("Warning: binary embeddings migration failed: %v", err)
+		} else {
+			_, _ = DB.Exec(`INSERT OR REPLACE INTO settings (key, value) VALUES ('binary_embeddings_migration_done', '1')`)
+			log.Println("RAG embeddings: successfully migrated all JSON records to binary BLOB format")
 		}
 	}
 
@@ -1291,15 +1306,12 @@ func SaveRAGDocument(name string, embeddingModel string, collection string, chun
 	}
 
 	for _, chunk := range chunks {
-		embeddingJSON, err := json.Marshal(chunk.Embedding)
-		if err != nil {
-			return 0, fmt.Errorf("failed to marshal embedding: %w", err)
-		}
+		embeddingBin := float64SliceToBytes(chunk.Embedding)
 
 		_, err = tx.Exec(`
 			INSERT INTO rag_chunks (document_id, chunk_index, content, embedding)
 			VALUES (?, ?, ?, ?)`,
-			docID, chunk.ChunkIndex, chunk.Content, string(embeddingJSON))
+			docID, chunk.ChunkIndex, chunk.Content, embeddingBin)
 		if err != nil {
 			return 0, err
 		}
@@ -1322,14 +1334,11 @@ func AppendRAGChunks(docID int64, chunks []RAGChunk) error {
 	defer func() { _ = tx.Rollback() }()
 
 	for _, chunk := range chunks {
-		embeddingJSON, err := json.Marshal(chunk.Embedding)
-		if err != nil {
-			return fmt.Errorf("failed to marshal embedding: %w", err)
-		}
+		embeddingBin := float64SliceToBytes(chunk.Embedding)
 		_, err = tx.Exec(`
 			INSERT INTO rag_chunks (document_id, chunk_index, content, embedding)
 			VALUES (?, ?, ?, ?)`,
-			docID, chunk.ChunkIndex, chunk.Content, string(embeddingJSON))
+			docID, chunk.ChunkIndex, chunk.Content, embeddingBin)
 		if err != nil {
 			return err
 		}
@@ -1435,12 +1444,20 @@ func GetRAGChunksForModel(embeddingModel string, collection ...string) ([]RAGChu
 	var list []RAGChunkWithDocInfo
 	for rows.Next() {
 		var c RAGChunkWithDocInfo
-		var embedStr string
-		if err := rows.Scan(&c.ChunkID, &c.DocumentID, &c.DocumentName, &c.ChunkIndex, &c.Content, &embedStr); err != nil {
+		var embedBytes []byte
+		if err := rows.Scan(&c.ChunkID, &c.DocumentID, &c.DocumentName, &c.ChunkIndex, &c.Content, &embedBytes); err != nil {
 			return nil, err
 		}
-		if err := json.Unmarshal([]byte(embedStr), &c.Embedding); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal embedding: %w", err)
+		if len(embedBytes) > 0 && embedBytes[0] == '[' {
+			if err := json.Unmarshal(embedBytes, &c.Embedding); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal JSON embedding: %w", err)
+			}
+		} else {
+			vec, err := bytesToFloat64Slice(embedBytes)
+			if err != nil {
+				return nil, fmt.Errorf("failed to decode binary embedding: %w", err)
+			}
+			c.Embedding = vec
 		}
 		list = append(list, c)
 	}
@@ -2010,4 +2027,81 @@ func GetSSHKeyPEMByID(id string) ([]byte, error) {
 		return nil, err
 	}
 	return sshDecrypt(blob, encKey)
+}
+
+func float64SliceToBytes(vec []float64) []byte {
+	buf := make([]byte, len(vec)*4)
+	for i, f := range vec {
+		binary.LittleEndian.PutUint32(buf[i*4:], math.Float32bits(float32(f)))
+	}
+	return buf
+}
+
+func bytesToFloat64Slice(b []byte) ([]float64, error) {
+	if len(b)%4 != 0 {
+		return nil, fmt.Errorf("invalid byte slice length for float32 vector: %d", len(b))
+	}
+	dims := len(b) / 4
+	vec := make([]float64, dims)
+	for i := 0; i < dims; i++ {
+		bits := binary.LittleEndian.Uint32(b[i*4:])
+		vec[i] = float64(math.Float32frombits(bits))
+	}
+	return vec, nil
+}
+
+func migrateJSONEmbeddingsToBinary() error {
+	rows, err := DB.Query("SELECT id, embedding FROM rag_chunks")
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = rows.Close() }()
+
+	type chunkUpdate struct {
+		id  int64
+		bin []byte
+	}
+	var updates []chunkUpdate
+
+	for rows.Next() {
+		var id int64
+		var rawEmbed []byte
+		if err := rows.Scan(&id, &rawEmbed); err != nil {
+			continue
+		}
+		if len(rawEmbed) > 0 && rawEmbed[0] == '[' {
+			var vec []float64
+			if err := json.Unmarshal(rawEmbed, &vec); err == nil {
+				updates = append(updates, chunkUpdate{
+					id:  id,
+					bin: float64SliceToBytes(vec),
+				})
+			}
+		}
+	}
+	_ = rows.Close()
+
+	if len(updates) == 0 {
+		return nil
+	}
+
+	tx, err := DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmt, err := tx.Prepare("UPDATE rag_chunks SET embedding = ? WHERE id = ?")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = stmt.Close() }()
+
+	for _, up := range updates {
+		if _, err := stmt.Exec(up.bin, up.id); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }

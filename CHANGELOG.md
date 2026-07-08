@@ -4,6 +4,21 @@ All notable changes to NEUROLLAMA are documented here.
 
 ---
 
+## [v0.2.25-beta.12] — 2026-07-07
+
+### Added
+- **Dynamic context-driven timeouts** — removed the fixed 10s HTTP client timeout on Ollama requests in favor of context propagation. Streaming endpoints (chat, generate, builder) propagate client cancellation immediately to conserve remote node GPU resources. Background health pollers employ 3–5s timeouts.
+- **Binary float32 vector embeddings** — optimized RAG storage by converting high-dimensional float vectors from verbose JSON strings to compact binary BLOBs, reducing database space by ~70%. Added dimension checks to queries to prevent mismatched models.
+- **Data-preserving SQLite migration** — auto-converts all legacy JSON string vectors in `rag_chunks` to binary BLOBs on startup.
+
+### Changed
+- **Refactored backend architecture** — decoupled the 8,300+ line `main.go` file into 11 domain-focused handler files (`handlers_servers.go`, `handlers_models.go`, `handlers_chat.go`, `handlers_chat_history.go`, `handlers_fleet.go`, `handlers_benchmarks.go`, `handlers_rag.go`, `handlers_preferences.go`, `handlers_keys.go`, `handlers_diagnostics.go`, and `handlers_optimizer.go`).
+
+### Fixed
+- **Code benchmark log formatting mismatch** — resolved a `go vet` compile issue where the overall score string was formatted as a percentage float.
+
+---
+
 ## [v0.2.25-beta.11] — 2026-07-02
 
 ### Fixed
