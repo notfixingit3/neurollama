@@ -4,6 +4,13 @@ All notable changes to NEUROLLAMA are documented here.
 
 ---
 
+## [v0.2.25-beta.16] — 2026-08-05
+
+### Fixed
+- **Active sub-tab label invisible on hover** — `.bench-subtab:hover` (specificity 0-2-0) overrode `.bench-subtab-active` (0-1-0), so hovering the already-active pill re-applied cyan hover text over its own cyan background, hiding the label and icon. Affected all 15 sub-tab groups sharing the class (Inventory Model List/Hub, Benchmark type selectors, etc). Pinned the active+hover state explicitly.
+
+---
+
 ## [v0.2.25-beta.15] — 2026-07-07
 
 ### Added
