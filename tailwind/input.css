@@ -178,7 +178,8 @@
 .bench-subtab:hover {
   color: #88c0d0;
 }
-.bench-subtab-active {
+.bench-subtab-active,
+.bench-subtab-active:hover {
   background-color: #88c0d0;
   color: #2e3440;
 }
